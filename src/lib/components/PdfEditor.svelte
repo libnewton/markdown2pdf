@@ -328,21 +328,23 @@
 
   // Auto-compile effect (debounce 450ms). Gated by the live-update setting:
   // first compile always runs so the user sees something; later ones obey the toggle.
+  // Important: subscribe to `markdown` ONLY when we'll actually use it. When live
+  // is paused (after the first compile), reading markdown would make every
+  // keystroke re-run this effect for nothing.
   $effect(() => {
     if (!browser) return
     if (!client) return
     if (isLoading) return
 
+    const live = settingsStore.liveUpdate
+    if (hasEverCompiled && !live) return
+
     const md = markdown
     const _style = style
-    const live = settingsStore.liveUpdate
-    // Read these so the effect re-runs when the user toggles them.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _pn = settingsStore.pageNumbers
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _cp = settingsStore.corsProxy
-
-    if (hasEverCompiled && !live) return
 
     if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
 
@@ -1289,6 +1291,11 @@
     flex: 1;
     overflow: hidden;
     position: relative;
+    /* Isolate the heavy SVG preview from layout/paint changes elsewhere
+       (e.g. CodeMirror updates in the editor pane). Without this, every
+       keystroke triggers a full layout pass over the ~thousands of SVG
+       nodes in the preview. */
+    contain: strict;
   }
 
   .preview-status-wrapper {
@@ -1355,6 +1362,11 @@
     background: white;
     width: calc(100% * var(--svg-scale, 1));
     height: auto;
+    /* Skip layout/paint for off-screen pages. Pages are ~A4 portrait, so
+       hint a sensible default size; the browser will use the real size once
+       a page becomes visible. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 800px auto 1100px;
   }
 
   /* ========================================

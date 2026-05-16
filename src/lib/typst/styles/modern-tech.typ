@@ -77,16 +77,17 @@
   }
 
   // 7) 行内代码：轻背景 + 圆角
-  // Monospace x-height runs hot vs sans-serif at the same point size, so we
-  // shrink inline code to 0.85em. `outset` extends the background up/down
-  // beyond the layout box so tall glyphs (brackets, descenders) sit inside
-  // the tint without pushing the surrounding line apart.
+  // Inline code sits at 0.95em — close enough to the body to read at a
+  // glance, but a hair smaller because monospace x-height runs hot.
+  // `outset` extends the background up/down beyond the layout box so tall
+  // glyphs (brackets, descenders) sit inside the tint without pushing the
+  // surrounding line apart.
   show raw.where(block: false): it => box(
     fill: luma(238),
     inset: (x: 4pt, y: 0pt),
-    outset: (top: 3pt, bottom: 2pt),
+    outset: (top: 2pt, bottom: 3pt),
     radius: 3pt,
-    text(size: 0.85em, it),
+    text(size: 0.95em, it),
   )
 
   // 8) 代码块：圆角 + 浅灰背景 + 左侧行号

@@ -103,6 +103,9 @@
     height: 100%;
     overflow: hidden;
     background-color: #282c34;
+    /* Isolate CodeMirror's internal layout from the rest of the page so
+       typing doesn't invalidate layout/paint on the preview pane. */
+    contain: strict;
   }
 
   .editor-host :global(.cm-editor) {
