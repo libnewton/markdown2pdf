@@ -13,6 +13,7 @@
   import { loadRemoteImages } from '$lib/utils/remote-images'
   import { useRegisterSW } from 'virtual:pwa-register/svelte'
   import type { RegisterSWOptions } from 'virtual:pwa-register/svelte'
+  import { writable, type Readable } from 'svelte/store'
 
   import StatusHint from '$lib/components/StatusHint.svelte'
   import EditorPane from '$lib/components/EditorPane.svelte'
@@ -54,7 +55,10 @@
 
   let imageAssets = $state<Record<string, LocalImageAsset>>({})
 
-  // PWA Service Worker
+  // PWA Service Worker — useRegisterSW touches `navigator` at setup time, so
+  // we can only call it in the browser. SSR/prerender gets a fallback store
+  // that is always false; the `{#if $needRefresh}` template branch stays
+  // dormant until a real registration happens client-side.
   const swOptions: RegisterSWOptions = {
     onRegistered(swr) {
       console.log('SW registered: ', swr)
@@ -72,7 +76,13 @@
       console.log('SW registration error', error)
     },
   }
-  const { needRefresh, updateServiceWorker } = useRegisterSW(swOptions)
+  let needRefresh: Readable<boolean> = writable(false)
+  let updateServiceWorker: (reload?: boolean) => void = () => {}
+  if (browser) {
+    const real = useRegisterSW(swOptions)
+    needRefresh = real.needRefresh
+    updateServiceWorker = real.updateServiceWorker
+  }
 
   function applyLoadedDocument(doc: SavedDocument) {
     markdown = doc.content
