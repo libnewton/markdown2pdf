@@ -57,6 +57,16 @@
 
   async function newFromTemplate(template: Template) {
     await saveCurrentIfNeeded()
+    // Don't duplicate a template doc: if a template-sourced doc already
+    // exists for this mode with the same derived name, reuse it.
+    const proposedName = deriveNameFromContent(template.content)
+    const existing = currentModeDocs.find(
+      (d) => d.creationSource === 'template' && d.name === proposedName,
+    )
+    if (existing) {
+      await openDocument(existing)
+      return
+    }
     const doc = await documentStore.createDocument(mode, template.content, undefined, 'template')
     onDocumentLoad(doc)
     close()

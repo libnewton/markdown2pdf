@@ -11,8 +11,15 @@
     paper: "a4",
     margin: (x: 1.8cm, y: 2cm),
     numbering: if page-numbers { "1" } else { none },
+    // Only show the page-number footer when there are 2+ pages.
+    // A single-page document doesn't need "1" at the bottom.
     footer: if page-numbers {
-      context align(center, text(9pt, fill: luma(120), counter(page).display("1")))
+      context {
+        let total = counter(page).final().first()
+        if total > 1 {
+          align(center, text(9pt, fill: luma(120), counter(page).display("1")))
+        }
+      }
     },
   )
   set document(title: title, author: authors, date: none)

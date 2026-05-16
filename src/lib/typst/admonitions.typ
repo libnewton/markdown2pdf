@@ -21,7 +21,7 @@
     width: 100%,
     {
       text(weight: "bold", fill: theme.at("accent"), size: 0.9em, label)
-      v(0.3em, weak: true)
+      v(0.7em, weak: true)
       body
     },
   )

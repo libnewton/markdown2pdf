@@ -192,7 +192,7 @@ Local images, remote images, captions, and explicit dimensions are all
 supported. Images are centered automatically; if you supply alt text, it
 becomes a small caption beneath the image.
 
-![Octocat — fetched live from GitHub, sized 200×200](https://octodex.github.com/images/minion.png =200x200)
+![Octocat — fetched live from GitHub, sized 200×200](https://octodex.github.com/images/minion.png "=200x200")
 
 You can also size without a caption, or include a remote image at its
 natural width.
@@ -257,139 +257,6 @@ keep chapters cleanly separated.
 > trigger a compile immediately, even when live preview is paused.
 `;
 
-const RESUME = `---
-lang: en
-title: Resume
----
-
-# Jane Smith
-
-📧 jane@email.com · 📱 (555) 123-4567 · 🔗 github.com/janesmith
-
----
-
-## Experience
-
-### Senior Frontend Engineer · ABC Tech Inc.
-*Mar 2021 - Present*
-
-- Led frontend architecture migration, reducing build times by 60%
-- Designed component library with 50+ components, 90% team adoption
-- Drove full TypeScript migration, reducing production bugs by 35%
-
-### Frontend Developer · XYZ Internet Co.
-*Jul 2019 - Feb 2021*
-
-- Built e-commerce H5 pages serving 500K+ daily page views
-- Optimized first contentful paint from 3.2s to 1.1s
-
-## Education
-
-### B.S. Computer Science · State University
-*Sep 2015 - Jun 2019*
-
-## Skills
-
-| Category | Skills |
-| :--- | :--- |
-| Languages | TypeScript, JavaScript, HTML, CSS |
-| Frameworks | React, Vue, Svelte, Next.js |
-| Tools | Git, Docker, Webpack, Vite |
-`;
-
-const AI_CHAT = `---
-lang: en
-title: AI Chat Notes
-date: ${date}
----
-
-# AI Conversation Log
-
-## Q: Implement quicksort in Python
-
-\`\`\`python
-def quicksort(arr):
-    if len(arr) <= 1:
-        return arr
-    pivot = arr[len(arr) // 2]
-    left = [x for x in arr if x < pivot]
-    middle = [x for x in arr if x == pivot]
-    right = [x for x in arr if x > pivot]
-    return quicksort(left) + middle + quicksort(right)
-\`\`\`
-
-> Time complexity: Average $O(n \\log n)$, Worst $O(n^2)$
-
-## Q: Quicksort vs Merge Sort?
-
-| Feature | Quicksort | Merge Sort |
-| :--- | :--- | :--- |
-| Avg Time | $O(n \\log n)$ | $O(n \\log n)$ |
-| Worst Time | $O(n^2)$ | $O(n \\log n)$ |
-| Space | $O(\\log n)$ | $O(n)$ |
-| Stable | No | Yes |
-
----
-
-*Paste your AI conversation here, replacing the sample content above.*
-`;
-
-const NOTION = `---
-lang: en
-title: Notion Notes
-date: ${date}
----
-
-# Notion Export Cleanup
-
-> 💡 **How to use**: Export from Notion as Markdown, then paste the .md file content here.
-
-## Project Overview
-
-| Task ID | Description | Owner | Priority | Due Date | Status | Notes |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| TASK-001 | Homepage Redesign | Alice | P0 | 2024-10-01 | In Progress | Waiting for design sign-off |
-| TASK-002 | API Optimization | Bob | P1 | 2024-10-15 | Not Started | Depends on backend migration |
-| TASK-003 | Feedback System | Charlie | P2 | 2024-11-01 | Done | Live, monitoring |
-
-## Meeting Notes
-
-### 2024-09-25 Weekly Sync
-
-**Attendees**: Alice, Bob, Charlie
-
-**Discussion**:
-1. Homepage redesign — designs approved, dev starts next week
-2. API latency — P99 over budget, need slow query investigation
-3. Q4 planning — focus on UX improvements
-
-**Action Items**:
-- [ ] Alice: Finalize homepage tech spec
-- [ ] Bob: Deliver API performance report
-- [ ] Charlie: Compile Top 10 user feedback items
-
-> 📝 **Next meeting**: 2024-10-02
-
----
-
-*Paste your Notion export content here, replacing the sample above.*
-`;
-
 export const PDF_TEMPLATES: Template[] = [
-	{ id: 'welcome', name: 'Get Started', icon: '🚀', content: WELCOME },
-	{
-		id: 'techDoc',
-		name: 'Technical Spec',
-		icon: '📝',
-		content: `---\ntitle: Technical Design Document\ndate: ${date}\n---\n\n# Overview\n\n## Context\n\n## Proposed Solution\n\n## Rollout Plan\n`
-	},
-	{
-		id: 'weeklyReport',
-		name: 'Weekly Report',
-		icon: '📊',
-		content: `# Weekly Report - ${date}\n\n## Accomplishments\n\n## Plans for Next Week\n\n## Blockers\n`
-	},
-	{ id: 'resume', name: 'Resume', icon: '👤', content: RESUME },
-	{ id: 'aiChat', name: 'AI Chat Notes', icon: '🤖', content: AI_CHAT },
-	{ id: 'notion', name: 'Notion Notes', icon: '📋', content: NOTION }
+	{ id: 'welcome', name: 'Feature Demo', icon: '🚀', content: WELCOME }
 ];

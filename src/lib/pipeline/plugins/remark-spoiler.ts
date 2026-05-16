@@ -27,13 +27,15 @@ export function preprocessSpoilers(markdown: string): {
 	let i = 0;
 	while (i < lines.length) {
 		const line = lines[i];
-		const open = /^\+{5,}\s*(.*?)\s*$/.exec(line);
+		// Tolerate up to a few leading spaces on the fence — WYSIWYG editors
+		// (Milkdown) often serialize the closing `+++++` indented after a list.
+		const open = /^\s{0,3}\+{5,}\s*(.*?)\s*$/.exec(line);
 		if (open) {
 			// Don't confuse with a setext underline or some unrelated +++++ in code.
 			// Treat as spoiler only if there's a matching closing fence below.
 			let close = -1;
 			for (let j = i + 1; j < lines.length; j++) {
-				if (/^\+{5,}\s*$/.test(lines[j])) {
+				if (/^\s{0,3}\+{5,}\s*$/.test(lines[j])) {
 					close = j;
 					break;
 				}

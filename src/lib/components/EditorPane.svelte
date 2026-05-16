@@ -38,7 +38,7 @@
   let imageInput = $state<HTMLInputElement | null>(null)
 
   let editorMode = $state<'code' | 'wysiwyg'>(
-    (browser && (localStorage.getItem('md2pdf-editor-mode') as 'code' | 'wysiwyg')) || 'wysiwyg',
+    (browser && (localStorage.getItem('md2pdf-editor-mode') as 'code' | 'wysiwyg')) || 'code',
   )
 
   $effect(() => {

@@ -668,16 +668,23 @@
   <title>{seoTitle}</title>
   <meta name="description" content={seoDescription} />
 
-  <!-- Open Graph -->
+  <!-- Open Graph — `summary`-style: small square thumbnail next to text,
+       not a full-width hero image. -->
   <meta property="og:title" content={seoTitle} />
   <meta property="og:description" content={seoDescription} />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="en_US" />
+  <meta property="og:image" content="/square.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="240" />
+  <meta property="og:image:height" content="240" />
+  <meta property="og:image:alt" content="md2pdf logo" />
 
-  <!-- Twitter Card -->
+  <!-- Twitter / Discord embed (summary keeps the icon as a side thumbnail) -->
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content={seoTitle} />
   <meta name="twitter:description" content={seoDescription} />
+  <meta name="twitter:image" content="/square.png" />
 </svelte:head>
 
 <!-- Loading Overlay -->
