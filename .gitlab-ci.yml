@@ -1,0 +1,38 @@
+# GitLab Pages deploy for md2pdf.
+# Static SvelteKit (adapter-static). Output goes to `build/`, which we rename
+# to `public/` so GitLab Pages picks it up.
+
+stages:
+  - build
+
+# Cache node_modules across runs to keep builds fast.
+# Tied to the lockfile hash so dep changes invalidate it automatically.
+.node_cache: &node_cache
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - .npm/
+    - node_modules/
+  policy: pull-push
+
+pages:
+  stage: build
+  image: node:20-alpine
+  cache:
+    <<: *node_cache
+  before_script:
+    # The font + twemoji Vite plugins shell out to fetch assets on first build.
+    # Pre-install the small native deps they need.
+    - apk add --no-cache git
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run build
+    - mv build public
+  artifacts:
+    paths:
+      - public
+    expire_in: 1 week
+  rules:
+    # Only publish from the default branch.
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
