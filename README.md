@@ -8,6 +8,8 @@
 
 md2pdf is a Markdown export tool built with [Svelte 5](https://svelte.dev/) and [Typst](https://typst.app/). Convert Markdown into professional PDFs, social media image cards, and presentation slides — all client-side, no setup, no server.
 
+> Based on [cosformula/mdxport](https://github.com/cosformula/mdxport).
+
 ## ✨ Features
 
 ### Three export modes
