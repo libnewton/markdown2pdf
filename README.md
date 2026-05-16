@@ -76,10 +76,6 @@ All fonts (IBM Plex Sans, NewCMMath, DejaVu Sans Mono, Libertinus Serif, Noto Sa
   <em>Rich support for math, Mermaid diagrams, and charts</em>
 </p>
 
-## 🚀 Quick start
-
-Visit [mdxport.com](https://mdxport.com) to start using it immediately.
-
 ### Local development
 
 ```bash
@@ -106,7 +102,6 @@ npm run build
 
 ## 🔗 Related projects
 
-- [mdxport-cli](https://github.com/cosformula/mdxport-cli) — single-binary CLI for Markdown to PDF (`npm install -g @mdxport/cli`).
 - [markdown2typst](https://github.com/Mapaor/markdown2typst) — standalone npm package for Markdown to Typst by [@Mapaor](https://github.com/Mapaor).
 
 ## 📄 License
