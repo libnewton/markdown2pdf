@@ -170,7 +170,7 @@ The only network calls during a compile are user-supplied remote image URLs (and
 
 ## 6. Roadmap
 
-- Preflight: typed lint rules + autofixes for common AI-generated markdown problems.
+- Preflight: typed lint rules + autofixes for common markdown problems (broken tables, code-fence mismatches, very long URLs, lone footnote refs, …).
 - Asset manager UI: list, rename, delete IndexedDB-stored images.
 - Optional font subsetting to shrink the bundle for mobile.
 

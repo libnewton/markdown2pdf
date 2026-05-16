@@ -7,6 +7,6 @@
 </svelte:head>
 
 <PdfEditor
-  seoTitle="md2pdf · Markdown to PDF, Perfect Typesetting"
-  seoDescription="A delivery engine for AI-generated content. Runs entirely client-side, your data never leaves your browser. Auto-fix formatting issues with one click."
+  seoTitle="md2pdf · Markdown to PDF, in your browser"
+  seoDescription="A polished Markdown-to-PDF engine powered by Typst, running 100% in your browser. Live preview, beautiful typography, math, tables, callouts, code with line numbers, and one-click export. Zero setup, no upload."
 />

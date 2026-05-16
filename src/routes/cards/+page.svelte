@@ -3,6 +3,6 @@
 </script>
 
 <CardsEditor
-  seoTitle="md2pdf · Markdown to Social Cards"
-  seoDescription="Convert Markdown into beautiful social image cards. Supports Redbook, Instagram, X, and Story presets with one-click PNG export, fully client-side."
+  seoTitle="md2pdf · Markdown to image cards"
+  seoDescription="Turn Markdown into clean image cards for Instagram, X, Story or Redbook formats. Live preview, one-click PNG export, all in the browser."
 />

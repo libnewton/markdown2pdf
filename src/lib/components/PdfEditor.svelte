@@ -25,6 +25,7 @@
     isLegacyImplicitBlankDocument,
   } from '$lib/stores/documentStore.svelte'
   import { settingsStore } from '$lib/stores/settingsStore.svelte'
+  import { SOCIAL_IMAGE } from '$lib/seo'
 
   import type { SavedDocument } from '$lib/storage/documents'
 
@@ -674,7 +675,7 @@
   <meta property="og:description" content={seoDescription} />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="en_US" />
-  <meta property="og:image" content="/square.png" />
+  <meta property="og:image" content={SOCIAL_IMAGE} />
   <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content="240" />
   <meta property="og:image:height" content="240" />
@@ -684,7 +685,7 @@
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content={seoTitle} />
   <meta name="twitter:description" content={seoDescription} />
-  <meta name="twitter:image" content="/square.png" />
+  <meta name="twitter:image" content={SOCIAL_IMAGE} />
 </svelte:head>
 
 <!-- Loading Overlay -->

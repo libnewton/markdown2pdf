@@ -19,6 +19,7 @@
   import CardGallery from '$lib/components/CardGallery.svelte'
   import DocumentMenu from '$lib/components/DocumentMenu.svelte'
   import { CARD_TEMPLATES } from '$lib/templates/card-templates'
+  import { SOCIAL_IMAGE } from '$lib/seo'
   import {
     documentStore,
     isBrokenTemplateDocument,
@@ -571,7 +572,7 @@
   <meta property="og:title" content={seoTitle} />
   <meta property="og:description" content={seoDescription} />
   <meta property="og:type" content="website" />
-  <meta property="og:image" content="/square.png" />
+  <meta property="og:image" content={SOCIAL_IMAGE} />
   <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content="240" />
   <meta property="og:image:height" content="240" />
@@ -579,7 +580,7 @@
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content={seoTitle} />
   <meta name="twitter:description" content={seoDescription} />
-  <meta name="twitter:image" content="/square.png" />
+  <meta name="twitter:image" content={SOCIAL_IMAGE} />
 </svelte:head>
 
 <!-- Loading Overlay -->

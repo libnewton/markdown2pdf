@@ -3,6 +3,6 @@
 </script>
 
 <SlidesEditor
-  seoTitle="md2pdf · Markdown to Slides"
-  seoDescription="Convert Markdown into beautiful PDF slide decks. Multiple themes, code highlighting, and math support, runs entirely client-side."
+  seoTitle="md2pdf · Markdown to slide decks"
+  seoDescription="Write presentation slides in Markdown, get a polished PDF deck. Multiple themes, code highlighting, math, all rendered in the browser."
 />
