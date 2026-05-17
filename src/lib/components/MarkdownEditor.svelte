@@ -16,6 +16,11 @@
   let editorView = $state<EditorView | null>(null)
   let editorContainerEl = $state<HTMLDivElement | null>(null)
   let suppressEditorUpdate = false
+  // Tracks the last document string the editor emitted upward. Lets the
+  // external-sync effect bail without calling `doc.toString()` on every
+  // keystroke — for large documents that string conversion alone is the
+  // bulk of the per-keystroke cost.
+  let lastEmittedDoc = ''
 
   export function insertTextAtSelection(text: string): boolean {
     if (!editorView) return false
@@ -30,13 +35,16 @@
       scrollIntoView: true,
     })
     suppressEditorUpdate = false
-    markdown = editorView.state.doc.toString()
+    const next = editorView.state.doc.toString()
+    lastEmittedDoc = next
+    markdown = next
     editorView.focus()
     return true
   }
 
   onMount(() => {
     if (!editorContainerEl) return
+    lastEmittedDoc = markdown
 
     const startState = EditorState.create({
       doc: markdown,
@@ -47,7 +55,9 @@
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !suppressEditorUpdate) {
-            markdown = update.state.doc.toString()
+            const next = update.state.doc.toString()
+            lastEmittedDoc = next
+            markdown = next
           }
         }),
         EditorView.theme({
@@ -79,19 +89,23 @@
     }
   })
 
-  // Sync external markdown changes into the editor
+  // Sync external markdown changes into the editor. We compare against the
+  // last value the editor emitted upward, NOT against `doc.toString()` — the
+  // latter is O(n) and runs on every keystroke through this effect, which is
+  // the most expensive thing on the editor's hot path for large documents.
   $effect(() => {
-    if (editorView && markdown !== editorView.state.doc.toString()) {
-      suppressEditorUpdate = true
-      editorView.dispatch({
-        changes: {
-          from: 0,
-          to: editorView.state.doc.length,
-          insert: markdown,
-        },
-      })
-      suppressEditorUpdate = false
-    }
+    if (!editorView) return
+    if (markdown === lastEmittedDoc) return
+    lastEmittedDoc = markdown
+    suppressEditorUpdate = true
+    editorView.dispatch({
+      changes: {
+        from: 0,
+        to: editorView.state.doc.length,
+        insert: markdown,
+      },
+    })
+    suppressEditorUpdate = false
   })
 </script>
 

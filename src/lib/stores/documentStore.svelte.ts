@@ -23,24 +23,29 @@ let hasLoadedSessionCurrent = false;
 let pendingSave: { id: string; content: string; assets?: Record<string, SavedDocumentAsset> } | null = null;
 
 export function deriveNameFromContent(content: string): string {
+	// We only need the title / H1 / first body line, all of which live near
+	// the top of the document. Operating on a head slice keeps this O(1) in
+	// document size — important because DocumentMenu re-derives the name on
+	// every keystroke while the document is still unnamed.
+	const head = content.length > 4096 ? content.slice(0, 4096) : content;
 	// Try frontmatter title first
-	const fmMatch = content.match(/^---\s*\n[\s\S]*?title\s*:\s*["']?(.+?)["']?\s*\n[\s\S]*?---/m);
+	const fmMatch = head.match(/^---\s*\n[\s\S]*?title\s*:\s*["']?(.+?)["']?\s*\n[\s\S]*?---/m);
 	if (fmMatch) return fmMatch[1].trim().slice(0, 50);
 	// Try H1 heading
-	const match = content.match(/^#\s+(.+)$/m);
+	const match = head.match(/^#\s+(.+)$/m);
 	if (match) return match[1].trim().slice(0, 50);
 	// Fallback to first non-frontmatter line
-	const body = content.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '').trim();
-	const firstLine = body.split('\n')[0]?.trim();
+	const body = head.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, '').trim();
+	const firstLine = body.split('\n', 1)[0]?.trim();
 	if (firstLine) return firstLine.slice(0, 50);
-	return 'Untitled';
+	return '';
 }
 
 export function isLegacyImplicitBlankDocument(doc: SavedDocument): boolean {
 	return (
 		doc.creationSource === undefined &&
 		doc.content.trim() === '' &&
-		doc.name === 'Untitled'
+		doc.name === ''
 	);
 }
 
@@ -128,7 +133,7 @@ export const documentStore = {
 		const now = Date.now();
 		const doc: SavedDocument = {
 			id: crypto.randomUUID(),
-			name: deriveNameFromContent(content) || 'Untitled',
+			name: deriveNameFromContent(content) || '',
 			mode,
 			content,
 			assets,

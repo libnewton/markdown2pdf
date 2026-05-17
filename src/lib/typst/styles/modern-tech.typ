@@ -6,10 +6,23 @@
 #let article(title: "", authors: (), ..args, body) = {
   let lang = args.at("lang", default: "zh")
   let page-numbers = args.at("page-numbers", default: true)
+  let letter-return = args.at("letter-return", default: "")
+  let letter-to = args.at("letter-to", default: ())
+  let letter-from = args.at("letter-from", default: ())
+  let letter-subject = args.at("letter-subject", default: "")
+  let letter-date = args.at("letter-date", default: "")
+  let letter-mode = (
+    letter-return != "" or letter-to.len() > 0
+      or letter-from.len() > 0 or letter-subject != ""
+      or letter-date != ""
+  )
   // 1) 页面设置：宽边距，利于阅读
+  // Letter mode uses 20mm x-margin (DIN 5008 body margin).
+  let page-margin-x = if letter-mode { 20mm } else { 1.8cm }
+  let page-margin-y = 2cm
   set page(
     paper: "a4",
-    margin: (x: 1.8cm, y: 2cm),
+    margin: (x: page-margin-x, y: page-margin-y),
     numbering: if page-numbers { "1" } else { none },
     // Only show the page-number footer when there are 2+ pages.
     // A single-page document doesn't need "1" at the bottom.
@@ -133,6 +146,79 @@
 
   // 11) 图片：带 alt 时渲染为带 caption 的居中 figure
   show image: it => align(center, it)
+
+  // Letter mode (DIN 5008 Form B). Coordinates are page-absolute so the
+  // address lines up with the window of a DIN long / C6/5 envelope. Typst's
+  // `place()` is column-relative, so we subtract the page margins.
+  //
+  // DIN 5008 Anschriftfeld (80mm × 45mm) at 25mm from page left, 45mm from
+  // page top, composed of two zones:
+  //   - Zusatz- und Vermerkzone: 80mm × 17.7mm — return line lives here
+  //   - Anschriftzone:           80mm × 27.3mm — recipient address
+  // Each zone is a fixed-height block so the recipient address always starts
+  // exactly at 45 + 17.7 = 62.7mm from the page top, regardless of how many
+  // lines the return zone contains.
+  if letter-mode {
+    place(top + left,
+      dx: 25mm - page-margin-x,
+      dy: 45mm - page-margin-y,
+      block(width: 80mm, height: 45mm, {
+        // Stack the two zones with zero inter-block spacing so the total
+        // height stays exactly 17.7 + 27.3 = 45mm. Without this, Typst's
+        // default block spacing (~1.2em) would push the Anschriftzone down
+        // and the recipient would no longer start at 62.7mm from page top.
+        set block(spacing: 0pt)
+        // Zusatz- und Vermerkzone (17.7mm) — return line, small + underlined.
+        // Place near the bottom but with a small gap above the recipient so
+        // the underline doesn't visually touch the recipient's first line.
+        block(width: 80mm, height: 17.7mm, {
+          if letter-return != "" {
+            place(bottom + left, dy: -2mm, text(size: 8pt, underline(letter-return)))
+          }
+        })
+        // Anschriftzone (27.3mm) — up to 6 lines of recipient address.
+        block(width: 80mm, height: 27.3mm, {
+          set par(leading: 0.5em, spacing: 0.3em)
+          for line in letter-to {
+            text(size: 11pt, line)
+            linebreak()
+          }
+        })
+      }))
+
+    // Infofeld (sender details) on the right. Vertically aligned with the
+    // Anschriftzone (recipient block) so both blocks share the same top
+    // baseline at 45 + 17.7 = 62.7mm from the page top.
+    if letter-from.len() > 0 {
+      place(top + left,
+        dx: 125mm - page-margin-x,
+        dy: 62.7mm - page-margin-y,
+        block(width: 75mm, {
+          set par(leading: 0.5em, spacing: 0.3em)
+          for line in letter-from {
+            text(size: 10pt, line)
+            linebreak()
+          }
+        }))
+    }
+
+    // Reserve vertical space so normal flow starts at the DIN 5008 subject
+    // position (98.46mm from the page top). The cursor is currently at the
+    // top of the content area (page-margin-y from the page top), so advance
+    // 98.46mm - page-margin-y.
+    v(98.46mm - page-margin-y)
+
+    if letter-subject != "" or letter-date != "" {
+      // Subject left, place + date right, same baseline.
+      grid(
+        columns: (1fr, auto),
+        column-gutter: 1em,
+        text(weight: "bold", size: 11pt, letter-subject),
+        text(size: 11pt, letter-date),
+      )
+      v(1.5em)
+    }
+  }
 
   // 标题区（可选）
   if title != "" {

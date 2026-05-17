@@ -98,6 +98,11 @@ export type MarkdownToTypstOptions = {
 	theme?: string;
 	exportPreset?: CardExportPresetId;
 	pageNumbers?: boolean;
+	letterReturn?: string;
+	letterTo?: string[];
+	letterFrom?: string[];
+	letterSubject?: string;
+	letterDate?: string;
 };
 
 export type TypstStyleId = 'modern-tech' | 'redbook-knowledge' | 'redbook-dark' | 'redbook-minimalist' | 'redbook-modern' | 'redbook-forest' | 'redbook-blueprint' | 'redbook-clean' | 'slides-modern' | 'slides-dark' | 'slides-minimal';
@@ -184,6 +189,13 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
 	// authorial intent; the toggle is just a global default.
 	const pageNumbers = frontmatter.pageNumbers ?? options.pageNumbers ?? true;
 
+	const isModernTech = !isRedbookStyle && !isSlidesStyle;
+	const letterReturn = isModernTech ? options.letterReturn ?? frontmatter.letterReturn ?? '' : '';
+	const letterTo = isModernTech ? options.letterTo ?? frontmatter.letterTo ?? [] : [];
+	const letterFrom = isModernTech ? options.letterFrom ?? frontmatter.letterFrom ?? [] : [];
+	const letterSubject = isModernTech ? options.letterSubject ?? frontmatter.letterSubject ?? '' : '';
+	const letterDate = isModernTech ? options.letterDate ?? frontmatter.letterDate ?? '' : '';
+
 	const nodesForBody =
 		!isRedbookStyle && leadingTitleIndex !== null && normalizeText(title) === normalizeText(leadingTitle)
 			? tree.children.filter((_, index) => index !== leadingTitleIndex)
@@ -215,7 +227,16 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
 		isRedbookStyle && options.exportPreset
 			? `preset: "${options.exportPreset}"`
 			: null,
-		!pageNumbers ? `page-numbers: false` : null
+		!pageNumbers ? `page-numbers: false` : null,
+		letterReturn ? `letter-return: "${escapeTypstString(letterReturn)}"` : null,
+		letterTo.length
+			? `letter-to: ${renderTypstArray(letterTo.map((l) => `"${escapeTypstString(l)}"`))}`
+			: null,
+		letterFrom.length
+			? `letter-from: ${renderTypstArray(letterFrom.map((l) => `"${escapeTypstString(l)}"`))}`
+			: null,
+		letterSubject ? `letter-subject: "${escapeTypstString(letterSubject)}"` : null,
+		letterDate ? `letter-date: "${escapeTypstString(letterDate)}"` : null
 	]
 		.filter(isNonEmpty)
 		.join(', ');
@@ -361,6 +382,11 @@ type Frontmatter = {
 	authors?: string[];
 	lang?: string;
 	pageNumbers?: boolean;
+	letterReturn?: string;
+	letterTo?: string[];
+	letterFrom?: string[];
+	letterSubject?: string;
+	letterDate?: string;
 };
 
 function parseFrontmatter(root: Root): Frontmatter {
@@ -401,6 +427,40 @@ function parseFrontmatterYaml(yaml: string): Frontmatter {
 			continue;
 		}
 
+		const returnMatch = /^\s*letter[-_]return\s*:\s*(.+?)\s*$/.exec(line);
+		if (returnMatch && !result.letterReturn) {
+			result.letterReturn = stripYamlScalar(returnMatch[1]);
+			continue;
+		}
+
+		const subjectMatch = /^\s*letter[-_]subject\s*:\s*(.+?)\s*$/.exec(line);
+		if (subjectMatch && !result.letterSubject) {
+			result.letterSubject = stripYamlScalar(subjectMatch[1]);
+			continue;
+		}
+
+		const dateMatch = /^\s*letter[-_]date\s*:\s*(.+?)\s*$/.exec(line);
+		if (dateMatch && !result.letterDate) {
+			result.letterDate = stripYamlScalar(dateMatch[1]);
+			continue;
+		}
+
+		const letterToHead = /^\s*letter[-_]to\s*:\s*(.*?)\s*$/.exec(line);
+		if (letterToHead && !result.letterTo) {
+			const parsed = parseYamlListAt(letterToHead[1], lines, i);
+			result.letterTo = parsed.items;
+			i = parsed.lastIndex;
+			continue;
+		}
+
+		const letterFromHead = /^\s*letter[-_]from\s*:\s*(.*?)\s*$/.exec(line);
+		if (letterFromHead && !result.letterFrom) {
+			const parsed = parseYamlListAt(letterFromHead[1], lines, i);
+			result.letterFrom = parsed.items;
+			i = parsed.lastIndex;
+			continue;
+		}
+
 		const authorsMatch = /^\s*authors\s*:\s*(.*?)\s*$/.exec(line);
 		if (!authorsMatch || result.authors) continue;
 
@@ -421,6 +481,24 @@ function parseFrontmatterYaml(yaml: string): Frontmatter {
 	}
 
 	return result;
+}
+
+function parseYamlListAt(
+	inlineRest: string,
+	lines: string[],
+	headerIndex: number
+): { items: string[]; lastIndex: number } {
+	const rest = inlineRest.trim();
+	if (rest) return { items: parseInlineYamlList(rest), lastIndex: headerIndex };
+	const items: string[] = [];
+	let lastIndex = headerIndex;
+	for (let j = headerIndex + 1; j < lines.length; j++) {
+		const itemMatch = /^\s*-\s*(.+?)\s*$/.exec(lines[j]);
+		if (!itemMatch) break;
+		items.push(stripYamlScalar(itemMatch[1]));
+		lastIndex = j;
+	}
+	return { items: items.filter(Boolean), lastIndex };
 }
 
 function parseInlineYamlList(value: string): string[] {

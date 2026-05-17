@@ -241,6 +241,35 @@ The YAML block at the top of this document sets:
 
 ---
 
+## German letter mode (DIN 5008)
+
+Add any of the \`letter-*\` fields to the frontmatter and the first page
+switches to a DIN 5008 Form B layout: address window at 25 mm / 45 mm so it
+lines up with a DIN long envelope, sender info on the right, subject + place
+date on the same line, body content from 98.46 mm down. Page margins switch
+to 20 mm on both sides. All fields are optional and independent.
+
+\`\`\`yaml
+---
+title: Mietvertrag-Kündigung
+letter-return: Anna Beispiel, Lindenweg 7, 10115 Berlin
+letter-to:
+  - Hausverwaltung Müller GmbH
+  - z. Hd. Frau Schmidt
+  - Friedrichstraße 100
+  - 10117 Berlin
+letter-from:
+  - Anna Beispiel
+  - Lindenweg 7
+  - 10115 Berlin
+  - "Tel.: 030 1234567"
+letter-subject: "Kündigung des Mietvertrags zum 31.08.2026"
+letter-date: "Berlin, den 17.05.2026"
+---
+\`\`\`
+
+---
+
 ## Page breaks
 
 Use \`---\` for a horizontal rule, or the explicit token \`[[pagebreak]]\` to

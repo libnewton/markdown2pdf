@@ -158,10 +158,10 @@
   // ========================================
   let filename = $derived.by(() => {
     const h1Match = markdown.match(/^#\s+(.+)$/m)
-    let base = h1Match ? h1Match[1].trim() : 'Untitled'
+    let base = h1Match ? h1Match[1].trim() : ''
     base = base.replace(/[\\/:*?"<>|\x00-\x1F]/g, ' ')
     base = base.replace(/\s+/g, ' ').trim()
-    if (!base) base = 'Untitled'
+    if (!base) base = ''
     const MAX_LEN = 50
     if (base.length > MAX_LEN) {
       base = base.substring(0, MAX_LEN).trim()

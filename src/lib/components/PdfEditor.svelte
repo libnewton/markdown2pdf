@@ -188,12 +188,12 @@
   // Derived filename
   let filename = $derived.by(() => {
     const h1Match = markdown.match(/^#\s+(.+)$/m)
-    let base = h1Match ? h1Match[1].trim() : 'Untitled'
+    let base = h1Match ? h1Match[1].trim() : ''
 
     base = base.replace(/[\\/:*?"<>|\x00-\x1F]/g, ' ')
     base = base.replace(/\s+/g, ' ').trim()
 
-    if (!base) base = 'Untitled'
+    if (!base) base = ''
 
     const MAX_LEN = 50
     if (base.length > MAX_LEN) {
@@ -279,9 +279,12 @@
     isLoading = false
     void compile(markdown, style)
 
-    // Close menus on click outside
+    // Close menus on click outside. Guarded so the global click listener
+    // doesn't reactively touch state on every click in the editor — Svelte
+    // 5 already short-circuits identical writes, but skipping the call
+    // entirely keeps this listener off the hot path.
     const handleClickOutside = () => {
-      closeMenu()
+      if (isMenuOpen) closeMenu()
     }
     window.addEventListener('click', handleClickOutside)
 
@@ -504,7 +507,9 @@
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = filename + '.pdf'
+    // Only force a filename when we have one; otherwise let the browser pick
+    // its own default rather than offering the user ".pdf".
+    if (filename) a.download = `${filename}.pdf`
     a.click()
     URL.revokeObjectURL(url)
   }
