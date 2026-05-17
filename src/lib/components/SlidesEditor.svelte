@@ -346,15 +346,19 @@
   // ========================================
   async function downloadPdf() {
     if (!client || !lastCompiledFullTypst) return
+    // Open the tab synchronously so it counts as user-initiated and isn't
+    // blocked by popup blockers after the async compile.
+    const newTab = window.open('', '_blank')
     // @ts-ignore
     const { pdf } = await client.compilePdf(lastCompiledFullTypst, lastCompiledImages)
     const blob = new Blob([pdf], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${filename}.pdf`
-    a.click()
-    URL.revokeObjectURL(url)
+    if (newTab) {
+      newTab.location.href = url
+    } else {
+      window.open(url, '_blank')
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
   function handleImageSaved(path: string, bytes: Uint8Array, objectUrl: string, mimeType: string) {
