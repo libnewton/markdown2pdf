@@ -1,7 +1,21 @@
 import type { Node, Parent } from 'unist';
 import type { Root, Html } from 'mdast';
 
-const KINDS = new Set(['success', 'warning', 'tip', 'info', 'danger', 'note']);
+const KINDS = new Set([
+	'success',
+	'warning',
+	'tip',
+	'info',
+	'danger',
+	'note',
+	// Layout directives — same plumbing, different renderer. The renderer
+	// dispatches on `kind` so these flow through preprocessor + remark plugin
+	// unchanged and are turned into Typst `align()` / `grid()` calls.
+	'left',
+	'center',
+	'right',
+	'row'
+]);
 
 export type AdmonitionBlock = {
 	kind: string;
@@ -17,11 +31,14 @@ export interface AdmonitionNode extends Node {
 }
 
 /**
- * Preprocess raw markdown to find :::kind ... ::: blocks and replace them with
- * an HTML-comment placeholder. The block contents are stored separately so we
- * can re-parse them later, recursively, with the full pipeline.
+ * Preprocess raw markdown to find `:::kind ... :::` blocks and replace them
+ * with an HTML-comment placeholder. The block contents are stored separately
+ * so we can re-parse them later, recursively, with the full pipeline.
  *
- * Non-greedy and not nested — a `:::` line always closes the nearest open block.
+ * Fence length matters (CommonMark code-fence style): an opener of N colons
+ * is closed only by a line of N or more colons. So `::::row` is closed by
+ * `::::` and can safely contain inner 3-colon admonitions like `:::warning`.
+ * A 3-colon opener is closed by `:::` exactly as before — backward compatible.
  */
 export function preprocessAdmonitions(markdown: string): {
 	markdown: string;
@@ -33,17 +50,19 @@ export function preprocessAdmonitions(markdown: string): {
 	let i = 0;
 	while (i < lines.length) {
 		const line = lines[i];
-		const open = /^:::\s*([A-Za-z][A-Za-z0-9_-]*)\s*(.*?)\s*$/.exec(line);
-		if (open && KINDS.has(open[1].toLowerCase())) {
-			const kind = open[1].toLowerCase();
-			const title = open[2] || '';
+		const open = /^(:{3,})\s*([A-Za-z][A-Za-z0-9_-]*)\s*(.*?)\s*$/.exec(line);
+		if (open && KINDS.has(open[2].toLowerCase())) {
+			const fenceLen = open[1].length;
+			const kind = open[2].toLowerCase();
+			const title = open[3] || '';
+			const closer = new RegExp('^:{' + fenceLen + ',}\\s*$');
 			const body: string[] = [];
 			i++;
-			while (i < lines.length && !/^:::\s*$/.test(lines[i])) {
+			while (i < lines.length && !closer.test(lines[i])) {
 				body.push(lines[i]);
 				i++;
 			}
-			i++; // skip closing :::
+			i++; // skip closing fence
 			const id = blocks.length;
 			blocks.push({ kind, title, source: body.join('\n') });
 			// Surround with blank lines so remark parses the placeholder as its own block.

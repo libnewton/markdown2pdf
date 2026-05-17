@@ -241,6 +241,45 @@ The YAML block at the top of this document sets:
 
 ---
 
+## Layout & alignment
+
+Wrap any block in \`:::left\`, \`:::center\`, or \`:::right\` to align it. Wrap
+multiple blocks (separated by blank lines) in \`::::row\` to lay them out
+side by side as equal-width columns.
+
+\`\`\`markdown
+:::center
+#### A centered subheading
+
+This paragraph is centered too.
+:::
+
+::::row
+First column — left-aligned paragraph.
+
+Second column with **bold**.
+
+Third column ends here.
+::::
+\`\`\`
+
+Use a deeper fence (4 colons) when nesting other directives — e.g. two
+admonitions next to each other:
+
+\`\`\`markdown
+::::row
+:::tip
+Tip on the left.
+:::
+
+:::warning
+Warning on the right.
+:::
+::::
+\`\`\`
+
+---
+
 ## German letter mode (DIN 5008)
 
 Add any of the \`letter-*\` fields to the frontmatter and the first page

@@ -623,9 +623,42 @@ function renderBlock(
 }
 
 function renderAdmonition(node: AdmonitionNode, indentLevel: number): string {
+	// Layout directives reuse the admonition plumbing (preprocessor + remark
+	// plugin) but render to plain Typst primitives instead of the styled
+	// admonition box.
+	if (node.kind === 'left' || node.kind === 'center' || node.kind === 'right') {
+		return renderAlign(node, indentLevel);
+	}
+	if (node.kind === 'row') {
+		return renderRow(node, indentLevel);
+	}
 	const inner = renderInnerMarkdown(node.source);
 	const title = node.title ? `, title: "${escapeTypstString(node.title)}"` : '';
 	return indentLines(`#admonition(kind: "${node.kind}"${title})[\n${inner}\n]`, indentLevel);
+}
+
+function renderAlign(node: AdmonitionNode, indentLevel: number): string {
+	const inner = renderInnerMarkdown(node.source);
+	if (!inner) return '';
+	return indentLines(`#align(${node.kind})[\n${inner}\n]`, indentLevel);
+}
+
+function renderRow(node: AdmonitionNode, indentLevel: number): string {
+	// Each top-level child block of the row's source becomes one column.
+	// Re-parse rather than calling renderInnerMarkdown so we can iterate
+	// children individually and wrap each one in its own grid cell.
+	if (!node.source.trim()) return '';
+	const { tree, definitions, footnoteDefinitions } = parseMarkdown(node.source);
+	const cells = tree.children
+		.map((child) => renderBlock(child as Content, 0, definitions, footnoteDefinitions))
+		.filter(isNonEmpty)
+		.map((c) => `[\n${c}\n]`);
+	if (cells.length === 0) return '';
+	const cols = Array(cells.length).fill('1fr').join(', ');
+	return indentLines(
+		`#grid(columns: (${cols}), column-gutter: 1em, row-gutter: 1em,\n${cells.join(',\n')}\n)`,
+		indentLevel
+	);
 }
 
 function renderSpoiler(node: SpoilerNode, indentLevel: number): string {
