@@ -14,6 +14,9 @@ import remarkSpoiler, { preprocessSpoilers } from './plugins/remark-spoiler';
 import type { SpoilerNode } from './plugins/remark-spoiler';
 import remarkTwemoji from './plugins/remark-twemoji';
 import remarkEmojiShortcodes from './plugins/remark-emoji-shortcodes';
+import remarkUnderline, { preprocessUnderlines } from './plugins/remark-underline';
+import type { UnderlineNode } from './plugins/remark-underline';
+import remarkTableWidths, { preprocessTableWidths } from './plugins/remark-table-widths';
 import remarkParse from 'remark-parse';
 import { tex2typst } from 'tex2typst';
 import type {
@@ -146,14 +149,18 @@ function parseMarkdown(markdown: string): {
 } {
 	const withDims = normalizeImageDimensions(markdown);
 	const withSpacers = injectExtraBlankLineTokens(withDims);
-	const a = preprocessAdmonitions(withSpacers);
+	const withUnderlines = preprocessUnderlines(withSpacers);
+	const tw = preprocessTableWidths(withUnderlines);
+	const a = preprocessAdmonitions(tw.markdown);
 	const s = preprocessSpoilers(a.markdown);
 	const processor = unified()
 		.use(remarkParse)
 		.use(remarkFrontmatter, ['yaml'])
 		.use(remarkGfm, { singleTilde: false })
+		.use(remarkTableWidths, tw.blocks)
 		.use(remarkMath)
 		.use(remarkMark)
+		.use(remarkUnderline)
 		.use(remarkAdmonitions, a.blocks)
 		.use(remarkSpoiler, s.blocks)
 		.use(remarkPagebreakToken)
@@ -559,6 +566,8 @@ function plainTextFromPhrasingNode(node: PhrasingContent, definitions: Map<strin
 		case 'strong':
 		case 'emphasis':
 			return plainTextFromPhrasing((node as Strong).children, definitions);
+		case 'underline' as any:
+			return plainTextFromPhrasing((node as unknown as UnderlineNode).children, definitions);
 		case 'inlineCode':
 			return (node as InlineCode).value;
 		case 'link':
@@ -867,8 +876,16 @@ function renderTable(
 	};
 	const aligns = (node.align ?? []).map((a) => alignMap[a ?? 'left'] ?? 'left');
 
-	// Build column specification
-	const columns = Array(colCount).fill('1fr').join(', ');
+	// Build column specification. Default is equal `1fr` per column; the
+	// remark-table-widths plugin may attach a per-column fr multiplier under
+	// node.data.tableWidths when the markdown source uses `+` markers in the
+	// separator row.
+	const widths = (node as any).data?.tableWidths as number[] | undefined;
+	const columns = (
+		widths && widths.length
+			? Array.from({ length: colCount }, (_, i) => `${widths[i] ?? 1}fr`)
+			: Array(colCount).fill('1fr')
+	).join(', ');
 
 	// Build table content
 	const headerCells: string[] = [];
@@ -947,6 +964,8 @@ function renderInline(
 			return `#strike[${renderInlines((node as unknown as Delete).children, definitions, footnoteDefinitions)}]`;
 		case 'mark':
 			return `#highlight[${renderInlines((node as unknown as Mark).children, definitions, footnoteDefinitions)}]`;
+		case 'underline':
+			return `#underline[${renderInlines((node as unknown as UnderlineNode).children, definitions, footnoteDefinitions)}]`;
 		case 'subscript':
 			return `#sub[${renderInlines((node as unknown as SubScript).children, definitions, footnoteDefinitions)}]`;
 		case 'superscript':
