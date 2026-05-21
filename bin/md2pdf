@@ -1,0 +1,72 @@
+#!/bin/sh
+# md2pdf — host shim. Markdown -> PDF via the @local/md2pdf Typst package.
+#
+# All Markdown processing lives in the Typst package. This shim only does host
+# I/O: Typst's compile sandbox cannot reach the network, so remote images are
+# discovered (pass 1: `typst query`), prefetched, then the document is
+# compiled (pass 2). The shim contains no Markdown logic.
+set -e
+
+input="$1"
+if [ -z "$input" ] || [ ! -f "$input" ]; then
+  echo "usage: md2pdf <input.md> [output.pdf]" >&2
+  exit 1
+fi
+output="${2:-${input%.*}.pdf}"
+
+here=$(cd "$(dirname "$0")" && pwd)
+fonts="$here/../fonts"
+docdir=$(cd "$(dirname "$input")" && pwd)
+docname=$(basename "$input")
+main="$docdir/.md2pdf-main-$$.typ"
+manifest="$docdir/.md2pdf-remotes-$$.json"
+trap 'rm -f "$main" "$manifest"' EXIT
+
+# The eval happens here, in the document's directory, so image() paths in the
+# generated body resolve against the document root (not the package).
+cat > "$main" <<EOF
+#import "@local/md2pdf:0.1.0": prepare
+#let _d = prepare(read("$docname"))
+#metadata(_d.remotes) <md2pdf-remote-images>
+#if not _d.skip {
+  show: _d.template
+  eval(_d.body, mode: "markup", scope: _d.scope)
+}
+EOF
+
+# Pass 1 — discover remote image URLs (published as <md2pdf-remote-images>).
+typst query --root "$docdir" --font-path "$fonts" --ignore-system-fonts \
+  --input md2pdf-query=1 --one --field value \
+  "$main" '<md2pdf-remote-images>' > "$manifest" 2>/dev/null || echo '[]' > "$manifest"
+
+# Prefetch each remote image into <docdir>/remote/<hash>; Typst then resolves it.
+python3 - "$manifest" "$docdir" <<'PY'
+import json, os, sys, urllib.request
+manifest, docdir = sys.argv[1], sys.argv[2]
+try:
+    items = json.load(open(manifest))
+except Exception:
+    items = []
+for it in items:
+    url, alias = it.get("url"), it.get("alias")
+    if not url or not alias:
+        continue
+    dest = os.path.join(docdir, alias)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "md2pdf"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            open(dest, "wb").write(r.read())
+        print(f"md2pdf: fetched {url}")
+    except Exception as e:
+        # Placeholder so one bad URL does not fail the whole compile.
+        open(dest, "wb").write(
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>'
+        )
+        print(f"md2pdf: WARN could not fetch {url}: {e}", file=sys.stderr)
+PY
+
+# Pass 2 — compile.
+typst compile --root "$docdir" --font-path "$fonts" --ignore-system-fonts \
+  "$main" "$output"
+echo "md2pdf: wrote $output"

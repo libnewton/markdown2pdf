@@ -1,0 +1,26 @@
+[package]
+name = "md2pdf-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Markdown -> Typst engine, compiled to a Typst WASM plugin"
+license = "MIT"
+
+[lib]
+# `cdylib` so the build produces a standalone .wasm; the lib name (hyphens ->
+# underscores) gives `md2pdf_engine.wasm`.
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-minimal-protocol = "0.1"
+# `shortcodes` enables `:emoji:` parsing (pulls in the small `emojis` crate).
+comrak = { version = "0.41", default-features = false, features = ["shortcodes"] }
+# Emoji detection -> Twemoji codepoints.
+unic-emoji-char = "0.9"
+emojis = "0.6"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"

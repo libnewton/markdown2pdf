@@ -1,109 +1,71 @@
 <p align="center">
-  <img src="static/logo.png" alt="md2pdf Logo" width="128" />
+  <img src="web/static/logo.png" alt="md2pdf logo" width="128" />
 </p>
 
 # md2pdf
 
-**Markdown to PDF, Cards & Slides — perfect typesetting, fully in the browser.**
+**Markdown → PDF with perfect typesetting — all Markdown processing lives
+inside Typst.**
 
-md2pdf is a Markdown export tool built with [Svelte 5](https://svelte.dev/) and [Typst](https://typst.app/). Convert Markdown into professional PDFs, social media image cards, and presentation slides — all client-side, no setup, no server.
+The Markdown engine is a Rust/[`comrak`](https://github.com/kivikakk/comrak)
+parser compiled to a WebAssembly [Typst](https://typst.app/) plugin and shipped
+as a Typst package (`@local/md2pdf`). Both front-ends — the browser app and the
+command-line tool — feed raw Markdown to the *same* engine, so output is
+identical.
 
-> Based on [cosformula/mdxport](https://github.com/cosformula/mdxport).
+```
+Markdown ─▶ engine.wasm (Rust/comrak) ─▶ Typst markup ─▶ Typst compile ─▶ PDF
+           └──── inside the Typst package ────┘          └── typst / typst.ts ──┘
+```
 
-## ✨ Features
+## Repository layout
 
-### Three export modes
+| Path         | What it is |
+|--------------|------------|
+| `web/`       | The SvelteKit web app (live editor + preview). Deployed to GitLab Pages. |
+| `engine/`    | Rust crate — builds `engine.wasm`, the Markdown engine. |
+| `package/`   | The `md2pdf` Typst package: `lib.typ`, `styles/`, `admonitions.typ`, vendored `mitex`/`mmdr`, bundled Twemoji SVGs, and the built `engine.wasm`. |
+| `bin/md2pdf` | CLI host shim — discovers remote images, then runs `typst compile`. |
+| `fonts/`     | Fonts shared by the CLI and the web app. |
+| `build.sh`   | Builds `engine.wasm` and installs the package to `@local/md2pdf`. |
+| `tests/`     | Markdown fixtures. |
 
-- **PDF Documents** — Built-in templates for technical specs, weekly reports, resumes, AI chat notes, and Notion exports.
-- **Image Cards** — Export beautiful social-card PNGs. 7 styles (clean, knowledge, dark, minimalist, modern, forest, blueprint) with customizable themes, sizes, and content density. Presets for Redbook, Instagram, X, and Story.
-- **Presentation Slides** — Create slide decks from Markdown. 3 themes (modern, dark, minimal) with PDF export.
+`package/engine.wasm` is committed (so the web build needs no Rust toolchain);
+rerun `./build.sh` after changing anything in `engine/`.
 
-### Editing
+## Web app
 
-- **Dual editor modes** — Switch between a code editor and a WYSIWYG editor (powered by [Milkdown](https://milkdown.dev/)).
-- **Real-time preview** — Live SVG preview rendered directly from Typst.
-- **Live update toggle** — Pause live preview and use `Ctrl/Cmd+Enter` (or the toolbar button) to compile on demand.
-- **Page breaks** — Use `[[pagebreak]]` to control pagination across all modes.
-- **Image upload** — Paste or drop images straight into the editor.
-
-### Markdown coverage
-
-- **GFM**: tables, task lists (rendered as real checkboxes), strikethrough.
-- **`==highlight==`** — yellow highlight.
-- **Admonitions** — `:::success`, `:::warning`, `:::tip`, `:::info`, `:::danger`.
-- **Spoilers** — `+++++ … +++++`.
-- **Math** (LaTeX, auto-converted to Typst), inline and block.
-- **Mermaid** diagrams.
-- **Twemoji** — both unicode emoji (😀) and shortcodes (`:innocent:`).
-- **Footnotes**, super- and subscript.
-- **Image sizing** — `![alt](url =200x200)` (HackMD style) and alt-text-as-caption.
-- **Remote images** with an optional CORS-proxy fallback for blocked URLs.
-- **`[toc]`** → Typst `#outline()`.
-
-### Offline by default
-
-All fonts (IBM Plex Sans, NewCMMath, DejaVu Sans Mono, Noto Color Emoji) and all Twemoji SVGs are bundled into `static/` at build time. The only network call during a compile is user-supplied remote image URLs.
-
-### More
-
-- **Document management** — Auto-saves to IndexedDB; switch between recent documents.
-- **Privacy-first** — Runs entirely client-side using WebAssembly. No analytics, no telemetry.
-- **No setup** — No installation or account required.
-
-## 📸 Screenshots
-
-<p align="center">
-  <img src="static/screenshots/screenshot_editor.png" alt="md2pdf editor" width="100%" />
-  <br>
-  <em>Split-screen editing with real-time PDF preview</em>
-</p>
-
-<p align="center">
-  <img src="static/screenshots/screenshot_cards.png" alt="md2pdf social cards" width="100%" />
-  <br>
-  <em>Export Markdown as beautiful social media cards</em>
-</p>
-
-<p align="center">
-  <img src="static/screenshots/screenshot_slides.png" alt="md2pdf slides" width="100%" />
-  <br>
-  <em>Create presentation slides from Markdown</em>
-</p>
-
-<p align="center">
-  <img src="static/screenshots/screenshot_features.png" alt="md2pdf features" width="100%" />
-  <br>
-  <em>Rich support for math, Mermaid diagrams, and charts</em>
-</p>
-
-### Local development
-
-```bash
-git clone https://github.com/libnewton/markdown2pdf.git
-cd md2pdf
+```sh
+cd web
 npm install
-npm run dev
+npm run dev          # local dev server
+npm run build        # static build → web/build/
 ```
 
-Production build (static site):
+The `web/vite.config.ts` plugins copy `package/` and `fonts/` into
+`web/static/` at build time — the app is fully offline, no CDN calls.
 
-```bash
-npm run build
+## CLI
+
+Requires the `typst` binary (v0.13+) and, to rebuild the engine, Rust with the
+`wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`, or
+the `rust-wasm` package on Arch).
+
+```sh
+./build.sh                       # build engine.wasm + install @local/md2pdf
+./bin/md2pdf tests/sample.md     # → tests/sample.pdf
 ```
 
-## 🛠️ Tech stack
+## Markdown coverage
 
-- **Framework**: [Svelte 5](https://svelte.dev/) + [SvelteKit](https://kit.svelte.dev) (`adapter-static`)
-- **Typesetting**: [Typst](https://typst.app/) via WASM
-- **WYSIWYG editor**: [Milkdown](https://milkdown.dev/) (Crepe)
-- **Markdown parsing**: [unified](https://unifiedjs.com/) + remark
-- **Preview rendering**: [typst.ts](https://github.com/Myriad-Dreamin/typst.ts) SVG renderer
-- **Diagrams**: [Mermaid](https://mermaid.js.org/)
+Core CommonMark + GFM (tables incl. `+` column-width markers, task lists,
+strikethrough, footnotes, autolinks); `==highlight==`, super/subscript,
+underline; admonitions (`:::info` …), spoilers (`+++++`), `:::row/center`
+layout; math via `mitex`; Mermaid via `mmdr`; HackMD `=WxH` image sizing;
+remote images; Twemoji emoji (unicode and `:shortcodes:`); YAML frontmatter
+(title / authors / page numbers); DIN 5008 letter mode (`letter-*` fields);
+`[toc]` → `#outline()`.
 
-## 🔗 Related projects
-
-- [markdown2typst](https://github.com/Mapaor/markdown2typst) — standalone npm package for Markdown to Typst by [@Mapaor](https://github.com/Mapaor).
-
-## 📄 License
+## License
 
 [MIT](LICENSE)

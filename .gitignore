@@ -1,13 +1,3 @@
-node_modules
-
-# Output
-.output
-.vercel
-.netlify
-.wrangler
-/.svelte-kit
-/build
-
 # OS
 .DS_Store
 Thumbs.db
@@ -17,11 +7,31 @@ Thumbs.db
 .env.*
 !.env.example
 !.env.test
-
-# Vite
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
 .gstack/
 
-# Generated at build time by the md2pdf-copy-package Vite plugin
-/static/md2pdf
+# --- web app (web/) ---
+web/node_modules
+web/.svelte-kit
+web/build
+web/.output
+web/.vercel
+web/.netlify
+web/.wrangler
+web/vite.config.js.timestamp-*
+web/vite.config.ts.timestamp-*
+# Generated at build time by the Vite plugins.
+# Sources of truth are the repo-root package/ and fonts/ directories.
+web/static/md2pdf
+web/static/fonts
+
+# GitLab Pages build artifact
+/public
+
+# --- Rust engine ---
+engine/target
+
+# --- CLI scratch + test output ---
+tests/*.pdf
+tests/remote/
+.md2pdf-main-*.typ
+.md2pdf-remotes-*.json
