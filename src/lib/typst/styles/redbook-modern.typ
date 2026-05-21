@@ -1,5 +1,5 @@
-// 小红书现代卡片风格 (Redbook Modern Card Style)
-// 特点：渐变装饰、圆角元素、多主题色支持。
+// Redbook Modern card style.
+// Gradient decoration, rounded elements, multiple theme colours.
 
 #import "redbook-typography.typ": resolve-layout, resolve-tokens
 
@@ -85,8 +85,6 @@
 )
 
 #let article(title: "", authors: (), ..args, body) = {
-  let lang = args.at("lang", default: "zh")
-  let font-choice = args.at("font", default: "sans")
   let size-preset = args.at("size", default: "compact")
   let density-preset = args.at("density", default: "comfortable")
   let theme-name = args.at("theme", default: "indigo")
@@ -95,10 +93,8 @@
   let layout = resolve-layout(preset: export-preset)
   let theme = _themes.at(theme-name, default: _themes.at("indigo"))
 
-  let sans-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Sans CJK SC", "Noto Sans SC", "Noto Color Emoji")
-  let serif-fonts = ("Libertinus Serif", "Noto Serif SC", "Noto Serif CJK SC", "Noto Color Emoji")
-  let body-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
-  let heading-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
+  let body-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Color Emoji")
+  let heading-fonts = body-fonts
   let body-size = tokens.at("body-size")
   let heading-1-size = tokens.at("heading-1-size")
   let heading-2-size = tokens.at("heading-2-size")
@@ -147,7 +143,7 @@
   set text(
     font: body-fonts,
     size: body-size,
-    lang: lang,
+    lang: "en",
     fill: text-dark,
   )
 

@@ -314,7 +314,7 @@ html, body {
 }
 
 .drop-zone-active::after {
-  content: '拖放 .md 文件到这里';
+  content: 'Drop .md files here';
   position: absolute;
   inset: 0;
   z-index: 100;

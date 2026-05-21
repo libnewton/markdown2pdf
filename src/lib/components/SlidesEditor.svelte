@@ -60,11 +60,6 @@
       'slides-modern',
   )
 
-  let font = $state<'sans' | 'serif'>(
-    (browser && (localStorage.getItem('md2pdf-slides-font') as 'sans' | 'serif')) ||
-      'sans',
-  )
-
   // Compilation state
   let status: 'idle' | 'compiling' | 'done' | 'error' = $state('idle')
   let errorMessage: string | null = $state(null)
@@ -180,7 +175,7 @@
     void (async () => {
       isLoading = false
 
-      void compile(markdown, style, font)
+      void compile(markdown, style)
     })().catch((error) => {
       console.error(error)
       isLoading = false
@@ -205,7 +200,6 @@
   $effect(() => {
     if (!browser) return
     localStorage.setItem('md2pdf-slides-style', style)
-    localStorage.setItem('md2pdf-slides-font', font)
   })
 
   // Auto-save document to IndexedDB
@@ -225,13 +219,12 @@
 
     const md = markdown
     const _style = style
-    const _font = font
 
     if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
 
     const delay = hasEverCompiled ? 450 : 0
     autoPreviewTimer = window.setTimeout(() => {
-      void compile(md, _style, _font)
+      void compile(md, _style)
     }, delay)
 
     return () => {
@@ -245,7 +238,6 @@
   async function compile(
     md: string,
     nextStyle: TypstStyleId,
-    compileFont: 'sans' | 'serif' = 'sans',
   ) {
     if (!client) return
     hasEverCompiled = true
@@ -295,15 +287,11 @@
       // Cache full-document Typst for PDF export (with preprocessed mermaid + images)
       lastCompiledFullTypst = markdownToTypst(processedMd, {
         style: nextStyle,
-        lang: "en",
-        font: compileFont,
       })
       lastCompiledImages = images
 
       const typstPages = markdownToTypstPages(processedMd, {
         style: nextStyle,
-        lang: "en",
-        font: compileFont,
       })
 
       // Incremental: only recompile pages whose Typst source or images changed
@@ -731,10 +719,6 @@
             <option value="slides-dark">Dark</option>
             <option value="slides-minimal">Minimal</option>
           </select>
-          <select class="font-select" bind:value={font}>
-            <option value="sans">Sans</option>
-            <option value="serif">Serif</option>
-          </select>
         </div>
         <div class="preview-toolbar-right">
           {#if status === 'compiling'}
@@ -938,8 +922,7 @@
     cursor: default;
   }
 
-  .style-select,
-  .font-select {
+  .style-select {
     appearance: none;
     -webkit-appearance: none;
     padding: calc(0.5rem - 1px) 2rem calc(0.5rem - 1px) 0.875rem;
@@ -958,8 +941,7 @@
     box-sizing: border-box;
   }
 
-  .style-select:hover,
-  .font-select:hover {
+  .style-select:hover {
     background-color: var(--color-gray-100);
     border-color: var(--color-gray-300);
   }

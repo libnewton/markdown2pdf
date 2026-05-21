@@ -94,8 +94,6 @@ export type MarkdownToTypstOptions = {
 	title?: string;
 	authors?: string[];
 	style?: TypstStyleId;
-	lang?: 'zh' | 'en';
-	font?: 'sans' | 'serif';
 	size?: 'compact' | 'regular' | 'large';
 	density?: 'tight' | 'comfortable' | 'relaxed';
 	theme?: string;
@@ -191,7 +189,6 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
 
 	const title = isRedbookStyle ? (options.title ?? '') : options.title ?? frontmatter.title ?? leadingTitle ?? '';
 	const authors = isRedbookStyle ? (options.authors ?? []) : options.authors ?? frontmatter.authors ?? [];
-	const lang = coerceLanguage(frontmatter.lang) ?? options.lang ?? 'zh';
 	// Frontmatter wins over the UI toggle — `pageNumbers:` in YAML is explicit
 	// authorial intent; the toggle is just a global default.
 	const pageNumbers = frontmatter.pageNumbers ?? options.pageNumbers ?? true;
@@ -220,12 +217,9 @@ export function markdownToTypst(markdown: string, options: MarkdownToTypstOption
 	const template = STYLE_TO_TEMPLATE[styleId] ?? STYLE_TO_TEMPLATE['modern-tech'];
 	header.push(`#import "${template.path}": ${template.entry}`);
 	header.push(`#import "/admonitions.typ": admonition, spoiler, task-item`);
-	const font = options.font ?? 'sans';
 	const showArgs = [
 		title ? `title: "${escapeTypstString(title)}"` : null,
 		authors.length ? `authors: ${renderTypstArray(authors.map((a) => `"${escapeTypstString(a)}"`))}` : null,
-		`lang: "${lang}"`,
-		font !== 'sans' ? `font: "${font}"` : null,
 		options.size && options.size !== 'compact' ? `size: "${options.size}"` : null,
 		options.density && options.density !== 'comfortable'
 			? `density: "${options.density}"`
@@ -269,7 +263,6 @@ export function markdownToTypstPages(markdown: string, options: MarkdownToTypstO
 
 	const title = isRedbookStyle ? (options.title ?? '') : options.title ?? frontmatter.title ?? leadingTitle ?? '';
 	const authors = isRedbookStyle ? (options.authors ?? []) : options.authors ?? frontmatter.authors ?? [];
-	const lang = coerceLanguage(frontmatter.lang) ?? options.lang ?? 'zh';
 	// Frontmatter wins over the UI toggle — `pageNumbers:` in YAML is explicit
 	// authorial intent; the toggle is just a global default.
 	const pageNumbers = frontmatter.pageNumbers ?? options.pageNumbers ?? true;
@@ -296,15 +289,12 @@ export function markdownToTypstPages(markdown: string, options: MarkdownToTypstO
 	// (slides templates generate a title page from the title parameter)
 	const styleId: TypstStyleId = options.style ?? 'modern-tech';
 	const template = STYLE_TO_TEMPLATE[styleId] ?? STYLE_TO_TEMPLATE['modern-tech'];
-	const font = options.font ?? 'sans';
 	const importLine = `#import "${template.path}": ${template.entry}`;
 
 	function buildHeader(includeTitle: boolean): string {
 		const showArgs = [
 			includeTitle && title ? `title: "${escapeTypstString(title)}"` : null,
 			includeTitle && authors.length ? `authors: ${renderTypstArray(authors.map((a) => `"${escapeTypstString(a)}"`))}` : null,
-			`lang: "${lang}"`,
-			font !== 'sans' ? `font: "${font}"` : null,
 			options.size && options.size !== 'compact' ? `size: "${options.size}"` : null,
 			options.density && options.density !== 'comfortable' ? `density: "${options.density}"` : null,
 			options.theme ? `theme: "${options.theme}"` : null,
@@ -387,7 +377,6 @@ function collectFootnotes(root: Root): Map<string, FootnoteDefinition> {
 type Frontmatter = {
 	title?: string;
 	authors?: string[];
-	lang?: string;
 	pageNumbers?: boolean;
 	letterReturn?: string;
 	letterTo?: string[];
@@ -408,12 +397,6 @@ function parseFrontmatterYaml(yaml: string): Frontmatter {
 
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
-
-		const langMatch = /^\s*lang(?:uage)?\s*:\s*(.+?)\s*$/.exec(line);
-		if (langMatch && !result.lang) {
-			result.lang = stripYamlScalar(langMatch[1]);
-			continue;
-		}
 
 		const pageNumMatch = /^\s*(?:page[-_]?numbers?|pageNumbers)\s*:\s*(.+?)\s*$/.exec(line);
 		if (pageNumMatch && result.pageNumbers === undefined) {
@@ -530,13 +513,6 @@ function stripYamlScalar(value: string): string {
 		v = v.slice(1, -1);
 	}
 	return v.trim();
-}
-
-function coerceLanguage(value: string | undefined): 'zh' | 'en' | undefined {
-	const v = (value ?? '').trim().toLowerCase();
-	if (v.startsWith('zh')) return 'zh';
-	if (v.startsWith('en')) return 'en';
-	return undefined;
 }
 
 function findLeadingH1(

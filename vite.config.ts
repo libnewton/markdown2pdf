@@ -55,18 +55,6 @@ const FONTS_TO_BUNDLE: Array<{ filename: string; url: string }> = [
 		url: 'https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/NewCMMath-Book.otf'
 	},
 	{
-		filename: 'NotoSansCJKsc-Regular.otf',
-		url: 'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf'
-	},
-	{
-		filename: 'NotoSansCJKsc-Bold.otf',
-		url: 'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf'
-	},
-	{
-		filename: 'NotoSerifSC-Regular.ttf',
-		url: 'https://fonts.gstatic.com/s/notoserifsc/v35/H4cyBXePl9DZ0Xe7gG9cyOj7uK2-n-D2rd4FY7SCqyWv.ttf'
-	},
-	{
 		filename: 'NotoColorEmoji.ttf',
 		url: 'https://fonts.gstatic.com/s/notocoloremoji/v37/Yq6P-KqIXTD0t4D9z1ESnKM3-HpFab4.ttf'
 	},
@@ -87,26 +75,6 @@ const FONTS_TO_BUNDLE: Array<{ filename: string; url: string }> = [
 	{
 		filename: 'DejaVuSansMono-BoldOblique.ttf',
 		url: 'https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/DejaVuSansMono-BoldOblique.ttf'
-	},
-	{
-		filename: 'LibertinusSerif-Regular.otf',
-		url: 'https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/LibertinusSerif-Regular.otf'
-	},
-	{
-		filename: 'LibertinusSerif-Bold.otf',
-		url: 'https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/LibertinusSerif-Bold.otf'
-	},
-	{
-		filename: 'LibertinusSerif-Italic.otf',
-		url: 'https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/LibertinusSerif-Italic.otf'
-	},
-	{
-		filename: 'LibertinusSerif-BoldItalic.otf',
-		url: 'https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/LibertinusSerif-BoldItalic.otf'
-	},
-	{
-		filename: 'LibertinusSerif-Semibold.otf',
-		url: 'https://cdn.jsdelivr.net/gh/typst/typst-assets@v0.13.1/files/fonts/LibertinusSerif-Semibold.otf'
 	}
 ];
 

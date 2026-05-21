@@ -1,21 +1,17 @@
-// 小红书蓝图卡片风格 (Redbook Blueprint Card Style)
-// 特点：深蓝背景、荧光蓝/青色强调、网格点阵装饰、角标、适合科技/编程类。
+// Redbook Blueprint card style.
+// Deep blue background, neon blue/cyan accent, dotted-grid decoration, corner marks; suits tech/programming content.
 
 #import "redbook-typography.typ": resolve-layout, resolve-tokens
 
 #let article(title: "", authors: (), ..args, body) = {
-  let lang = args.at("lang", default: "zh")
-  let font-choice = args.at("font", default: "sans")
   let size-preset = args.at("size", default: "compact")
   let density-preset = args.at("density", default: "comfortable")
   let export-preset = args.at("preset", default: "redbook-portrait")
   let tokens = resolve-tokens(size: size-preset, density: density-preset)
   let layout = resolve-layout(preset: export-preset)
 
-  let sans-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Sans CJK SC", "Noto Sans SC", "Noto Color Emoji")
-  let serif-fonts = ("Libertinus Serif", "Noto Serif SC", "Noto Serif CJK SC", "Noto Color Emoji")
-  let body-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
-  let heading-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
+  let body-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Color Emoji")
+  let heading-fonts = body-fonts
   let body-size = tokens.at("body-size")
   let heading-1-size = tokens.at("heading-1-size")
   let heading-2-size = tokens.at("heading-2-size")
@@ -77,7 +73,7 @@
   set text(
     font: body-fonts,
     size: body-size,
-    lang: lang,
+    lang: "en",
     fill: text-primary,
   )
 

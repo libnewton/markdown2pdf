@@ -2,18 +2,13 @@
 // 16:9 landscape (254mm × 142.875mm)
 
 #let article(title: "", authors: (), ..args, body) = {
-  let lang = args.at("lang", default: "zh")
-  let font-choice = args.at("font", default: "sans")
-
   let accent = rgb("#2563EB")
   let text-dark = rgb("#1E293B")
   let text-sub = rgb("#64748B")
   let bg = white
 
-  let sans-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Sans CJK SC", "Noto Sans SC", "Noto Color Emoji")
-  let serif-fonts = ("Libertinus Serif", "Noto Serif SC", "Noto Serif CJK SC", "Noto Color Emoji")
-  let body-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
-  let heading-fonts = sans-fonts
+  let body-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Color Emoji")
+  let heading-fonts = body-fonts
 
   set page(
     width: 254mm,
@@ -38,7 +33,7 @@
   set text(
     font: body-fonts,
     size: 16pt,
-    lang: lang,
+    lang: "en",
     fill: text-dark,
   )
 

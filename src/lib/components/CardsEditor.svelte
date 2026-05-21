@@ -72,11 +72,6 @@
     (browser && localStorage.getItem('md2pdf-card-theme')) || 'indigo',
   )
 
-  let font = $state<'sans' | 'serif'>(
-    (browser && (localStorage.getItem('md2pdf-card-font') as 'sans' | 'serif')) ||
-      'sans',
-  )
-
   let cardSize = $state<'compact' | 'regular' | 'large'>(
     (browser && (localStorage.getItem('md2pdf-card-size') as 'compact' | 'regular' | 'large')) ||
       'compact',
@@ -235,7 +230,7 @@
       isLoading = false
 
       // Trigger first compile
-      void compile(markdown, style, font, cardSize, cardDensity, cardTheme, cardExportPreset)
+      void compile(markdown, style, cardSize, cardDensity, cardTheme, cardExportPreset)
     })().catch((error) => {
       console.error(error)
       isLoading = false
@@ -263,7 +258,6 @@
     if (!browser) return
     localStorage.setItem('md2pdf-redbook-style', style)
     localStorage.setItem('md2pdf-card-theme', cardTheme)
-    localStorage.setItem('md2pdf-card-font', font)
     localStorage.setItem('md2pdf-card-size', cardSize)
     localStorage.setItem('md2pdf-card-density', cardDensity)
     localStorage.setItem('md2pdf-card-export-preset', cardExportPreset)
@@ -286,7 +280,6 @@
 
     const md = markdown
     const _style = style
-    const _font = font
     const _cardSize = cardSize
     const _cardDensity = cardDensity
     const _cardTheme = cardTheme
@@ -296,7 +289,7 @@
 
     const delay = hasEverCompiled ? 450 : 0
     autoPreviewTimer = window.setTimeout(() => {
-      void compile(md, _style, _font, _cardSize, _cardDensity, _cardTheme, _cardExportPreset)
+      void compile(md, _style, _cardSize, _cardDensity, _cardTheme, _cardExportPreset)
     }, delay)
 
     return () => {
@@ -310,7 +303,6 @@
   async function compile(
     md: string,
     nextStyle: TypstStyleId,
-    compileFont: 'sans' | 'serif' = 'sans',
     compileSize: 'compact' | 'regular' | 'large' = 'compact',
     compileDensity: 'tight' | 'comfortable' | 'relaxed' = 'comfortable',
     compileTheme: string = 'indigo',
@@ -364,8 +356,6 @@
 
       const typstPages = markdownToTypstPages(processedMd, {
         style: nextStyle,
-        lang: 'en',
-        font: compileFont,
         size: compileSize,
         density: compileDensity,
         theme: compileTheme,
@@ -779,10 +769,6 @@
             </button>
             {#if openPopover === 'layout'}
               <div class="popover-dropdown">
-                <select class="font-select" bind:value={font}>
-                  <option value="sans">Sans</option>
-                  <option value="serif">Serif</option>
-                </select>
                 <select class="font-select" bind:value={cardSize}>
                   <option value="compact">Compact</option>
                   <option value="regular">Regular</option>

@@ -480,8 +480,6 @@
 
       const mainTypst = markdownToTypst(processedMd, {
         style: nextStyle,
-        lang: 'en',
-        font: 'sans',
         pageNumbers: settingsStore.pageNumbers,
       })
       lastCompiledTypst = mainTypst

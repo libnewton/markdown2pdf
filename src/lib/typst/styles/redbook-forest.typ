@@ -1,21 +1,17 @@
-// 小红书森林卡片风格 (Redbook Forest Card Style)
-// 特点：自然绿色调、大地色系、清新治愈、适合学习/读书笔记。
+// Redbook Forest card style.
+// Natural greens, earth tones, fresh and calming; suits study/reading notes.
 
 #import "redbook-typography.typ": resolve-layout, resolve-tokens
 
 #let article(title: "", authors: (), ..args, body) = {
-  let lang = args.at("lang", default: "zh")
-  let font-choice = args.at("font", default: "sans")
   let size-preset = args.at("size", default: "compact")
   let density-preset = args.at("density", default: "comfortable")
   let export-preset = args.at("preset", default: "redbook-portrait")
   let tokens = resolve-tokens(size: size-preset, density: density-preset)
   let layout = resolve-layout(preset: export-preset)
 
-  let sans-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Sans CJK SC", "Noto Sans SC", "Noto Color Emoji")
-  let serif-fonts = ("Libertinus Serif", "Noto Serif SC", "Noto Serif CJK SC", "Noto Color Emoji")
-  let body-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
-  let heading-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
+  let body-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Color Emoji")
+  let heading-fonts = body-fonts
   let body-size = tokens.at("body-size")
   let heading-1-size = tokens.at("heading-1-size")
   let heading-2-size = tokens.at("heading-2-size")
@@ -43,7 +39,7 @@
   set text(
     font: body-fonts,
     size: body-size,
-    lang: lang,
+    lang: "en",
     fill: rgb("#2D3B2D"),
   )
 

@@ -1,21 +1,17 @@
-// 小红书素雅卡片风格 (Redbook Clean Card Style)
-// 特点：纯白底、单一深色强调、极简结构线、Notion/Linear 风格。
+// Redbook Clean card style.
+// Pure white background, single dark accent, minimal structural lines, Notion/Linear style.
 
 #import "redbook-typography.typ": resolve-layout, resolve-tokens
 
 #let article(title: "", authors: (), ..args, body) = {
-  let lang = args.at("lang", default: "zh")
-  let font-choice = args.at("font", default: "sans")
   let size-preset = args.at("size", default: "compact")
   let density-preset = args.at("density", default: "comfortable")
   let export-preset = args.at("preset", default: "redbook-portrait")
   let tokens = resolve-tokens(size: size-preset, density: density-preset)
   let layout = resolve-layout(preset: export-preset)
 
-  let sans-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Sans CJK SC", "Noto Sans SC", "Noto Color Emoji")
-  let serif-fonts = ("Libertinus Serif", "Noto Serif SC", "Noto Serif CJK SC", "Noto Color Emoji")
-  let body-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
-  let heading-fonts = if font-choice == "serif" { serif-fonts } else { sans-fonts }
+  let body-fonts = ("IBM Plex Sans", "Roboto", "Libertinus Sans", "Noto Color Emoji")
+  let heading-fonts = body-fonts
   let body-size = tokens.at("body-size")
   let heading-1-size = tokens.at("heading-1-size")
   let heading-2-size = tokens.at("heading-2-size")
@@ -66,7 +62,7 @@
   set text(
     font: body-fonts,
     size: body-size,
-    lang: lang,
+    lang: "en",
     fill: text-dark,
   )
 

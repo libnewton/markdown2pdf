@@ -54,7 +54,7 @@ let compileQueue: Promise<void> = Promise.resolve();
 
 // All fonts served from same-origin /fonts/* (bundled at build time by the
 // `md2pdf-bundle-fonts` Vite plugin in vite.config.ts). No external CDNs.
-// We also include the DejaVu/Libertinus fonts typst.ts would otherwise pull
+// We also include the DejaVu mono fonts typst.ts would otherwise pull
 // from jsdelivr via `assets: ['text']`, and skip that asset bundle below.
 const CORE_FONTS: string[] = [
 	'/fonts/IBMPlexSans-Regular.ttf',
@@ -64,40 +64,20 @@ const CORE_FONTS: string[] = [
 	'/fonts/DejaVuSansMono.ttf',
 	'/fonts/DejaVuSansMono-Bold.ttf',
 	'/fonts/DejaVuSansMono-Oblique.ttf',
-	'/fonts/DejaVuSansMono-BoldOblique.ttf',
-	'/fonts/LibertinusSerif-Regular.otf',
-	'/fonts/LibertinusSerif-Bold.otf',
-	'/fonts/LibertinusSerif-Italic.otf',
-	'/fonts/LibertinusSerif-BoldItalic.otf',
-	'/fonts/LibertinusSerif-Semibold.otf'
-];
-
-const CJK_FONTS: string[] = [
-	'/fonts/NotoSansCJKsc-Regular.otf',
-	'/fonts/NotoSansCJKsc-Bold.otf',
-	'/fonts/NotoSerifSC-Regular.ttf'
+	'/fonts/DejaVuSansMono-BoldOblique.ttf'
 ];
 
 const EMOJI_FONTS: string[] = ['/fonts/NotoColorEmoji.ttf'];
 
-let cjkLoaded = false;
 let emojiLoaded = false;
 
-async function upgradeCompiler(needCjk: boolean, needEmoji: boolean) {
-	// Check if we need to upgrade
-	const shouldUpgradeCjk = needCjk && !cjkLoaded;
-	const shouldUpgradeEmoji = needEmoji && !emojiLoaded;
+async function upgradeCompiler(needEmoji: boolean) {
+	if (!needEmoji || emojiLoaded) return;
+	emojiLoaded = true;
 
-	if (!shouldUpgradeCjk && !shouldUpgradeEmoji) return;
+	console.log('md2pdf - Upgrading compiler (Emoji)...');
 
-	if (shouldUpgradeCjk) cjkLoaded = true;
-	if (shouldUpgradeEmoji) emojiLoaded = true;
-
-	console.log(`md2pdf - Upgrading compiler (CJK: ${cjkLoaded}, Emoji: ${emojiLoaded})...`);
-	
-	const fontsToLoad = [...CORE_FONTS];
-	if (cjkLoaded) fontsToLoad.push(...CJK_FONTS);
-	if (emojiLoaded) fontsToLoad.push(...EMOJI_FONTS);
+	const fontsToLoad = [...CORE_FONTS, ...EMOJI_FONTS];
 
 	const newCompiler = createTypstCompiler();
 	await newCompiler.init({
@@ -156,13 +136,11 @@ async function compileTypst(
 	images: Record<string, Uint8Array<ArrayBuffer>> = {},
 	format: 'pdf' | 'vector' = 'pdf'
 ): Promise<{ result: Uint8Array; diagnostics: string[] }> {
-	// Check for special characters
-	const hasCjk = /[\u4e00-\u9fa5]/.test(mainTypst);
-	// Broad emoji detection regex
+	// Load the emoji font on demand when the document contains emoji.
 	const hasEmoji = /[\u{1F000}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(mainTypst);
-	
-	if (hasCjk || hasEmoji) {
-		await upgradeCompiler(hasCjk, hasEmoji);
+
+	if (hasEmoji) {
+		await upgradeCompiler(hasEmoji);
 	}
 
 	const compiler = await getCompiler();

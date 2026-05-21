@@ -9,7 +9,6 @@ export const SLIDES_TEMPLATES: Template[] = [
 title: Slides Mode Quick Start
 authors:
   - md2pdf
-lang: en
 ---
 
 ## Basic Structure
@@ -23,7 +22,6 @@ Set title and authors in YAML frontmatter at the top:
 title: Your Presentation Title
 authors:
   - Author Name
-lang: en
 ---
 \`\`\`
 
@@ -108,7 +106,6 @@ $$
 title: "TypeScript 5.0: What's New"
 authors:
   - Developer
-lang: en
 ---
 
 ## The satisfies Keyword

@@ -8,7 +8,6 @@ export interface Template {
 const date = new Date().toISOString().split('T')[0];
 
 const WELCOME = `---
-lang: en
 title: md2pdf Feature Demo
 authors:
   - md2pdf Team

@@ -1,10 +1,9 @@
-// 方案一：现代科技风 (The "Modern Tech" Style)
-// 特点：全无衬线（更像网页阅读）、段间距、无首行缩进、代码块现代风格。
+// Modern Tech style.
+// Sans-serif throughout (web-like reading), paragraph spacing, no first-line indent, modern code blocks.
 
 #import "../admonitions.typ": admonition, spoiler, task-item, md2pdf-list-markers, md2pdf-enum-numbering
 
 #let article(title: "", authors: (), ..args, body) = {
-  let lang = args.at("lang", default: "zh")
   let page-numbers = args.at("page-numbers", default: true)
   let letter-return = args.at("letter-return", default: "")
   let letter-to = args.at("letter-to", default: ())
@@ -16,7 +15,7 @@
       or letter-from.len() > 0 or letter-subject != ""
       or letter-date != ""
   )
-  // 1) 页面设置：宽边距，利于阅读
+  // 1) Page setup: wide margins for readability
   // Letter mode uses 20mm x-margin (DIN 5008 body margin).
   let page-margin-x = if letter-mode { 20mm } else { 1.8cm }
   let page-margin-y = 2cm
@@ -37,22 +36,19 @@
   )
   set document(title: title, author: authors, date: none)
 
-  // 2) 字体栈：英文/数字用高质量西文字体，中文优先无衬线（屏幕阅读更舒适），末尾添加 emoji 字体
+  // 2) Font stack: high-quality Latin sans-serif fonts for text/numbers, emoji font last
   set text(
     font: (
       "IBM Plex Sans",
       "Roboto",
       "Libertinus Sans",
-      "Noto Sans CJK SC",
-      "Noto Sans SC",
-      "Noto Serif SC",
       "Noto Color Emoji",
     ),
     size: 10.5pt,
-    lang: lang,
+    lang: "en",
   )
 
-  // 3) 段落：放弃首行缩进，采用“段间距”模式（更接近网页阅读）
+  // 3) Paragraphs: no first-line indent, paragraph-spacing mode (closer to web reading)
   set par(
     justify: true,
     leading: 1em,
@@ -62,20 +58,20 @@
   set list(indent: 1em, body-indent: 0.5em, spacing: 0.8em, marker: md2pdf-list-markers)
   set enum(indent: 1em, body-indent: 0.5em, spacing: 0.8em, full: true, numbering: md2pdf-enum-numbering)
 
-  // 4) 标题：加粗、深灰、留白（建立清晰层级）
+  // 4) Headings: bold, dark grey, generous spacing (clear hierarchy)
   show heading: it => {
     set text(
       weight: "bold",
       fill: rgb("#333333"),
-      font: ("IBM Plex Sans", "Roboto", "Noto Sans CJK SC", "Noto Sans SC"),
+      font: ("IBM Plex Sans", "Roboto"),
     )
     block(above: 2em, below: 1em, it)
   }
 
-  // 5) 链接颜色：科技蓝
+  // 5) Link colour: tech blue
   show link: set text(fill: rgb("#0074de"))
 
-  // 6) 引用块：左侧高亮线 + 浅背景
+  // 6) Blockquotes: left accent line + light background
   set quote(block: true)
   show quote: it => {
     set par(first-line-indent: 0pt)
@@ -89,7 +85,7 @@
     )
   }
 
-  // 7) 行内代码：轻背景 + 圆角
+  // 7) Inline code: light background + rounded corners
   // Inline code sits at 0.95em — close enough to the body to read at a
   // glance, but a hair smaller because monospace x-height runs hot.
   // `outset` extends the background up/down beyond the layout box so tall
@@ -103,7 +99,7 @@
     text(size: 0.95em, it),
   )
 
-  // 8) 代码块：圆角 + 浅灰背景 + 左侧行号
+  // 8) Code blocks: rounded corners + light grey background + left-gutter line numbers
   // Scope the raw.line rule inside the block rule so it does not fire for
   // inline `code` (which would otherwise get wrapped in a grid and break).
   show raw.where(block: true): it => block(
@@ -125,7 +121,7 @@
   )
   show raw: set text(font: ("JetBrains Mono", "Fira Code", "Consolas", "DejaVu Sans Mono"))
 
-  // 9) 表格样式：浅灰表头 + 圆角边框
+  // 9) Tables: light grey header + rounded border
   set table(
     stroke: (paint: luma(200), thickness: 0.5pt),
     inset: 8pt,
@@ -141,10 +137,10 @@
   show table: set par(justify: false, spacing: 0.6em)
   show table.cell.where(y: 0): set text(weight: "bold")
 
-  // 10) 高亮：稍柔和的黄
+  // 10) Highlight: a softer yellow
   show highlight: set highlight(fill: rgb("#FEF08A"))
 
-  // 11) 图片：带 alt 时渲染为带 caption 的居中 figure
+  // 11) Images: centered (the generator adds a caption when alt text is present)
   show image: it => align(center, it)
 
   // Letter mode (DIN 5008 Form B). Coordinates are page-absolute so the
@@ -220,7 +216,7 @@
     }
   }
 
-  // 标题区（可选）
+  // Title area (optional)
   if title != "" {
     align(center)[
       #text(1.8em, weight: "black", title)

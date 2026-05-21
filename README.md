@@ -42,7 +42,7 @@ md2pdf is a Markdown export tool built with [Svelte 5](https://svelte.dev/) and 
 
 ### Offline by default
 
-All fonts (IBM Plex Sans, NewCMMath, DejaVu Sans Mono, Libertinus Serif, Noto Sans/Serif CJK, Noto Color Emoji) and all Twemoji SVGs are bundled into `static/` at build time. The only network call during a compile is user-supplied remote image URLs.
+All fonts (IBM Plex Sans, NewCMMath, DejaVu Sans Mono, Noto Color Emoji) and all Twemoji SVGs are bundled into `static/` at build time. The only network call during a compile is user-supplied remote image URLs.
 
 ### More
 
