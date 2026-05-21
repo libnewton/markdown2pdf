@@ -3,13 +3,9 @@
   import { onMount } from 'svelte'
   import { getTypstRenderer } from '$lib/typst/renderer'
   import { extractPageSvgs } from '$lib/typst/svg-utils'
-  import { markdownToTypst } from '$lib/pipeline/markdownToTypst'
-  import { markdownToHtml } from '$lib/pipeline/markdownToHtml'
   import { getSharedTypstWorkerClient, TypstWorkerClient } from '$lib/workers/typstClient'
-  import { renderMermaidToSvg } from '$lib/mermaid/render'
   import { getMarkdownImportFile, getImageDropFile } from '$lib/utils/image-utils'
   import { PAGEBREAK_TOKEN } from '$lib/pagebreak'
-  import { loadTwemojiImages } from '$lib/twemoji/loader'
   import { loadRemoteImages } from '$lib/utils/remote-images'
   import { useRegisterSW } from 'virtual:pwa-register/svelte'
   import type { RegisterSWOptions } from 'virtual:pwa-register/svelte'
@@ -147,8 +143,6 @@
   let isDragging = $state(false)
 
 
-  // PDF mode currently has a single style.
-  const style = 'modern-tech' as const
 
   let templates = $derived(PDF_TEMPLATES)
 
@@ -203,8 +197,6 @@
     return base
   })
 
-  // SEO Content
-  let seoHtml = $derived(markdownToHtml(initialMarkdown || ''))
 
   // Compilation state
   let status: 'idle' | 'compiling' | 'done' | 'error' = $state('idle')
@@ -229,8 +221,8 @@
   let compileSeq = 0
   let hasEverCompiled = false
 
-  // Cached last compiled Typst source + images for PDF export (same as preview)
-  let lastCompiledTypst = ''
+  // Cached last compiled Markdown + images for PDF export (same as preview)
+  let lastCompiledMarkdown = ''
   let lastCompiledImages: Record<string, Uint8Array> = {}
   let autoPreviewTimer: number | null = null
 
@@ -277,7 +269,7 @@
 
     // Hide loading overlay and trigger first compile
     isLoading = false
-    void compile(markdown, style)
+    void compile(markdown)
 
     // Close menus on click outside. Guarded so the global click listener
     // doesn't reactively touch state on every click in the editor — Svelte
@@ -343,7 +335,6 @@
     if (hasEverCompiled && !live) return
 
     const md = markdown
-    const _style = style
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _pn = settingsStore.pageNumbers
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -353,7 +344,7 @@
 
     const delay = hasEverCompiled ? 450 : 0
     autoPreviewTimer = window.setTimeout(() => {
-      void compile(md, _style)
+      void compile(md)
     }, delay)
 
     return () => {
@@ -362,7 +353,7 @@
   })
 
   function compileNow() {
-    void compile(markdown, style)
+    void compile(markdown)
   }
 
   // Auto-fit on mobile tab switch
@@ -423,70 +414,29 @@
   // ========================================
   // Functions
   // ========================================
-  async function compile(
-    md: string,
-    nextStyle: typeof style,
-  ) {
+  // All Markdown processing happens inside the Typst compile (the md2pdf
+  // engine). The host only resolves images Typst cannot fetch itself.
+  async function compile(md: string) {
     if (!client) return
-    hasEverCompiled = true
+    // Only mark "compiled" once real content exists — otherwise a first
+    // compile that races ahead of the document load would, while live
+    // update is paused, leave the preview blank until a manual Update.
+    if (md.trim() !== '') hasEverCompiled = true
 
     const seq = ++compileSeq
     status = 'compiling'
     errorMessage = null
 
     try {
-      // Pre-process Mermaid blocks
-      let processedMd = md
       const images: Record<string, Uint8Array> = {}
+      Object.assign(images, collectReferencedImageAssets(md))
+      Object.assign(images, await loadRemoteImages(md, settingsStore.corsProxy))
 
-      const mermaidRegex = /```mermaid\n([\s\S]*?)\n```/g
-      const matches = [...md.matchAll(mermaidRegex)]
-
-      if (matches.length > 0) {
-        let lastIndex = 0
-        let newContent = ''
-
-        for (const [index, match] of matches.entries()) {
-          const [fullMatch, code] = match
-          const id = `mermaid-${index}`
-          const filename_svg = `${id}.svg`
-
-          try {
-            const svg = await renderMermaidToSvg(code, id)
-            images[filename_svg] = svg
-
-            newContent += md.slice(lastIndex, match.index)
-            newContent += `![Mermaid Diagram](${filename_svg})`
-            lastIndex = (match.index || 0) + fullMatch.length
-          } catch (e) {
-            console.error('Mermaid render failed', e)
-            newContent += md.slice(
-              lastIndex,
-              (match.index || 0) + fullMatch.length,
-            )
-            lastIndex = (match.index || 0) + fullMatch.length
-          }
-        }
-        newContent += md.slice(lastIndex)
-        processedMd = newContent
-      }
-
-      Object.assign(images, collectReferencedImageAssets(processedMd))
-      const [twemoji, remote] = await Promise.all([
-        loadTwemojiImages(processedMd),
-        loadRemoteImages(processedMd, settingsStore.corsProxy),
-      ])
-      Object.assign(images, twemoji, remote)
-
-      const mainTypst = markdownToTypst(processedMd, {
-        style: nextStyle,
-        pageNumbers: settingsStore.pageNumbers,
-      })
-      lastCompiledTypst = mainTypst
+      lastCompiledMarkdown = md
       lastCompiledImages = images
 
       // @ts-ignore
-      const vectorData = await client.compileVector(mainTypst, images)
+      const vectorData = await client.compileVector(md, images, settingsStore.pageNumbers)
       if (seq !== compileSeq) return
       vectorBytes = vectorData.vector
       status = 'done'
@@ -498,12 +448,12 @@
   }
 
   async function downloadPdf() {
-    if (!client || !lastCompiledTypst) return
+    if (!client || !lastCompiledMarkdown) return
     // Open the tab synchronously so it counts as user-initiated and isn't
     // blocked by popup blockers after the async compile.
     const newTab = window.open('', '_blank')
     // @ts-ignore
-    const { pdf } = await client.compilePdf(lastCompiledTypst, lastCompiledImages)
+    const { pdf } = await client.compilePdf(lastCompiledMarkdown, lastCompiledImages, settingsStore.pageNumbers)
     const blob = new Blob([pdf], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     if (newTab) {
@@ -741,11 +691,6 @@
       <a href="/" class="logo-link">
         <img src="/logo.png" alt="md2pdf" class="logo-img" />
       </a>
-      <div class="mode-toggle hidden-mobile">
-        <span class="mode-toggle-item active">PDF</span>
-        <a href="/cards/" class="mode-toggle-item">Cards</a>
-        <a href="/slides/" class="mode-toggle-item">Slides</a>
-      </div>
       <DocumentMenu
         mode="pdf"
         templates={PDF_TEMPLATES}
@@ -851,12 +796,10 @@
         bind:this={editorPane}
         bind:markdown
         placeholder={t('placeholder')}
-        cardMode
         {errorMessage}
         pageBreakToken={PAGEBREAK_TOKEN}
         pageBreakLabel="Break"
         pageBreakTitle="Insert page break"
-        {imageAssets}
         onImageSaved={handleImageSaved}
       />
     </section>
@@ -960,10 +903,6 @@
     </section>
   </main>
 
-  <!-- Hidden SEO Content for Search Engines -->
-  <div class="visually-hidden" aria-hidden="false">
-    {@html seoHtml}
-  </div>
 
   {#if isCorsModalOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -1065,11 +1004,6 @@
     gap: var(--space-xs);
   }
 
-  .navbar-right > .btn {
-    padding-left: var(--space-md);
-    padding-right: var(--space-md);
-  }
-
   .logo-link {
     display: flex;
     align-items: center;
@@ -1083,66 +1017,7 @@
     display: block;
   }
 
-  .mode-toggle {
-    display: flex;
-    align-items: center;
-    background: var(--color-gray-100);
-    border-radius: var(--radius-sm);
-    padding: 2px;
-    gap: 0;
-  }
-
-  .mode-toggle-item {
-    font-size: 0.75rem;
-    font-weight: 500;
-    padding: 3px 10px;
-    border-radius: calc(var(--radius-sm) - 1px);
-    color: var(--color-gray-500);
-    text-decoration: none;
-    transition: all var(--transition-fast);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .mode-toggle-item:hover:not(.active) {
-    color: var(--color-gray-700);
-  }
-
-  .mode-toggle-item.active {
-    background: var(--color-white);
-    color: var(--color-gray-900);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-    cursor: default;
-  }
-
-  /* ========================================
-     Style Select
-     ======================================== */
-  .style-select {
-    appearance: none;
-    -webkit-appearance: none;
-    padding: calc(0.5rem - 1px) 2rem calc(0.5rem - 1px) 0.875rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    font-family: var(--font-mono);
-    line-height: 1;
-    background-color: var(--color-gray-50);
-    background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 9L12 15L18 9' stroke='%23737373' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 0.75rem center;
-    background-size: 1rem;
-    border: 1px solid var(--color-gray-200);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    box-sizing: border-box;
-  }
-
-  .style-select:hover {
-    background-color: var(--color-gray-100);
-    border-color: var(--color-gray-300);
-  }
-
-  /* Live update toggle (sits where the style selector used to) */
+  /* Live update toggle */
   .live-toggle {
     display: inline-flex;
     align-items: center;
@@ -1429,11 +1304,6 @@
   .menu-item:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  .menu-item.small {
-    font-size: 0.75rem;
-    padding: 4px var(--space-sm);
   }
 
   .menu-icon {

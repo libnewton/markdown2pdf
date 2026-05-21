@@ -2,7 +2,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
 import { SvelteKitPWA } from '@vite-pwa/sveltekit';
 // @ts-ignore -- node builtins are present at vite build time
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 // @ts-ignore
 import { dirname, join } from 'node:path';
 // @ts-ignore
@@ -10,27 +10,48 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-function copyTwemojiAssets(): Plugin {
-	const src = join(__dirname, 'node_modules/twemoji-emojis/vendor/svg');
-	const dest = join(__dirname, 'static/twemoji');
+// Bundle the `md2pdf` Typst package (engine.wasm + lib.typ + styles + vendored
+// mitex/mmdr) into static/md2pdf/ so the typst.ts worker can load it. This is
+// the single Markdown-processing codebase, shared with the CLI.
+function copyMd2pdfPackage(): Plugin {
+	const src = join(__dirname, '../md2pdf-typst/package');
+	const dest = join(__dirname, 'static/md2pdf');
 	return {
-		name: 'md2pdf-copy-twemoji',
+		name: 'md2pdf-copy-package',
 		buildStart() {
-			if (!existsSync(src)) return;
-			try {
-				if (existsSync(dest) && statSync(dest).isDirectory()) {
-					// Already copied — skip (saves ~17MB of file ops on every start)
-					return;
-				}
-				mkdirSync(dest, { recursive: true });
-				for (const f of readdirSync(src)) {
-					if (!f.endsWith('.svg')) continue;
-					copyFileSync(join(src, f), join(dest, f));
-				}
-				this.info(`copied twemoji svgs → static/twemoji`);
-			} catch (err) {
-				this.warn(`twemoji copy failed: ${(err as Error).message}`);
+			if (!existsSync(src)) {
+				this.warn('md2pdf package not found at ../md2pdf-typst/package');
+				return;
 			}
+			rmSync(dest, { recursive: true, force: true });
+			mkdirSync(dest, { recursive: true });
+			// manifest = files the worker registers upfront (.typ source + .wasm
+			// plugins). Twemoji .svg files are copied too but fetched lazily by
+			// the worker (only the glyphs a document actually uses).
+			const manifest: string[] = [];
+			let svgCount = 0;
+			const walk = (dir: string, base: string) => {
+				for (const entry of readdirSync(dir, { withFileTypes: true })) {
+					const rel = base ? `${base}/${entry.name}` : entry.name;
+					if (entry.isDirectory()) {
+						walk(join(dir, entry.name), rel);
+						continue;
+					}
+					const isTyp = entry.name.endsWith('.typ');
+					const isWasm = entry.name.endsWith('.wasm');
+					const isSvg = entry.name.endsWith('.svg');
+					if (!isTyp && !isWasm && !isSvg) continue;
+					mkdirSync(dirname(join(dest, rel)), { recursive: true });
+					copyFileSync(join(dir, entry.name), join(dest, rel));
+					if (isTyp || isWasm) manifest.push(rel);
+					else svgCount++;
+				}
+			};
+			walk(src, '');
+			writeFileSync(join(dest, 'manifest.json'), JSON.stringify(manifest));
+			this.info(
+				`copied md2pdf package (${manifest.length} core + ${svgCount} twemoji) → static/md2pdf`
+			);
 		}
 	};
 }
@@ -108,7 +129,7 @@ function bundleFonts(): Plugin {
 
 export default defineConfig({
 	plugins: [
-		copyTwemojiAssets(),
+		copyMd2pdfPackage(),
 		bundleFonts(),
 		sveltekit(),
 		SvelteKitPWA({

@@ -1,8 +1,9 @@
 type CompileRequest = {
 	type: 'compile';
 	id: string;
-	mainTypst: string;
+	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
+	pageNumbers?: boolean;
 	format?: 'pdf' | 'vector';
 };
 
@@ -75,32 +76,38 @@ export class TypstWorkerClient {
 	}
 
 	compilePdf(
-		mainTypst: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {}
+		markdown: string,
+		images: Record<string, Uint8Array<ArrayBuffer>> = {},
+		pageNumbers = true
 	): Promise<{ pdf: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
-		return this.#compile(mainTypst, images, 'pdf').then((r) => ({
+		return this.#compile(markdown, images, pageNumbers, 'pdf').then((r) => ({
 			pdf: r.pdf!,
 			diagnostics: r.diagnostics
 		}));
 	}
 
 	compileVector(
-		mainTypst: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {}
+		markdown: string,
+		images: Record<string, Uint8Array<ArrayBuffer>> = {},
+		pageNumbers = true
 	): Promise<{ vector: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
-		return this.#compile(mainTypst, images, 'vector').then((r) => ({
+		return this.#compile(markdown, images, pageNumbers, 'vector').then((r) => ({
 			vector: r.vector!,
 			diagnostics: r.diagnostics
 		}));
 	}
 
 	#compile(
-		mainTypst: string,
+		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>>,
+		pageNumbers: boolean,
 		format: 'pdf' | 'vector'
 	): Promise<CompileResult> {
-		const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now());
-		const request: CompileRequest = { type: 'compile', id, mainTypst, images, format };
+		const id =
+			typeof crypto !== 'undefined' && 'randomUUID' in crypto
+				? crypto.randomUUID()
+				: String(Date.now());
+		const request: CompileRequest = { type: 'compile', id, markdown, images, pageNumbers, format };
 
 		return new Promise((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });

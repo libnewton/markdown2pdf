@@ -22,3 +22,6 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .gstack/
+
+# Generated at build time by the md2pdf-copy-package Vite plugin
+/static/md2pdf

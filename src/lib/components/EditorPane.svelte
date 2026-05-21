@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { browser } from '$app/environment'
   import MarkdownEditor from '$lib/components/MarkdownEditor.svelte'
-  import WysiwygEditor from '$lib/components/WysiwygEditor.svelte'
   import {
     getImageExtension,
     getImageAltText,
@@ -12,39 +10,25 @@
   interface Props {
     markdown: string
     placeholder?: string
-    cardMode?: boolean
     errorMessage?: string | null
     pageBreakToken?: string | null
     pageBreakLabel?: string | null
     pageBreakTitle?: string | null
-    imageAssets?: Record<string, { bytes: Uint8Array; objectUrl: string; mimeType?: string }>
     onImageSaved?: (path: string, bytes: Uint8Array, objectUrl: string, mimeType: string) => void
   }
 
   let {
     markdown = $bindable(),
     placeholder = '',
-    cardMode = false,
     errorMessage = null,
     pageBreakToken = null,
     pageBreakLabel = null,
     pageBreakTitle = null,
-    imageAssets = {},
     onImageSaved,
   }: Props = $props()
 
   let markdownEditor = $state<MarkdownEditor | null>(null)
-  let wysiwygEditor = $state<WysiwygEditor | null>(null)
   let imageInput = $state<HTMLInputElement | null>(null)
-
-  let editorMode = $state<'code' | 'wysiwyg'>(
-    (browser && (localStorage.getItem('md2pdf-editor-mode') as 'code' | 'wysiwyg')) || 'code',
-  )
-
-  $effect(() => {
-    if (!browser) return
-    localStorage.setItem('md2pdf-editor-mode', editorMode)
-  })
 
   function openImagePicker() {
     imageInput?.click()
@@ -57,10 +41,7 @@
   }
 
   export function insertMarkdownSnippet(snippet: string): void {
-    if (editorMode === 'code' && markdownEditor?.insertTextAtSelection(snippet)) {
-      return
-    }
-    if (editorMode === 'wysiwyg' && wysiwygEditor?.insertMarkdownAtSelection(snippet)) {
+    if (markdownEditor?.insertTextAtSelection(snippet)) {
       return
     }
 
@@ -81,10 +62,6 @@
     onImageSaved?.(path, bytes, objectUrl, mimeType)
 
     return path
-  }
-
-  function resolveImageUrl(path: string): string {
-    return imageAssets[path]?.objectUrl ?? path
   }
 
   export async function insertImageFile(file: File): Promise<void> {
@@ -109,15 +86,6 @@
 
 <div class="editor-toolbar">
   <div class="editor-toolbar-left">
-    <div class="editor-mode-toggle">
-      <button class="mode-toggle-btn" class:active={editorMode === 'wysiwyg'} onclick={() => editorMode = 'wysiwyg'}>
-        Edit
-      </button>
-      <button class="mode-toggle-btn" class:active={editorMode === 'code'} onclick={() => editorMode = 'code'}>
-        Code
-      </button>
-    </div>
-    <div class="toolbar-divider"></div>
     {#if pageBreakToken && pageBreakLabel}
       <button class="toolbar-icon-btn" onclick={insertPageBreak} title={pageBreakTitle ?? ''}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -147,18 +115,7 @@
   accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
   onchange={handleImageInputChange}
 />
-{#if editorMode === 'wysiwyg'}
-  <WysiwygEditor
-    bind:this={wysiwygEditor}
-    bind:markdown
-    {placeholder}
-    {cardMode}
-    imageUpload={saveLocalImage}
-    {resolveImageUrl}
-  />
-{:else}
-  <MarkdownEditor bind:this={markdownEditor} bind:markdown {placeholder} />
-{/if}
+<MarkdownEditor bind:this={markdownEditor} bind:markdown {placeholder} />
 {#if errorMessage}
   <div class="error-bar">{errorMessage}</div>
 {/if}
@@ -200,38 +157,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-
-  .editor-mode-toggle {
-    display: flex;
-    background: var(--color-gray-200, #e5e7eb);
-    border-radius: var(--radius-sm, 4px);
-    padding: 1px;
-    gap: 1px;
-  }
-
-  .mode-toggle-btn {
-    font-size: 0.75rem;
-    font-weight: 500;
-    padding: 3px 10px;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-    color: var(--color-gray-500, #6b7280);
-    background: transparent;
-    transition: all 0.15s;
-  }
-
-  .mode-toggle-btn.active {
-    background: var(--color-white, #fff);
-    color: var(--color-gray-900, #111);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-  }
-
-  .toolbar-divider {
-    width: 1px;
-    height: 18px;
-    background: var(--color-gray-200, #e5e7eb);
   }
 
   .toolbar-icon-btn {

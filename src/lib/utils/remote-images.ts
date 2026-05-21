@@ -2,8 +2,8 @@
 //
 // Typst itself can only read images from its in-memory VFS; we pre-fetch each
 // http(s) image referenced from the markdown and pass the bytes into the
-// `images` map keyed by `remote/<hash>` — matching the alias produced by
-// renderImage() in markdownToTypst.ts.
+// `images` map keyed by `remote/<hash>` — matching the alias the md2pdf
+// engine emits (its `hash_url` is the same FNV-1a hash as `hashUrl` below).
 //
 // If a fetch fails (most commonly CORS) we just skip it; the user can
 // download manually and re-insert via the existing image-paste flow.
