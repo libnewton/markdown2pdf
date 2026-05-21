@@ -1,25 +1,33 @@
-import mermaid from 'mermaid';
+import type { Mermaid } from 'mermaid';
 
-let initialized = false;
 let renderQueue: Promise<void> = Promise.resolve();
 
 const encoder = new TextEncoder();
 
+// Mermaid is large and most documents have no diagrams, so the library is
+// dynamically imported on first render instead of bundled into the initial
+// page load. The promise is cached so `initialize` runs exactly once.
+let mermaidPromise: Promise<Mermaid> | null = null;
+
 /**
- * Initialize mermaid if not already
+ * Lazily load and initialize mermaid, returning the module.
  */
-function init() {
-	if (initialized) return;
-	mermaid.initialize({
-		startOnLoad: false,
-		theme: 'neutral', // Better for tech docs
-		securityLevel: 'loose', // Needed for some charts?
-		fontFamily: 'sans-serif',
-		htmlLabels: false, // Critical for Typst SVG support
-		flowchart: { htmlLabels: false },
-		suppressErrorRendering: true // Prevent error rendering in DOM
-	});
-	initialized = true;
+function init(): Promise<Mermaid> {
+	if (!mermaidPromise) {
+		mermaidPromise = import('mermaid').then(({ default: mermaid }) => {
+			mermaid.initialize({
+				startOnLoad: false,
+				theme: 'neutral', // Better for tech docs
+				securityLevel: 'loose', // Needed for some charts?
+				fontFamily: 'sans-serif',
+				htmlLabels: false, // Critical for Typst SVG support
+				flowchart: { htmlLabels: false },
+				suppressErrorRendering: true // Prevent error rendering in DOM
+			});
+			return mermaid;
+		});
+	}
+	return mermaidPromise;
 }
 
 /**
@@ -41,7 +49,7 @@ export async function renderMermaidToSvg(code: string, id: string): Promise<Uint
 }
 
 async function doRender(code: string, baseId: string): Promise<Uint8Array> {
-	init();
+	const mermaid = await init();
 
 	// Use unique ID to avoid conflicts with previous renders
 	const uniqueId = generateUniqueId(baseId);
