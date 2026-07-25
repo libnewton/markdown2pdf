@@ -32,6 +32,5 @@ engine/target
 
 # --- CLI scratch + test output ---
 tests/*.pdf
-tests/remote/
+remote
 .md2pdf-main-*.typ
-.md2pdf-remotes-*.json

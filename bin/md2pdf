@@ -14,13 +14,37 @@ if [ -z "$input" ] || [ ! -f "$input" ]; then
 fi
 output="${2:-${input%.*}.pdf}"
 
-here=$(cd "$(dirname "$0")" && pwd)
+# `readlink -f` is GNU-only, so walk the symlink chain by hand: the shim is
+# usually reached through a symlink on PATH, and the fonts sit next to the real
+# script, not next to the link.
+prog="$0"
+while [ -L "$prog" ]; do
+  target=$(readlink "$prog")
+  case "$target" in
+    /*) prog="$target" ;;
+    *) prog="$(dirname "$prog")/$target" ;;
+  esac
+done
+here=$(cd "$(dirname "$prog")" && pwd)
 fonts="$here/../fonts"
 docdir=$(cd "$(dirname "$input")" && pwd)
 docname=$(basename "$input")
 main="$docdir/.md2pdf-main-$$.typ"
-manifest="$docdir/.md2pdf-remotes-$$.json"
-trap 'rm -f "$main" "$manifest"' EXIT
+
+# Remote images live in a per-user temp cache, not in the document's directory.
+# Typst's sandbox only reads below --root, but it follows symlinks out of it, so
+# the cache is linked in under the `remote/` prefix the engine emits.
+cache="${TMPDIR:-/tmp}/md2pdf-cache-$(id -u)"
+manifest="$cache/remotes-$$.json"
+mkdir -p "$cache"
+chmod 700 "$cache"
+link="$docdir/remote"
+if [ -e "$link" ] && [ ! -L "$link" ]; then
+  echo "md2pdf: $link is in the way — delete it (remote images now go to $cache)" >&2
+  exit 1
+fi
+ln -sfn "$cache" "$link"
+trap 'rm -f "$main" "$manifest" "$link"' EXIT
 
 # The eval happens here, in the document's directory, so image() paths in the
 # generated body resolve against the document root (not the package). `asset`
@@ -41,10 +65,14 @@ typst query --root "$docdir" --font-path "$fonts" --ignore-system-fonts \
   --input md2pdf-query=1 --one --field value \
   "$main" '<md2pdf-remote-images>' > "$manifest" 2>/dev/null || echo '[]' > "$manifest"
 
-# Prefetch each remote image into <docdir>/remote/<hash>; Typst then resolves it.
-python3 - "$manifest" "$docdir" <<'PY'
+# Prefetch each remote image into <cache>/<hash>; Typst resolves it through the
+# `remote/` symlink. Hashed by URL, so a second run reuses the download.
+python3 - "$manifest" "$cache" <<'PY'
 import json, os, sys, urllib.request
-manifest, docdir = sys.argv[1], sys.argv[2]
+manifest, cache = sys.argv[1], sys.argv[2]
+# Stands in for an image that could not be fetched, so one bad URL does not fail
+# the whole compile. Never counts as a cache hit.
+PLACEHOLDER = b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>'
 try:
     items = json.load(open(manifest))
 except Exception:
@@ -53,18 +81,16 @@ for it in items:
     url, alias = it.get("url"), it.get("alias")
     if not url or not alias:
         continue
-    dest = os.path.join(docdir, alias)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    dest = os.path.join(cache, os.path.basename(alias))
+    if os.path.exists(dest) and open(dest, "rb").read() != PLACEHOLDER:
+        continue
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "md2pdf"})
         with urllib.request.urlopen(req, timeout=20) as r:
             open(dest, "wb").write(r.read())
         print(f"md2pdf: fetched {url}")
     except Exception as e:
-        # Placeholder so one bad URL does not fail the whole compile.
-        open(dest, "wb").write(
-            b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>'
-        )
+        open(dest, "wb").write(PLACEHOLDER)
         print(f"md2pdf: WARN could not fetch {url}: {e}", file=sys.stderr)
 PY
 
