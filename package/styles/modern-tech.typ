@@ -82,13 +82,14 @@
   set document(title: title, author: authors, date: none)
 
   // 2) Font stack: high-quality Latin sans-serif fonts for text/numbers
+  let body-size = 10.5pt
   set text(
     font: (
       "IBM Plex Sans",
       "Roboto",
       "Libertinus Sans",
     ),
-    size: 10.5pt,
+    size: body-size,
     // Drives hyphenation, smart quotes, and Typst's localised titles — a
     // `[toc]` renders as "Inhaltsverzeichnis" under `lang: de`.
     lang: lang,
@@ -105,14 +106,45 @@
   set list(indent: 1em, body-indent: 0.5em, spacing: 0.8em, marker: md2pdf-list-markers)
   set enum(indent: 1em, body-indent: 0.5em, spacing: 0.8em, full: true, numbering: md2pdf-enum-numbering)
 
-  // 4) Headings: bold, dark grey, generous spacing (clear hierarchy)
+  // 4) Headings: explicit size ramp per level (clear hierarchy).
+  // Typst's own defaults stop scaling at level 3, so `###` and `####` both
+  // landed on body size and were indistinguishable. Every level therefore
+  // carries its own size here. Levels 5-6 have no size headroom left above
+  // body text and change register via letter tracking instead.
+  // Headings keep the softer #333333 grey, which is lighter than the pure
+  // black of a bold paragraph — so size carries the hierarchy on its own.
+  // Spacing scales with the level too — a `####` needs far less air than a
+  // `#`. Typst collapses adjacent block spacing to the larger of the two
+  // values, so `below` bottoms out at `par.spacing` (1.2em) no matter what.
+  // Sizes are multiples of `body-size` rather than `em`: Typst's built-in
+  // per-level sizing still wraps our output (1.4x on an `#`, 1.2x on a `##`,
+  // nothing from level 3 down — exactly the ramp being replaced), and an `em`
+  // here would resolve against *that* and compound.
+  let heading-styles = (
+    (size: 1.52, tracking: 0pt, above: 1.9em, below: 1.3em),
+    (size: 1.30, tracking: 0pt, above: 1.7em, below: 1.2em),
+    (size: 1.16, tracking: 0pt, above: 1.5em, below: 1.2em),
+    (size: 1.07, tracking: 0.02em, above: 1.35em, below: 1.2em),
+    (size: 1.00, tracking: 0.05em, above: 1.3em, below: 1.2em),
+    (size: 0.94, tracking: 0.08em, above: 1.25em, below: 1.2em),
+  )
   show heading: it => {
-    set text(
-      weight: "bold",
-      fill: rgb("#333333"),
-      font: ("IBM Plex Sans", "Roboto"),
+    let style = heading-styles.at(calc.min(it.level, heading-styles.len()) - 1)
+    let marker = if it.numbering != none {
+      counter(heading).display(it.numbering) + h(0.5em)
+    }
+    block(
+      above: style.above,
+      below: style.below,
+      text(
+        weight: "bold",
+        fill: rgb("#333333"),
+        font: ("IBM Plex Sans", "Roboto"),
+        size: body-size * style.size,
+        tracking: style.tracking,
+        marker + it.body,
+      ),
     )
-    block(above: 2em, below: 1em, it)
   }
 
   // 5) Link colour: tech blue
