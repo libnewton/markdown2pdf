@@ -15,20 +15,13 @@ footer-left: md2pdf
 
 # Welcome — every feature, one document
 
-md2pdf turns Markdown into a typeset PDF, 100% in your browser. This document
-is both a showcase and a reference: the first half demonstrates every syntax
-the renderer supports, the second half lists every option you can set.
+md2pdf turns Markdown into a typeset PDF, 100% in your browser. This document is both a showcase and a reference: the first half demonstrates every syntax the renderer supports, the second half lists every option you can set.
 
-==This sentence is highlighted== to draw the eye. **Bold**, _italic_,
-**_both at once_**, ~~strikethrough~~, `inline code`, __underline__ (the HTML
-<u>u tag</u> works too), super^script^ and sub~script~ all work inline.
-A backslash escapes any character: \*not italic\*. Footnotes too[^demo].
+==This sentence is highlighted== to draw the eye. **Bold**, _italic_, **_both at once_**, ~~strikethrough~~, `inline code`, __underline__ (the HTML <u>u tag</u> works too), super^script^ and sub~script~ all work inline. A backslash escapes any character: \*not italic\*. Footnotes too[^demo].
 
 [^demo]: Footnotes render as numbered notes at the foot of the page.
 
-Line breaks are kept: a newline in the source is a newline in the PDF, so a
-paragraph keeps the shape you typed it in. A blank line starts a new
-paragraph; three or more blank lines leave extra vertical space.
+Line breaks are kept: every newline in the source is a line break in the PDF. Write each paragraph as one long line — as this document does — and it is justified and wrapped for you; hard-wrap the source and those wraps show up in the output. A blank line starts a new paragraph; three or more blank lines leave extra vertical space.
 
 ---
 
@@ -47,8 +40,7 @@ paragraph; three or more blank lines leave extra vertical space.
 ##### H5
 ###### H6
 
-The first `#` heading of a document becomes its title if the frontmatter has
-no `title:` — and is then dropped from the body, so it is never printed twice.
+The first `#` heading of a document becomes its title if the frontmatter has no `title:` — and is then dropped from the body, so it is never printed twice.
 
 ---
 
@@ -85,9 +77,7 @@ no `title:` — and is then dropped from the body, so it is never printed twice.
 
 ## Tables
 
-Column alignment comes from the `:` markers in the separator row. A column
-grows by appending `+` to its separator cell: `---` is one share of the
-width, `---+` two, `---++` three.
+Column alignment comes from the `:` markers in the separator row. A column grows by appending `+` to its separator cell: `---` is one share of the width, `---+` two, `---++` three.
 
 | Feature       | Supported | Notes                                     |
 | ------------- | --------- | --------------------------------------++  |
@@ -104,8 +94,7 @@ width, `---+` two, `---++` three.
 
 ## Code blocks (with line numbers)
 
-Fence with three backticks or with `~~~`, and name the language after the
-opening fence to label it. Line numbers appear in the gutter automatically.
+Fence with three backticks or with `~~~`, and name the language after the opening fence to label it. Line numbers appear in the gutter automatically.
 
 ```typescript
 // TypeScript — line numbers appear in the gutter
@@ -137,10 +126,7 @@ A fence without a language is set as plain preformatted text.
 
 ## Math
 
-Inline math like $E = mc^2$ flows with the paragraph, written between single
-dollars. The GitHub spelling — a dollar, a backticked expression, a dollar —
-renders identically: $`\alpha + \beta`$. Complex inline:
-$\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$.
+Inline math like $E = mc^2$ flows with the paragraph, written between single dollars. The GitHub spelling — a dollar, a backticked expression, a dollar — renders identically: $`\alpha + \beta`$. Complex inline: $\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$.
 
 Block math gets its own line:
 
@@ -156,20 +142,16 @@ $$
 
 ## Quotes & callouts
 
-> A standard Markdown blockquote. It can contain **inline formatting** and
-> even `inline code`. The left rule and tinted background come from the
-> theme — no extra syntax required.
+> A standard Markdown blockquote. It can contain **inline formatting** and even `inline code`. The left rule and tinted background come from the theme — no extra syntax required.
 >
 > > Quotes nest, too.
 
 ### Themed admonitions
 
-Six kinds — `success`, `warning`, `tip`, `info`, `danger`, `note`. Write any
-text after the kind to replace the default label.
+Six kinds — `success`, `warning`, `tip`, `info`, `danger`, `note`. Write any text after the kind to replace the default label.
 
 :::success
-**Looks good.** Use `:::success` for confirmations, completed steps, or
-positive results.
+**Looks good.** Use `:::success` for confirmations, completed steps, or positive results.
 :::
 
 :::warning
@@ -177,8 +159,7 @@ positive results.
 :::
 
 :::tip
-**Pro tip.** Use `:::tip` for advice or shortcuts. Inline math and `code`
-both work inside admonitions.
+**Pro tip.** Use `:::tip` for advice or shortcuts. Inline math and `code` both work inside admonitions.
 :::
 
 :::info
@@ -190,15 +171,13 @@ both work inside admonitions.
 :::
 
 :::note Custom label
-This one was opened with `:::note Custom label` — the trailing text replaces
-the "NOTE" label.
+This one was opened with `:::note Custom label` — the trailing text replaces the "NOTE" label.
 :::
 
 ### Spoiler
 
 +++++ Click to reveal
-The summary can sit on the opening line, as here, or on the first line of the
-body. You can write **any markdown** inside, including `code` and lists:
+The summary can sit on the opening line, as here, or on the first line of the body. You can write **any markdown** inside, including `code` and lists:
 
 - one
 - two
@@ -209,9 +188,7 @@ body. You can write **any markdown** inside, including `code` and lists:
 
 ## Layout & alignment
 
-Wrap any block in `:::left`, `:::center`, or `:::right` to align it. Wrap
-several blocks (separated by blank lines) in `::::row` to lay them out
-side by side as equal-width columns.
+Wrap any block in `:::left`, `:::center`, or `:::right` to align it. Wrap several blocks (separated by blank lines) in `::::row` to lay them out side by side as equal-width columns.
 
 :::center
 #### A centered subheading
@@ -227,8 +204,7 @@ Second column with **bold**.
 Third column ends here.
 ::::
 
-Use a deeper fence (four colons) when nesting other directives — e.g. two
-admonitions next to each other:
+Use a deeper fence (four colons) when nesting other directives — e.g. two admonitions next to each other:
 
 ::::row
 :::tip
@@ -244,14 +220,9 @@ Warning on the right.
 
 ## Images
 
-Images are centered automatically and fill the text width unless you give them
-a size. Alt text becomes a small caption underneath; leave it empty for a bare
-image. `http(s)` URLs are fetched and embedded — in the browser they go
-through `fetch` (set a CORS proxy in the settings menu if a host refuses),
-in the CLI through a prefetch pass before the compile.
+Images are centered automatically and fill the text width unless you give them a size. Alt text becomes a small caption underneath; leave it empty for a bare image. `http(s)` URLs are fetched and embedded — in the browser they go through `fetch` (set a CORS proxy in the settings menu if a host refuses), in the CLI through a prefetch pass before the compile.
 
-The path may be a file next to the document or an `http(s)` URL — both take
-the same size syntax.
+The path may be a file next to the document or an `http(s)` URL — both take the same size syntax.
 
 | Syntax                       | Result                            |
 | ---------------------------++ | --------------------------------+ |
@@ -281,8 +252,7 @@ Inline: [md2pdf README](https://github.com/libnewton/markdown2pdf).
 
 Reference style: [SvelteKit][sk] and [Typst][typst] power the rendering.
 
-Bare and pointy-bracket URLs link themselves: https://typst.app and
-<https://kit.svelte.dev>.
+Bare and pointy-bracket URLs link themselves: https://typst.app and <https://kit.svelte.dev>.
 
 [sk]: https://kit.svelte.dev
 [typst]: https://typst.app
@@ -319,9 +289,7 @@ graph LR
 
 ## Frontmatter reference
 
-Everything the document controls lives in the YAML block at the top. All keys
-are optional, and hyphenated keys also accept underscores (`header_left`,
-`cover_color`, `letter_to`).
+Everything the document controls lives in the YAML block at the top. All keys are optional, and hyphenated keys also accept underscores (`header_left`, `cover_color`, `letter_to`).
 
 | Key                                          | Value                                         | Default             |
 | -------------------------------------------+ | --------------------------------------------++ | ------------------+ |
@@ -367,10 +335,7 @@ Setting `footer-center` yourself replaces the number entirely.
 
 ## Running header & footer
 
-Six optional slots — `header-left`, `header-center`, `header-right` and the
-same three for `footer-`. They are small, grey, have no separating rule, and
-start on the **second** page, so a cover or title page stays clean. This
-document uses four of them:
+Six optional slots — `header-left`, `header-center`, `header-right` and the same three for `footer-`. They are small, grey, have no separating rule, and start on the **second** page, so a cover or title page stays clean. This document uses four of them:
 
 ```yaml
 ---
@@ -392,9 +357,7 @@ Placeholders, usable in any slot and in a `pageNumbers` template:
 
 Anything unrecognised is left as written.
 
-A slot can hold a graphic instead of text, using ordinary Markdown image
-syntax. A remote `https://` URL works there too, and is fetched exactly like a
-body image:
+A slot can hold a graphic instead of text, using ordinary Markdown image syntax. A remote `https://` URL works there too, and is fetched exactly like a body image:
 
 ```yaml
 header-right: "![](logo.png =x22)"   # =WxH in points; =x22 sets height only
@@ -404,10 +367,7 @@ header-right: "![](logo.png =x22)"   # =WxH in points; =x22 sets height only
 
 ## Cover page
 
-Page one of this document is a cover. Set `cover:` to one of `arcs`, `strata`,
-`wedge` or `grid` (plain `true` gives `arcs`). The cover counts as page one, so
-the first content page is numbered 2 and the header and footer begin there.
-Title, subtitle, authors and date all move onto it.
+Page one of this document is a cover. Set `cover:` to one of `arcs`, `strata`, `wedge` or `grid` (plain `true` gives `arcs`). The cover counts as page one, so the first content page is numbered 2 and the header and footer begin there. Title, subtitle, authors and date all move onto it.
 
 ```yaml
 ---
@@ -422,26 +382,15 @@ cover-date: May 2026                   # optional, overrides `date` here only
 ---
 ```
 
-The four geometries fill the bottom of the page: `arcs` (quarter-discs from
-the bottom-left), `strata` (slanted bands), `wedge` (one layered diagonal),
-`grid` (a fading dot lattice over solid bars).
+The four geometries fill the bottom of the page: `arcs` (quarter-discs from the bottom-left), `strata` (slanted bands), `wedge` (one layered diagonal), `grid` (a fading dot lattice over solid bars).
 
-`cover-color` takes a named palette — `ocean`, `ink`, `ember`, `plum`,
-`forest`, `crimson`, `teal`, `gold`, or `rub` (Ruhr-Universität Bochum house
-colours) — or any hex value such as `"#0074de"`, from which the lighter tones
-are derived. The palette only tints the geometry and the hairline under the
-title; cover text is always black. Cover mode and letter mode are mutually
-exclusive — letter mode wins.
+`cover-color` takes a named palette — `ocean`, `ink`, `ember`, `plum`, `forest`, `crimson`, `teal`, `gold`, or `rub` (Ruhr-Universität Bochum house colours) — or any hex value such as `"#0074de"`, from which the lighter tones are derived. The palette only tints the geometry and the hairline under the title; cover text is always black. Cover mode and letter mode are mutually exclusive — letter mode wins.
 
 ---
 
 ## German letter mode (DIN 5008)
 
-Add any of the `letter-*` fields and the first page switches to a DIN 5008
-Form B layout: address window at 25 mm / 45 mm so it lines up with a DIN long
-envelope, sender info on the right, subject and place-date on the same line,
-body content from 98.46 mm down. Page margins switch to 20 mm on both sides.
-All fields are optional and independent.
+Add any of the `letter-*` fields and the first page switches to a DIN 5008 Form B layout: address window at 25 mm / 45 mm so it lines up with a DIN long envelope, sender info on the right, subject and place-date on the same line, body content from 98.46 mm down. Page margins switch to 20 mm on both sides. All fields are optional and independent.
 
 ```yaml
 ---
@@ -462,27 +411,22 @@ letter-date: "Berlin, den 17.05.2026"
 ---
 ```
 
-The body of the letter is just Markdown — everything in this document works
-there as well.
+The body of the letter is just Markdown — everything in this document works there as well.
 
 ---
 
 ## Page breaks & spacing
 
-Use `---` for a horizontal rule. Leaving three or more blank lines in the
-source opens up extra vertical space:
+Use `---` for a horizontal rule. Leaving three or more blank lines in the source opens up extra vertical space:
 
 
 
-…which is the small gap above this line. The explicit token `[[pagebreak]]`
-starts a new page right here:
+…which is the small gap above this line. The explicit token `[[pagebreak]]` starts a new page right here:
 
 [[pagebreak]]
 
 ## You are now on a new page
 
-Anything after the token continues on the next page. Combine with sections to
-keep chapters cleanly separated.
+Anything after the token continues on the next page. Combine with sections to keep chapters cleanly separated.
 
-> **One more tip**: Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the editor to
-> trigger a compile immediately, even when live preview is paused.
+> **One more tip**: Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the editor to trigger a compile immediately, even when live preview is paused.
