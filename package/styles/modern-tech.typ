@@ -111,8 +111,8 @@
   // landed on body size and were indistinguishable. Every level therefore
   // carries its own size here. Levels 5-6 have no size headroom left above
   // body text and change register via letter tracking instead.
-  // Headings are pure black: at #333333 they came out *lighter* than a bold
-  // paragraph, which inverted the hierarchy (see `show strong` below).
+  // Headings keep the softer #333333 grey, which is lighter than the pure
+  // black of a bold paragraph — so size carries the hierarchy on its own.
   // Spacing scales with the level too — a `####` needs far less air than a
   // `#`. Typst collapses adjacent block spacing to the larger of the two
   // values, so `below` bottoms out at `par.spacing` (1.2em) no matter what.
@@ -138,7 +138,7 @@
       below: style.below,
       text(
         weight: "bold",
-        fill: black,
+        fill: rgb("#333333"),
         font: ("IBM Plex Sans", "Roboto"),
         size: body-size * style.size,
         tracking: style.tracking,
@@ -147,19 +147,8 @@
     )
   }
 
-  // Bold body text must never out-shout the heading it sits under: `strong`
-  // gives up the last bit of black so the headings above it stay dominant.
-  show strong: set text(fill: rgb("#2b2b2b"))
-
-  // 5) Link colour: tech blue. The nested rule keeps a **bold link** blue:
-  // `strong` sits inside the link, and the inner element's fill would
-  // otherwise win over the link's own.
-  let link-blue = rgb("#0074de")
-  show link: it => {
-    set text(fill: link-blue)
-    show strong: set text(fill: link-blue)
-    it
-  }
+  // 5) Link colour: tech blue
+  show link: set text(fill: rgb("#0074de"))
 
   // 6) Blockquotes: left accent line + light background
   set quote(block: true)
