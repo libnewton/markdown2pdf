@@ -12,7 +12,13 @@ title: md2pdf Feature Demo
 authors:
   - md2pdf Team
 date: ${date}
-pageNumbers: true
+pageNumbers: "1/1"
+cover: arcs
+cover-color: ocean
+cover-subtitle: Every feature, one document
+header-left: "{title}"
+header-right: "{date}"
+footer-left: md2pdf
 ---
 
 # Welcome — every feature, on one page
@@ -230,13 +236,15 @@ graph LR
 
 ## Frontmatter & controls
 
-The YAML block at the top of this document sets:
+Everything below is switched on in *this* document's own YAML block — scroll
+back to page one, or to the top of any page, to see each one at work.
 
-- \`title:\` — appears centered at the top of page one
-- \`authors:\` — listed under the title
-- \`date:\` — available to the cover page and the \`{date}\` placeholder
+- \`title:\` — the document title; also the \`{title}\` placeholder
+- \`authors:\` — one name or a list
+- \`date:\` — feeds the cover page and the \`{date}\` placeholder
 - \`pageNumbers:\` — \`true\`, \`false\`, or a format: \`"1"\` for a bare number,
-  \`"1/1"\` for \`3 / 12\`. The menu toggle is a default, frontmatter wins.
+  \`"1/1"\` for \`3 / 12\` (what this document uses). The menu toggle is only a
+  default — frontmatter wins.
 
 ---
 
@@ -244,49 +252,58 @@ The YAML block at the top of this document sets:
 
 Six optional slots — \`header-left\`, \`header-center\`, \`header-right\` and the
 same three for \`footer-\`. They are small, grey, have no separating rule, and
-start on the **second** page. Each holds either text or a Markdown image.
+start on the **second** page, so a cover or title page stays clean. This
+document uses four of them:
 
 \`\`\`yaml
 ---
+pageNumbers: "1/1"      # -> the "4 / 12" in the footer centre
 header-left: "{title}"
-header-right: "![](logo.png =0x22)"
-footer-left: Confidential
-footer-center: "{page} / {pages}"
+header-right: "{date}"
+footer-left: md2pdf
 ---
 \`\`\`
 
 Placeholders: \`{page}\`, \`{pages}\`, \`{title}\`, \`{subtitle}\`, \`{author}\`,
-\`{authors}\`, \`{date}\`. An image field uses the same syntax as a body image,
-so local files and \`https://\` URLs both work; \`=WxH\` sizes it in points and
-\`=x22\` constrains the height only.
+\`{authors}\`, \`{date}\`. Anything unrecognised is left as written.
+
+A slot can hold a graphic instead of text, using ordinary Markdown image
+syntax. A remote \`https://\` URL works there too, and is fetched exactly like a
+body image:
+
+\`\`\`yaml
+header-right: "![](logo.png =0x22)"   # =WxH in points, =x22 sets height only
+\`\`\`
 
 \`footer-center\` defaults to the page number, so leaving every slot unset keeps
-the familiar centered number.
+the familiar centered number and nothing else.
 
 ---
 
 ## Cover page
 
-Set \`cover:\` to one of \`arcs\`, \`strata\`, \`wedge\` or \`grid\` for a title page.
-It counts as page one, so the first content page is numbered 2 and the header
-and footer begin there. The title, authors and date move onto the cover.
+Page one of this document is a cover. Set \`cover:\` to one of \`arcs\`,
+\`strata\`, \`wedge\` or \`grid\`. The cover counts as page one, so the first
+content page is numbered 2 and the header and footer begin there. Title,
+subtitle, authors and date all move onto it.
 
 \`\`\`yaml
 ---
-title: Quantus Dilithium HD Wallet
-authors: [Ada Lovelace, Alan Turing]
+title: md2pdf Feature Demo
+authors: [md2pdf Team]
 date: 2026-07-25
 cover: arcs
-cover-color: ocean          # ocean | ink | ember | plum | any #hex
-cover-subtitle: Security Assessment
-cover-logo: "![](logo.svg)" # placed top-right
+cover-color: ocean                     # ocean | ink | ember | plum | any #hex
+cover-subtitle: Every feature, one document
+cover-logo: "![](logo.svg)"            # optional, placed top-right
 ---
 \`\`\`
 
-The four geometries fill the bottom of the page: \`arcs\` (quarter-discs from the
-bottom-left), \`strata\` (slanted bands), \`wedge\` (one diagonal), \`grid\` (a
-fading dot lattice over solid bars). Cover mode and letter mode are mutually
-exclusive — letter mode wins.
+The four geometries fill the bottom of the page: \`arcs\` (quarter-discs from
+the bottom-left), \`strata\` (slanted bands), \`wedge\` (one diagonal), \`grid\` (a
+fading dot lattice over solid bars). The palette tints the geometry and the
+hairline under the title; cover text is always black. Cover mode and letter
+mode are mutually exclusive — letter mode wins.
 
 ---
 
