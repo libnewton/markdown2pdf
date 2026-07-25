@@ -234,9 +234,59 @@ The YAML block at the top of this document sets:
 
 - \`title:\` — appears centered at the top of page one
 - \`authors:\` — listed under the title
-- \`date:\` — surfaced for your own use
-- \`pageNumbers: true\` — toggle off to suppress footer numbers; the menu
-  toggle is a default, frontmatter wins
+- \`date:\` — available to the cover page and the \`{date}\` placeholder
+- \`pageNumbers:\` — \`true\`, \`false\`, or a format: \`"1"\` for a bare number,
+  \`"1/1"\` for \`3 / 12\`. The menu toggle is a default, frontmatter wins.
+
+---
+
+## Running header & footer
+
+Six optional slots — \`header-left\`, \`header-center\`, \`header-right\` and the
+same three for \`footer-\`. They are small, grey, have no separating rule, and
+start on the **second** page. Each holds either text or a Markdown image.
+
+\`\`\`yaml
+---
+header-left: "{title}"
+header-right: "![](logo.png =0x22)"
+footer-left: Confidential
+footer-center: "{page} / {pages}"
+---
+\`\`\`
+
+Placeholders: \`{page}\`, \`{pages}\`, \`{title}\`, \`{subtitle}\`, \`{author}\`,
+\`{authors}\`, \`{date}\`. An image field uses the same syntax as a body image,
+so local files and \`https://\` URLs both work; \`=WxH\` sizes it in points and
+\`=x22\` constrains the height only.
+
+\`footer-center\` defaults to the page number, so leaving every slot unset keeps
+the familiar centered number.
+
+---
+
+## Cover page
+
+Set \`cover:\` to one of \`arcs\`, \`strata\`, \`wedge\` or \`grid\` for a title page.
+It counts as page one, so the first content page is numbered 2 and the header
+and footer begin there. The title, authors and date move onto the cover.
+
+\`\`\`yaml
+---
+title: Quantus Dilithium HD Wallet
+authors: [Ada Lovelace, Alan Turing]
+date: 2026-07-25
+cover: arcs
+cover-color: ocean          # ocean | ink | ember | plum | any #hex
+cover-subtitle: Security Assessment
+cover-logo: "![](logo.svg)" # placed top-right
+---
+\`\`\`
+
+The four geometries fill the bottom of the page: \`arcs\` (quarter-discs from the
+bottom-left), \`strata\` (slanted bands), \`wedge\` (one diagonal), \`grid\` (a
+fading dot lattice over solid bars). Cover mode and letter mode are mutually
+exclusive — letter mode wins.
 
 ---
 

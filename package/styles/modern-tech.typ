@@ -2,9 +2,14 @@
 // Sans-serif throughout (web-like reading), paragraph spacing, no first-line indent, modern code blocks.
 
 #import "../admonitions.typ": admonition, spoiler, task-item, md2pdf-list-markers, md2pdf-enum-numbering
+#import "../furniture.typ": bar
+#import "../cover.typ": cover-page
 
 #let article(title: "", authors: (), ..args, body) = {
   let page-numbers = args.at("page-numbers", default: true)
+  let date = args.at("date", default: none)
+  let remotes = args.at("remotes", default: ())
+  let asset = args.at("asset", default: image)
   let letter-return = args.at("letter-return", default: "")
   let letter-to = args.at("letter-to", default: ())
   let letter-from = args.at("letter-from", default: ())
@@ -15,6 +20,44 @@
       or letter-from.len() > 0 or letter-subject != ""
       or letter-date != ""
   )
+
+  // Cover page. Mutually exclusive with letter mode: a cover would push the
+  // DIN 5008 address field to page 2 and break the envelope-window alignment.
+  let cover-style = args.at("cover", default: none)
+  let cover-mode = cover-style != none and cover-style != false and not letter-mode
+  let cover-subtitle = args.at("cover-subtitle", default: "")
+  let cover-date = args.at("cover-date", default: if date == none { "" } else { date })
+
+  // Header/footer slots. `page-numbers` supplies the default footer-center:
+  // `true`/"1" -> "{page}", "1/1" -> "{page} / {pages}", any other string is
+  // used verbatim as a template.
+  let number-template = if page-numbers == false {
+    none
+  } else if page-numbers == true or page-numbers == "1" {
+    "{page}"
+  } else if page-numbers == "1/1" {
+    "{page} / {pages}"
+  } else if type(page-numbers) == str {
+    page-numbers
+  } else {
+    "{page}"
+  }
+  let slot-of(name, fallback: none) = args.at(name, default: fallback)
+  let header-slots = (slot-of("header-left"), slot-of("header-center"), slot-of("header-right"))
+  let footer-slots = (
+    slot-of("footer-left"),
+    slot-of("footer-center", fallback: number-template),
+    slot-of("footer-right"),
+  )
+  let author-line = if authors.len() > 0 { authors.join(", ") } else { "" }
+  let vars = (
+    title: title,
+    subtitle: cover-subtitle,
+    author: author-line,
+    authors: author-line,
+    date: if date == none { "" } else { date },
+  )
+
   // 1) Page setup: wide margins for readability
   // Letter mode uses 20mm x-margin (DIN 5008 body margin).
   let page-margin-x = if letter-mode { 20mm } else { 1.8cm }
@@ -22,16 +65,16 @@
   set page(
     paper: "a4",
     margin: (x: page-margin-x, y: page-margin-y),
-    numbering: if page-numbers { "1" } else { none },
-    // Only show the page-number footer when there are 2+ pages.
-    // A single-page document doesn't need "1" at the bottom.
-    footer: if page-numbers {
-      context {
-        let total = counter(page).final().first()
-        if total > 1 {
-          align(center, text(9pt, fill: luma(120), counter(page).display("1")))
-        }
-      }
+    numbering: if page-numbers != false { "1" } else { none },
+    header-ascent: 6mm,
+    footer-descent: 6mm,
+    // Page furniture starts on the second page: page one is either the cover
+    // or the title page, and neither wants a running head.
+    header: context {
+      if here().page() > 1 { bar(..header-slots, vars, remotes, asset) }
+    },
+    footer: context {
+      if here().page() > 1 { bar(..footer-slots, vars, remotes, asset) }
     },
   )
   set document(title: title, author: authors, date: none)
@@ -139,8 +182,21 @@
   // 10) Highlight: a softer yellow
   show highlight: set highlight(fill: rgb("#FEF08A"))
 
-  // 11) Images: centered (the generator adds a caption when alt text is present)
-  show image: it => align(center, it)
+  // Cover page — the first content this template emits, so it lands on page 1.
+  // `page()` terminates itself; a `pagebreak()` after it would add a blank page.
+  if cover-mode {
+    cover-page(
+      title: title,
+      subtitle: cover-subtitle,
+      authors: authors,
+      date: cover-date,
+      logo: args.at("cover-logo", default: none),
+      palette: args.at("cover-color", default: "ocean"),
+      decoration: if type(cover-style) == str { cover-style } else { "arcs" },
+      remotes: remotes,
+      asset: asset,
+    )
+  }
 
   // Letter mode (DIN 5008 Form B). Coordinates are page-absolute so the
   // address lines up with the window of a DIN long / C6/5 envelope. Typst's
@@ -215,8 +271,8 @@
     }
   }
 
-  // Title area (optional)
-  if title != "" {
+  // Title area (optional) — the cover already carries the title when present.
+  if title != "" and not cover-mode {
     align(center)[
       #text(1.8em, weight: "black", title)
       #if authors.len() > 0 [
@@ -227,5 +283,11 @@
     v(1em)
   }
 
-  body
+  {
+    // Images: centered (the generator adds a caption when alt text is present).
+    // Scoped to the body so it cannot stretch the cover logo or a header image,
+    // which are sized boxes rather than full-width figures.
+    show image: it => align(center, it)
+    body
+  }
 }

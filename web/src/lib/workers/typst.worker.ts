@@ -150,10 +150,15 @@ async function loadTwemoji(compiler: TypstCompiler, markdown: string): Promise<v
 	);
 }
 
-/** The entry document: hand the Markdown to the `md2pdf` package and eval it. */
-function buildMain(pageNumbers: boolean): string {
+/**
+ * The entry document: hand the Markdown to the `md2pdf` package and eval it.
+ * `page-numbers` is only a default — a frontmatter `pageNumbers:` wins. `asset`
+ * must be defined here, not in the package: an `image()` call written inside a
+ * Typst package resolves against the package root, not the document root.
+ */
+function buildMain(pageNumbersDefault: boolean): string {
 	return `#import "/md2pdf/lib.typ": prepare
-#let _d = prepare(read("/doc.md"), page-numbers: ${pageNumbers})
+#let _d = prepare(read("/doc.md"), page-numbers: ${pageNumbersDefault}, asset: (p, ..a) => image(p, ..a))
 #if not _d.skip { show: _d.template; eval(_d.body, mode: "markup", scope: _d.scope) }
 `;
 }
