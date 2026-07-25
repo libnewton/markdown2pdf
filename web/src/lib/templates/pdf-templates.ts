@@ -7,7 +7,11 @@ export interface Template {
 
 const date = new Date().toISOString().split('T')[0];
 
+// The feature demo, kept byte-identical to `tests/extended.md` (the CLI
+// fixture) apart from the injected date — one document is the reference for
+// both front-ends.
 const WELCOME = `---
+lang: en
 title: md2pdf Feature Demo
 authors:
   - md2pdf Team
@@ -15,22 +19,28 @@ date: ${date}
 pageNumbers: "1/1"
 cover: arcs
 cover-color: ocean
-cover-subtitle: Every feature, one document
+cover-subtitle: Every feature, every option
 header-left: "{title}"
 header-right: "{date}"
 footer-left: md2pdf
 ---
 
-# Welcome — every feature, on one page
+# Welcome — every feature, one document
 
 md2pdf turns Markdown into a typeset PDF, 100% in your browser. This document
-exercises every syntax the renderer supports — use it as a reference.
+is both a showcase and a reference: the first half demonstrates every syntax
+the renderer supports, the second half lists every option you can set.
 
 ==This sentence is highlighted== to draw the eye. **Bold**, _italic_,
-~~strikethrough~~, \`inline code\`, super^script^ and sub~script~ all work
-inline. Footnotes too[^demo].
+**_both at once_**, ~~strikethrough~~, \`inline code\`, __underline__ (the HTML
+<u>u tag</u> works too), super^script^ and sub~script~ all work inline.
+A backslash escapes any character: \\*not italic\\*. Footnotes too[^demo].
 
 [^demo]: Footnotes render as numbered notes at the foot of the page.
+
+Line breaks are kept: a newline in the source is a newline in the PDF, so a
+paragraph keeps the shape you typed it in. A blank line starts a new
+paragraph; three or more blank lines leave extra vertical space.
 
 ---
 
@@ -48,6 +58,9 @@ inline. Footnotes too[^demo].
 #### H4
 ##### H5
 ###### H6
+
+The first \`#\` heading of a document becomes its title if the frontmatter has
+no \`title:\` — and is then dropped from the body, so it is never printed twice.
 
 ---
 
@@ -84,11 +97,15 @@ inline. Footnotes too[^demo].
 
 ## Tables
 
-| Feature       | Supported | Notes                                  |
-| ------------- | --------- | -------------------------------------- |
-| GFM tables    | yes       | left/right/center alignment            |
-| Headers       | yes       | light grey background, rounded corners |
-| Inline markup | yes       | **bold**, \`code\`, [links](#)           |
+Column alignment comes from the \`:\` markers in the separator row. A column
+grows by appending \`+\` to its separator cell: \`---\` is one share of the
+width, \`---+\` two, \`---++\` three.
+
+| Feature       | Supported | Notes                                     |
+| ------------- | --------- | --------------------------------------++  |
+| GFM tables    | yes       | left/right/center alignment               |
+| Headers       | yes       | light grey background, rounded corners    |
+| Inline markup | yes       | **bold**, \`code\`, [links](https://typst.app) |
 
 | Left   |  Center  |  Right |
 | :----- | :------: | -----: |
@@ -98,6 +115,9 @@ inline. Footnotes too[^demo].
 ---
 
 ## Code blocks (with line numbers)
+
+Fence with three backticks or with \`~~~\`, and name the language after the
+opening fence to label it. Line numbers appear in the gutter automatically.
 
 \`\`\`typescript
 // TypeScript — line numbers appear in the gutter
@@ -121,17 +141,17 @@ def quicksort(arr):
     )
 \`\`\`
 
-\`\`\`bash
-# Shell
-npm install
-npm run dev
+\`\`\`
+A fence without a language is set as plain preformatted text.
 \`\`\`
 
 ---
 
 ## Math
 
-Inline math like $E = mc^2$ flows with the paragraph. Complex inline:
+Inline math like $E = mc^2$ flows with the paragraph, written between single
+dollars. The GitHub spelling — a dollar, a backticked expression, a dollar —
+renders identically: $\`\\alpha + \\beta\`$. Complex inline:
 $\\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}$.
 
 Block math gets its own line:
@@ -151,8 +171,13 @@ $$
 > A standard Markdown blockquote. It can contain **inline formatting** and
 > even \`inline code\`. The left rule and tinted background come from the
 > theme — no extra syntax required.
+>
+> > Quotes nest, too.
 
 ### Themed admonitions
+
+Six kinds — \`success\`, \`warning\`, \`tip\`, \`info\`, \`danger\`, \`note\`. Write any
+text after the kind to replace the default label.
 
 :::success
 **Looks good.** Use \`:::success\` for confirmations, completed steps, or
@@ -176,13 +201,16 @@ both work inside admonitions.
 **Do not do this.** Use \`:::danger\` for destructive or dangerous actions.
 :::
 
+:::note Custom label
+This one was opened with \`:::note Custom label\` — the trailing text replaces
+the "NOTE" label.
+:::
+
 ### Spoiler
 
-+++++
-Click to reveal
-
-The body of a spoiler is indented under the summary line. You can write
-**any markdown** inside, including \`code\` and lists:
++++++ Click to reveal
+The summary can sit on the opening line, as here, or on the first line of the
+body. You can write **any markdown** inside, including \`code\` and lists:
 
 - one
 - two
@@ -191,16 +219,61 @@ The body of a spoiler is indented under the summary line. You can write
 
 ---
 
+## Layout & alignment
+
+Wrap any block in \`:::left\`, \`:::center\`, or \`:::right\` to align it. Wrap
+several blocks (separated by blank lines) in \`::::row\` to lay them out
+side by side as equal-width columns.
+
+:::center
+#### A centered subheading
+
+This paragraph is centered too.
+:::
+
+::::row
+First column — left-aligned paragraph.
+
+Second column with **bold**.
+
+Third column ends here.
+::::
+
+Use a deeper fence (four colons) when nesting other directives — e.g. two
+admonitions next to each other:
+
+::::row
+:::tip
+Tip on the left.
+:::
+
+:::warning
+Warning on the right.
+:::
+::::
+
+---
+
 ## Images
 
-Local images, remote images, captions, and explicit dimensions are all
-supported. Images are centered automatically; if you supply alt text, it
-becomes a small caption beneath the image.
+Images are centered automatically and fill the text width unless you give them
+a size. Alt text becomes a small caption underneath; leave it empty for a bare
+image. \`http(s)\` URLs are fetched and embedded — in the browser they go
+through \`fetch\` (set a CORS proxy in the settings menu if a host refuses),
+in the CLI through a prefetch pass before the compile.
+
+The path may be a file next to the document or an \`http(s)\` URL — both take
+the same size syntax.
+
+| Syntax                       | Result                            |
+| ---------------------------++ | --------------------------------+ |
+| \`![Alt](img.png)\`            | full text width, alt as caption   |
+| \`![](img.png)\`               | full text width, no caption       |
+| \`![Alt](img.png "=320x200")\` | 320 pt wide, 200 pt tall          |
+| \`![Alt](img.png "=320x")\`    | 320 pt wide, height follows       |
+| \`![Alt](<img.png =320x200>)\` | same sizing, angle-bracket form   |
 
 ![Octocat — fetched live from GitHub, sized 200×200](https://octodex.github.com/images/minion.png "=200x200")
-
-You can also size without a caption, or include a remote image at its
-natural width.
 
 ---
 
@@ -210,6 +283,8 @@ Unicode emoji are rendered as Twemoji SVGs (offline, bundled): 😀 🚀 🔥 �
 
 Shortcodes work too: :smile: :heart: :rocket: :tada: :sparkles: :warning: :white_check_mark:.
 
+Sequences are handled as one glyph — flags 🇩🇪 🇯🇵 and families 👨‍👩‍👧 included.
+
 ---
 
 ## Links & references
@@ -218,12 +293,17 @@ Inline: [md2pdf README](https://github.com/libnewton/markdown2pdf).
 
 Reference style: [SvelteKit][sk] and [Typst][typst] power the rendering.
 
+Bare and pointy-bracket URLs link themselves: https://typst.app and
+<https://kit.svelte.dev>.
+
 [sk]: https://kit.svelte.dev
 [typst]: https://typst.app
 
 ---
 
 ## Diagrams (Mermaid)
+
+A fence tagged \`mermaid\` is rendered as a diagram.
 
 \`\`\`mermaid
 graph LR
@@ -234,20 +314,66 @@ graph LR
 
 ---
 
-## Frontmatter & controls
+## Structural tokens
 
-Everything below is switched on in *this* document's own YAML block — scroll
-back to page one, or to the top of any page, to see each one at work.
+| Token                            | Effect                                     |
+| -------------------------------+ | -----------------------------------------++ |
+| \`[toc]\`                          | Outline of every heading, localised by \`lang\` |
+| \`[[pagebreak]]\`                  | Start a new page here                      |
+| \`---\`                            | Horizontal rule                            |
+| three or more blank lines        | Extra vertical space between two paragraphs |
+| \`:::left\` \`:::center\` \`:::right\` | Align a block                              |
+| \`::::row\`                        | Blocks side by side, equal columns         |
+| \`:::kind Optional title\`         | Admonition box                             |
+| \`+++++\`                          | Spoiler box with a summary line            |
 
-- \`title:\` — the document title; also the \`{title}\` placeholder
-- \`authors:\` — one name or a list
-- \`date:\` — feeds the cover page and the \`{date}\` placeholder
-- \`lang:\` — \`en\`, \`de\`, \`de-AT\`, … drives hyphenation, smart quotes and
-  Typst's built-in titles: under \`lang: de\` a \`[toc]\` is headed
-  "Inhaltsverzeichnis" instead of "Contents"
-- \`pageNumbers:\` — \`true\`, \`false\`, or a format: \`"1"\` for a bare number,
-  \`"1/1"\` for \`3 / 12\` (what this document uses). The menu toggle is only a
-  default — frontmatter wins.
+---
+
+## Frontmatter reference
+
+Everything the document controls lives in the YAML block at the top. All keys
+are optional, and hyphenated keys also accept underscores (\`header_left\`,
+\`cover_color\`, \`letter_to\`).
+
+| Key                                          | Value                                         | Default             |
+| -------------------------------------------+ | --------------------------------------------++ | ------------------+ |
+| \`title\`                                      | text                                          | leading \`#\` heading |
+| \`authors\` or \`author\`                        | one name or a list                            | none                |
+| \`date\`                                       | text or a YAML date                           | none                |
+| \`lang\`                                       | \`en\`, \`de\`, \`de-AT\`, …                        | \`en\`                |
+| \`pageNumbers\` or \`page-numbers\`              | \`true\`, \`false\`, \`"1"\`, \`"1/1"\`, or a template | \`true\`              |
+| \`header-left\` \`header-center\` \`header-right\` | text or an image                              | empty               |
+| \`footer-left\` \`footer-center\` \`footer-right\` | text or an image                              | centre = page number |
+| \`cover\`                                      | \`arcs\`, \`strata\`, \`wedge\`, \`grid\`, \`true\`, \`false\` | \`false\`         |
+| \`cover-color\`                                | palette name or a hex value                   | \`ocean\`             |
+| \`cover-subtitle\`                             | text                                          | none                |
+| \`cover-logo\`                                 | an image, placed top-right                    | none                |
+| \`cover-date\`                                 | text                                          | value of \`date\`     |
+| \`letter-return\`                              | one line                                      | none                |
+| \`letter-to\`                                  | one line or a list (up to six)                | none                |
+| \`letter-from\`                                | one line or a list                            | none                |
+| \`letter-subject\`                             | text                                          | none                |
+| \`letter-date\`                                | text                                          | none                |
+
+What each group does:
+
+- **\`title\` / \`authors\` / \`date\`** — printed as a centered title block on page one, or moved onto the cover when one is set. They also feed the header and footer placeholders.
+- **\`lang\`** — drives hyphenation, smart quotes and Typst's built-in titles: under \`lang: de\` a \`[toc]\` is headed "Inhaltsverzeichnis" instead of "Contents". A region may be appended, as in \`de-AT\`.
+- **\`pageNumbers\`** — see the table below. The web app's menu toggle is only a default: frontmatter always wins.
+- **\`header-*\` / \`footer-*\`** — see *Running header & footer*.
+- **\`cover-*\`** — see *Cover page*.
+- **\`letter-*\`** — any one of them switches on DIN 5008 letter mode.
+
+### Page numbering
+
+| \`pageNumbers\`             | Footer centre reads |
+| ------------------------+ | -----------------+  |
+| \`true\` or \`"1"\`           | \`3\`                 |
+| \`"1/1"\`                   | \`3 / 12\`            |
+| \`false\`                   | nothing             |
+| \`"Page {page} of {pages}"\` | \`Page 3 of 12\`      |
+
+Setting \`footer-center\` yourself replaces the number entirely.
 
 ---
 
@@ -267,38 +393,44 @@ footer-left: md2pdf
 ---
 \`\`\`
 
-Placeholders: \`{page}\`, \`{pages}\`, \`{title}\`, \`{subtitle}\`, \`{author}\`,
-\`{authors}\`, \`{date}\`. Anything unrecognised is left as written.
+Placeholders, usable in any slot and in a \`pageNumbers\` template:
+
+| Placeholder            | Expands to                                |
+| ---------------------+ | ---------------------------------------++ |
+| \`{page}\` \`{pages}\`     | current page number, total page count     |
+| \`{title}\` \`{subtitle}\` | \`title\`, \`cover-subtitle\`                 |
+| \`{author}\` \`{authors}\` | the author list, comma-separated          |
+| \`{date}\`               | \`date\`                                    |
+
+Anything unrecognised is left as written.
 
 A slot can hold a graphic instead of text, using ordinary Markdown image
 syntax. A remote \`https://\` URL works there too, and is fetched exactly like a
 body image:
 
 \`\`\`yaml
-header-right: "![](logo.png =0x22)"   # =WxH in points, =x22 sets height only
+header-right: "![](logo.png =x22)"   # =WxH in points; =x22 sets height only
 \`\`\`
-
-\`footer-center\` defaults to the page number, so leaving every slot unset keeps
-the familiar centered number and nothing else.
 
 ---
 
 ## Cover page
 
-Page one of this document is a cover. Set \`cover:\` to one of \`arcs\`,
-\`strata\`, \`wedge\` or \`grid\`. The cover counts as page one, so the first
-content page is numbered 2 and the header and footer begin there. Title,
-subtitle, authors and date all move onto it.
+Page one of this document is a cover. Set \`cover:\` to one of \`arcs\`, \`strata\`,
+\`wedge\` or \`grid\` (plain \`true\` gives \`arcs\`). The cover counts as page one, so
+the first content page is numbered 2 and the header and footer begin there.
+Title, subtitle, authors and date all move onto it.
 
 \`\`\`yaml
 ---
 title: md2pdf Feature Demo
 authors: [md2pdf Team]
-date: 2026-07-25
+date: 2026-05-19
 cover: arcs
 cover-color: ocean                     # see the palette list below
-cover-subtitle: Every feature, one document
-cover-logo: "![](logo.svg)"            # optional, placed top-right
+cover-subtitle: Every feature, every option
+cover-logo: "![](logo.svg =x16)"       # optional, placed top-right
+cover-date: May 2026                   # optional, overrides \`date\` here only
 ---
 \`\`\`
 
@@ -315,52 +447,13 @@ exclusive — letter mode wins.
 
 ---
 
-## Layout & alignment
-
-Wrap any block in \`:::left\`, \`:::center\`, or \`:::right\` to align it. Wrap
-multiple blocks (separated by blank lines) in \`::::row\` to lay them out
-side by side as equal-width columns.
-
-\`\`\`markdown
-:::center
-#### A centered subheading
-
-This paragraph is centered too.
-:::
-
-::::row
-First column — left-aligned paragraph.
-
-Second column with **bold**.
-
-Third column ends here.
-::::
-\`\`\`
-
-Use a deeper fence (4 colons) when nesting other directives — e.g. two
-admonitions next to each other:
-
-\`\`\`markdown
-::::row
-:::tip
-Tip on the left.
-:::
-
-:::warning
-Warning on the right.
-:::
-::::
-\`\`\`
-
----
-
 ## German letter mode (DIN 5008)
 
-Add any of the \`letter-*\` fields to the frontmatter and the first page
-switches to a DIN 5008 Form B layout: address window at 25 mm / 45 mm so it
-lines up with a DIN long envelope, sender info on the right, subject + place
-date on the same line, body content from 98.46 mm down. Page margins switch
-to 20 mm on both sides. All fields are optional and independent.
+Add any of the \`letter-*\` fields and the first page switches to a DIN 5008
+Form B layout: address window at 25 mm / 45 mm so it lines up with a DIN long
+envelope, sender info on the right, subject and place-date on the same line,
+body content from 98.46 mm down. Page margins switch to 20 mm on both sides.
+All fields are optional and independent.
 
 \`\`\`yaml
 ---
@@ -381,12 +474,20 @@ letter-date: "Berlin, den 17.05.2026"
 ---
 \`\`\`
 
+The body of the letter is just Markdown — everything in this document works
+there as well.
+
 ---
 
-## Page breaks
+## Page breaks & spacing
 
-Use \`---\` for a horizontal rule, or the explicit token \`[[pagebreak]]\` to
-start a new page right here:
+Use \`---\` for a horizontal rule. Leaving three or more blank lines in the
+source opens up extra vertical space:
+
+
+
+…which is the small gap above this line. The explicit token \`[[pagebreak]]\`
+starts a new page right here:
 
 [[pagebreak]]
 
