@@ -41,7 +41,7 @@
     if end == none {
       (:)
     } else {
-      let decoded = yaml.decode(bytes(lines.slice(1, end).join("\n")))
+      let decoded = yaml(bytes(lines.slice(1, end).join("\n")))
       if type(decoded) == dictionary { decoded } else { (:) }
     }
   }
