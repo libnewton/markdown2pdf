@@ -1,7 +1,16 @@
 /// <reference lib="webworker" />
 
-import { createTypstCompiler, loadFonts, type TypstCompiler } from '@myriaddreamin/typst.ts';
+import {
+	createTypstCompiler,
+	createTypstRenderer,
+	loadFonts,
+	type TypstCompiler,
+	type TypstRenderer
+} from '@myriaddreamin/typst.ts';
 import typstCompilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm?url';
+import typstRendererWasmUrl from '@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm?url';
+import { SUPERSEDED } from './compileProtocol';
+import { splitSvgDocument, type SvgDocument } from '$lib/typst/svg-split';
 
 // Markdown processing lives entirely in the `md2pdf` Typst package — the
 // Rust/WASM engine runs inside the compile. This worker only feeds raw
@@ -14,18 +23,19 @@ type CompileRequest = {
 	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
 	pageNumbers?: boolean;
-	format?: 'pdf' | 'vector';
+	format?: 'pdf' | 'preview';
 };
 
 type CompileResponse =
 	| { type: 'compile-result'; id: string; ok: true; pdf: ArrayBuffer; diagnostics: string[] }
-	| { type: 'compile-result'; id: string; ok: true; vector: ArrayBuffer; diagnostics: string[] }
+	| { type: 'compile-result'; id: string; ok: true; preview: SvgDocument; diagnostics: string[] }
 	| { type: 'compile-result'; id: string; ok: false; error: string; diagnostics: string[] };
+
+type CancelRequest = { type: 'cancel'; id: string };
 
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
 
 let compilerPromise: Promise<TypstCompiler> | null = null;
-let compileQueue: Promise<void> = Promise.resolve();
 
 // Fonts served same-origin from /fonts/* (bundled at build time). No CDNs.
 const CORE_FONTS: string[] = [
@@ -124,6 +134,32 @@ function getCompiler(): Promise<TypstCompiler> {
 	return compilerPromise;
 }
 
+// The preview renderer runs here too: turning the artifact into SVG is a long
+// synchronous WASM call that used to block typing on the main thread.
+let rendererPromise: Promise<TypstRenderer> | null = null;
+
+function getRenderer(): Promise<TypstRenderer> {
+	if (!rendererPromise) {
+		rendererPromise = (async () => {
+			const renderer = createTypstRenderer();
+			await renderer.init({ getModule: () => typstRendererWasmUrl });
+			return renderer;
+		})();
+	}
+	return rendererPromise;
+}
+
+async function renderPreview(artifact: Uint8Array): Promise<SvgDocument> {
+	const renderer = await getRenderer();
+	let svg = '';
+	await renderer.runWithSession({ format: 'vector', artifactContent: artifact }, async (session) => {
+		svg = await session.renderSvg({
+			data_selection: { body: true, defs: true, css: true, js: false }
+		});
+	});
+	return splitSvgDocument(svg);
+}
+
 // Twemoji codepoints already fetched + mapped into the compiler VFS. Kept
 // across recompiles so the live-preview loop doesn't re-fetch the same SVGs
 // on every keystroke.
@@ -163,20 +199,34 @@ function buildMain(pageNumbersDefault: boolean): string {
 `;
 }
 
+// What the VFS already holds, so a live-preview recompile only writes what
+// actually changed. Re-mapping identical bytes would throw away Typst's
+// incremental caches for those files (images get re-decoded, the emoji scan
+// re-runs) on every keystroke.
+let mappedMarkdown: string | null = null;
+let mappedMain: string | null = null;
+
 async function compileTypst(
 	markdown: string,
 	images: Record<string, Uint8Array<ArrayBuffer>> = {},
 	pageNumbers = true,
-	format: 'pdf' | 'vector' = 'pdf'
+	format: 'pdf' | 'preview' = 'pdf'
 ): Promise<{ result: Uint8Array; diagnostics: string[] }> {
 	const compiler = await getCompiler();
 
-	await loadTwemoji(compiler, markdown);
+	if (markdown !== mappedMarkdown) {
+		await loadTwemoji(compiler, markdown);
+		// The Markdown is a data file read via `read()` — it must live in the
+		// shadow VFS (mapShadow), not the source set (addSource).
+		compiler.mapShadow('/doc.md', new TextEncoder().encode(markdown));
+		mappedMarkdown = markdown;
+	}
 
-	// The Markdown is a data file read via `read()` — it must live in the
-	// shadow VFS (mapShadow), not the source set (addSource).
-	compiler.mapShadow('/doc.md', new TextEncoder().encode(markdown));
-	compiler.addSource('/main.typ', buildMain(pageNumbers));
+	const main = buildMain(pageNumbers);
+	if (main !== mappedMain) {
+		compiler.addSource('/main.typ', main);
+		mappedMain = main;
+	}
 
 	for (const [path, data] of Object.entries(images)) {
 		compiler.mapShadow('/' + path, data);
@@ -195,34 +245,80 @@ async function compileTypst(
 	return { result: compileResult.result, diagnostics };
 }
 
-ctx.onmessage = (event: MessageEvent<CompileRequest>) => {
-	const message = event.data;
-	if (!message || message.type !== 'compile') return;
+// While one compile runs, more keystrokes arrive; only the newest of those is
+// worth running. Export requests are user-initiated and are never dropped.
+let running = false;
+const queue: CompileRequest[] = [];
 
+function reply(id: string, error: string) {
+	ctx.postMessage({
+		type: 'compile-result',
+		id,
+		ok: false,
+		error,
+		diagnostics: []
+	} satisfies CompileResponse);
+}
+
+async function runOne(message: CompileRequest): Promise<void> {
 	const fmt = message.format || 'pdf';
-	compileQueue = compileQueue.then(async () => {
-		try {
-			const { result, diagnostics } = await compileTypst(
-				message.markdown,
-				message.images,
-				message.pageNumbers,
-				fmt
-			);
+	try {
+		const { result, diagnostics } = await compileTypst(
+			message.markdown,
+			message.images,
+			message.pageNumbers,
+			fmt
+		);
+		if (fmt === 'pdf') {
 			const copy = new Uint8Array(result.length);
 			copy.set(result);
-			const response: CompileResponse =
-				fmt === 'pdf'
-					? { type: 'compile-result', id: message.id, ok: true, pdf: copy.buffer, diagnostics }
-					: { type: 'compile-result', id: message.id, ok: true, vector: copy.buffer, diagnostics };
-			ctx.postMessage(response, [copy.buffer]);
-		} catch (error) {
-			ctx.postMessage({
-				type: 'compile-result',
-				id: message.id,
-				ok: false,
-				error: error instanceof Error ? error.message : String(error),
-				diagnostics: []
-			} satisfies CompileResponse);
+			ctx.postMessage(
+				{ type: 'compile-result', id: message.id, ok: true, pdf: copy.buffer, diagnostics },
+				[copy.buffer]
+			);
+			return;
 		}
-	});
+		const preview = await renderPreview(result);
+		ctx.postMessage({ type: 'compile-result', id: message.id, ok: true, preview, diagnostics });
+	} catch (error) {
+		reply(message.id, error instanceof Error ? error.message : String(error));
+	}
+}
+
+async function drain(): Promise<void> {
+	if (running) return;
+	running = true;
+	try {
+		while (queue.length > 0) {
+			await runOne(queue.shift()!);
+		}
+	} finally {
+		running = false;
+	}
+}
+
+ctx.onmessage = (event: MessageEvent<CompileRequest | CancelRequest>) => {
+	const message = event.data;
+	if (!message) return;
+
+	if (message.type === 'cancel') {
+		const i = queue.findIndex((q) => q.id === message.id);
+		if (i !== -1) {
+			queue.splice(i, 1);
+			reply(message.id, SUPERSEDED);
+		}
+		return;
+	}
+
+	if (message.type !== 'compile') return;
+
+	if (message.format === 'preview') {
+		const i = queue.findIndex((q) => q.format === 'preview');
+		if (i !== -1) {
+			reply(queue[i].id, SUPERSEDED);
+			queue.splice(i, 1);
+		}
+	}
+	queue.push(message);
+	void drain();
 };

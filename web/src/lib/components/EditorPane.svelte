@@ -14,7 +14,12 @@
     pageBreakToken?: string | null
     pageBreakLabel?: string | null
     pageBreakTitle?: string | null
-    onImageSaved?: (path: string, bytes: Uint8Array, objectUrl: string, mimeType: string) => void
+    onImageSaved?: (
+      path: string,
+      bytes: Uint8Array<ArrayBuffer>,
+      objectUrl: string,
+      mimeType: string,
+    ) => void
   }
 
   let {
@@ -38,6 +43,15 @@
     if (!pageBreakToken) return
     const insertion = `\n\n${pageBreakToken}\n\n`
     insertMarkdownSnippet(insertion)
+  }
+
+  /**
+   * Push the editor's buffered text upward now. The editor batches its
+   * updates while typing, so anything that must act on the exact current
+   * text (manual compile, export, save) flushes first.
+   */
+  export function flushPendingEdit(): void {
+    markdownEditor?.flushPendingEdit()
   }
 
   export function insertMarkdownSnippet(snippet: string): void {

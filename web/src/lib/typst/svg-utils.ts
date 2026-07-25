@@ -1,47 +1,34 @@
-/**
- * Extract individual page SVGs from a composite typst-ts SVG string.
- * Each page is a `<g class="typst-page">` element. Shared `<defs>` and `<style>`
- * are cloned into each extracted page SVG.
- *
- * @param svgString - The full SVG string from `renderSvg()`
- * @returns Array of standalone SVG strings, one per page
- */
-export function extractPageSvgs(svgString: string): string[] {
-	const parser = new DOMParser();
-	const doc = parser.parseFromString(svgString, 'image/svg+xml');
-	const root = doc.documentElement;
-	const defs = root.querySelectorAll('defs');
-	const styles = root.querySelectorAll('style');
-	const pageGroups = root.querySelectorAll('g.typst-page');
-	const serializer = new XMLSerializer();
+import type { SvgPage } from './svg-split';
 
-	return Array.from(pageGroups).map((pageG) => {
-		const w = pageG.getAttribute('data-page-width') || '595';
-		const h = pageG.getAttribute('data-page-height') || '842';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+// typst-ts puts its text-selection layer in XHTML elements under the `h5`
+// prefix, so a fragment cannot be parsed without that declaration.
+const SVG_OPEN =
+	`<svg xmlns="${SVG_NS}" xmlns:xlink="http://www.w3.org/1999/xlink"` +
+	' xmlns:h5="http://www.w3.org/1999/xhtml">';
 
-		const pageSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-		pageSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-		pageSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-		pageSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-		pageSvg.setAttribute('width', w);
-		pageSvg.setAttribute('height', h);
-
-		for (const def of defs) pageSvg.appendChild(def.cloneNode(true));
-		for (const style of styles) pageSvg.appendChild(style.cloneNode(true));
-
-		const cloned = pageG.cloneNode(true) as SVGGElement;
-		cloned.setAttribute('transform', 'translate(0, 0)');
-		pageSvg.appendChild(cloned);
-
-		return serializer.serializeToString(pageSvg);
-	});
+function parseSvg(markup: string): SVGSVGElement {
+	const doc = new DOMParser().parseFromString(SVG_OPEN + markup + '</svg>', 'image/svg+xml');
+	return document.adoptNode(doc.documentElement) as unknown as SVGSVGElement;
 }
 
 /**
- * Extract only the first page from a composite SVG.
- * Useful when a single-page compilation overflows.
+ * The document's shared definitions, as one zero-size element. Pages resolve
+ * their `<use href="#…">` against it because they share a document — so it is
+ * built once instead of being copied into every page.
  */
-export function extractFirstPageSvg(svgString: string): string {
-	const pages = extractPageSvgs(svgString);
-	return pages[0] || svgString;
+export function buildHeadElement(head: string): SVGSVGElement {
+	const el = parseSvg(head);
+	el.setAttribute('class', 'typst-defs');
+	el.setAttribute('aria-hidden', 'true');
+	return el;
+}
+
+export function buildPageElement(page: SvgPage): SVGSVGElement {
+	const el = parseSvg(page.markup);
+	el.setAttribute('viewBox', `0 0 ${page.width} ${page.height}`);
+	// The page carries its offset within the full document; standalone it
+	// starts at the origin.
+	el.firstElementChild?.setAttribute('transform', 'translate(0, 0)');
+	return el;
 }

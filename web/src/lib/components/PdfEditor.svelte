@@ -1,12 +1,13 @@
 <script lang="ts">
   import { browser } from '$app/environment'
   import { onMount } from 'svelte'
-  import { getTypstRenderer } from '$lib/typst/renderer'
-  import { extractPageSvgs } from '$lib/typst/svg-utils'
+  import { buildHeadElement, buildPageElement } from '$lib/typst/svg-utils'
+  import type { SvgDocument, SvgPage } from '$lib/typst/svg-split'
   import { getSharedTypstWorkerClient, TypstWorkerClient } from '$lib/workers/typstClient'
   import { getMarkdownImportFile, getImageDropFile } from '$lib/utils/image-utils'
   import { PAGEBREAK_TOKEN } from '$lib/pagebreak'
-  import { loadRemoteImages } from '$lib/utils/remote-images'
+  import { cachedRemoteImages, prefetchRemoteImages } from '$lib/utils/remote-images'
+  import { SUPERSEDED } from '$lib/workers/compileProtocol'
   import { useRegisterSW } from 'virtual:pwa-register/svelte'
   import type { RegisterSWOptions } from 'virtual:pwa-register/svelte'
   import { writable, type Readable } from 'svelte/store'
@@ -46,11 +47,13 @@
   let editorPane = $state<EditorPane | null>(null)
 
   type LocalImageAsset = {
-    bytes: Uint8Array
+    bytes: Uint8Array<ArrayBuffer>
     objectUrl: string
   }
 
   let imageAssets = $state<Record<string, LocalImageAsset>>({})
+  // Images handed to the Typst worker, keyed by their path in the document.
+  type ImageMap = Record<string, Uint8Array<ArrayBuffer>>
 
   // PWA Service Worker — useRegisterSW touches `navigator` at setup time, so
   // we can only call it in the browser. SSR/prerender gets a fallback store
@@ -193,7 +196,7 @@
   let compilingHintTimer: number | null = null
 
   // SVG preview state
-  let vectorBytes = $state<Uint8Array | null>(null)
+  let previewDoc = $state<SvgDocument | null>(null)
   let svgContainerEl = $state<HTMLDivElement | null>(null)
   let svgPageCount = $state(0)
   let svgScale = $state(1)
@@ -204,8 +207,11 @@
 
   // Cached last compiled Markdown + images for PDF export (same as preview)
   let lastCompiledMarkdown = ''
-  let lastCompiledImages: Record<string, Uint8Array> = {}
+  let lastCompiledImages: ImageMap = {}
   let autoPreviewTimer: number | null = null
+  // The auto-compile debounce follows the last compile's duration, so a slow
+  // document is not re-queued faster than it can be rendered.
+  let lastCycleMs = 0
 
   const UI = {
     export: 'Export PDF',
@@ -227,7 +233,7 @@
 
     showPreviewCompilingHint = false
 
-    if (status === 'compiling' && !!vectorBytes) {
+    if (status === 'compiling' && !!previewDoc) {
       compilingHintTimer = window.setTimeout(() => {
         showPreviewCompilingHint = true
       }, 180)
@@ -284,9 +290,20 @@
     }
     window.addEventListener('resize', handleResize)
 
+    // Typing is buffered and autosave debounced — both must land before the
+    // tab goes away.
+    const handleHide = () => {
+      editorPane?.flushPendingEdit()
+      void documentStore.flushPendingSave()
+    }
+    document.addEventListener('visibilitychange', handleHide)
+    window.addEventListener('pagehide', handleHide)
+
     return () => {
       window.removeEventListener('click', handleClickOutside)
       window.removeEventListener('resize', handleResize)
+      document.removeEventListener('visibilitychange', handleHide)
+      window.removeEventListener('pagehide', handleHide)
       window.removeEventListener('keydown', handleKey, true)
       if (resizeTimer) clearTimeout(resizeTimer)
       for (const asset of Object.values(imageAssets)) {
@@ -323,7 +340,7 @@
 
     if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
 
-    const delay = hasEverCompiled ? 450 : 0
+    const delay = hasEverCompiled ? Math.min(Math.max(450, lastCycleMs), 2500) : 0
     autoPreviewTimer = window.setTimeout(() => {
       void compile(md)
     }, delay)
@@ -334,6 +351,8 @@
   })
 
   function compileNow() {
+    // Compile what is on screen, including keystrokes still buffered.
+    editorPane?.flushPendingEdit()
     void compile(markdown)
   }
 
@@ -347,49 +366,91 @@
     }
   })
 
-  // SVG rendering effect (vectorBytes -> SVG in container)
-  let svgRenderSeq = 0
+  // Only the pages near the viewport become DOM; the rest stay as markup
+  // behind correctly-sized placeholders and mount on scroll. That keeps the
+  // per-compile cost proportional to what is on screen, not to the document
+  // length — a 40-page document is otherwise ~240k nodes to rebuild.
+  let pageSlots: HTMLDivElement[] = []
+  let pageMarkup: SvgPage[] = []
+  const visibleSlots = new Set<number>()
+  let headEl: SVGSVGElement | null = null
+  let pageObserver: IntersectionObserver | null = null
+
+  function mountPage(index: number) {
+    const slot = pageSlots[index]
+    const page = pageMarkup[index]
+    if (!slot || !page) return
+    slot.replaceChildren(buildPageElement(page))
+  }
+
+  function ensureObserver(container: HTMLDivElement): IntersectionObserver {
+    if (pageObserver) return pageObserver
+    pageObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const index = Number((entry.target as HTMLElement).dataset.page)
+          if (entry.isIntersecting) {
+            visibleSlots.add(index)
+            if (!entry.target.firstChild) mountPage(index)
+          } else {
+            visibleSlots.delete(index)
+            entry.target.replaceChildren()
+          }
+        }
+      },
+      // Mount a screenful ahead so scrolling finds pages already rendered.
+      { root: container, rootMargin: '100% 0px' },
+    )
+    return pageObserver
+  }
+
+  function syncSlots(container: HTMLDivElement, pages: SvgPage[]) {
+    const observer = ensureObserver(container)
+
+    while (pageSlots.length > pages.length) {
+      const slot = pageSlots.pop()!
+      observer.unobserve(slot)
+      visibleSlots.delete(pageSlots.length)
+      slot.remove()
+    }
+
+    for (let i = 0; i < pages.length; i++) {
+      let slot = pageSlots[i]
+      if (!slot) {
+        slot = document.createElement('div')
+        slot.className = 'page-slot'
+        slot.dataset.page = String(i)
+        container.appendChild(slot)
+        pageSlots[i] = slot
+        observer.observe(slot)
+      }
+      // The placeholder keeps the page's footprint, so scroll position and
+      // document height do not jump while pages are unmounted.
+      slot.style.aspectRatio = `${pages[i].width} / ${pages[i].height}`
+    }
+  }
+
   $effect(() => {
     if (!browser) return
-    const bytes = vectorBytes
+    const doc = previewDoc
     const container = svgContainerEl
-    if (!bytes || !container) return
+    if (!doc || !container) return
 
-    const seq = ++svgRenderSeq
+    pageMarkup = doc.pages
+    svgPageCount = doc.pages.length
 
-    void (async () => {
-      const renderer = await getTypstRenderer()
-      if (seq !== svgRenderSeq) return
+    const nextHead = buildHeadElement(doc.head)
+    if (headEl?.parentNode === container) {
+      container.replaceChild(nextHead, headEl)
+    } else {
+      container.replaceChildren(nextHead)
+      pageSlots = []
+      visibleSlots.clear()
+    }
+    headEl = nextHead
 
-      const savedScrollTop = container.scrollTop
-      const prevScrollHeight = container.scrollHeight || 1
-
-      await renderer.runWithSession(
-        { format: 'vector' as const, artifactContent: bytes },
-        async (session) => {
-          const pages = session.retrievePagesInfo()
-          svgPageCount = pages.length
-          const svgString = await session.renderSvg({
-            data_selection: { body: true, defs: true, css: true, js: false },
-          })
-
-          // Extract per-page SVGs and render each independently
-          const perPageSvgs = extractPageSvgs(svgString)
-          container.innerHTML = perPageSvgs.join('\n')
-        },
-      )
-
-      if (seq !== svgRenderSeq) return
-
-      // Restore scroll position proportionally
-      if (prevScrollHeight > 1 && savedScrollTop > 0) {
-        const nextScrollHeight = container.scrollHeight
-        const ratio = savedScrollTop / prevScrollHeight
-        container.scrollTop = ratio * nextScrollHeight
-      }
-    })().catch((error) => {
-      console.error('SVG render error:', error)
-    })
+    syncSlots(container, doc.pages)
+    for (const index of visibleSlots) mountPage(index)
   })
 
   // ========================================
@@ -405,30 +466,58 @@
     if (md.trim() !== '') hasEverCompiled = true
 
     const seq = ++compileSeq
+    // Whatever is still queued in the worker is already stale.
+    client.cancelPendingPreview()
     status = 'compiling'
     errorMessage = null
+    const startedAt = performance.now()
 
     try {
-      const images: Record<string, Uint8Array> = {}
-      Object.assign(images, collectReferencedImageAssets(md))
-      Object.assign(images, await loadRemoteImages(md, settingsStore.corsProxy))
+      const localImages = collectReferencedImageAssets(md)
+      // Remote images are not awaited: compile with what is cached, then
+      // recompile if a fetch brings in something new.
+      const { images: remoteImages, missing } = cachedRemoteImages(md)
+      const images: ImageMap = { ...localImages, ...remoteImages }
 
       lastCompiledMarkdown = md
       lastCompiledImages = images
 
-      // @ts-ignore
-      const vectorData = await client.compileVector(md, images, settingsStore.pageNumbers)
+      if (missing.length > 0) {
+        void prefetchRemoteImages(missing, settingsStore.corsProxy).then((gotNew) => {
+          if (gotNew && lastCompiledMarkdown === md) void compile(md)
+        })
+      }
+
+      const result = await client.compilePreview(md, imagesToSend(images), settingsStore.pageNumbers)
       if (seq !== compileSeq) return
-      vectorBytes = vectorData.vector
+      previewDoc = result.preview
       status = 'done'
+      lastCycleMs = performance.now() - startedAt
     } catch (error) {
+      // A compile the worker dropped in favour of a newer one is not an error.
+      if (error instanceof Error && error.message === SUPERSEDED) return
       if (seq !== compileSeq) return
       status = 'error'
       errorMessage = error instanceof Error ? error.message : String(error)
     }
   }
 
+  // The worker keeps every image it has been handed, so a recompile only
+  // ships new ones instead of copying megabytes across the worker boundary.
+  const sentImages = new Map<string, Uint8Array<ArrayBuffer>>()
+
+  function imagesToSend(images: ImageMap): ImageMap {
+    const fresh: ImageMap = {}
+    for (const [path, bytes] of Object.entries(images)) {
+      if (sentImages.get(path) === bytes) continue
+      sentImages.set(path, bytes)
+      fresh[path] = bytes
+    }
+    return fresh
+  }
+
   async function downloadPdf() {
+    editorPane?.flushPendingEdit()
     if (!client || !lastCompiledMarkdown) return
     // Open the tab synchronously so it counts as user-initiated and isn't
     // blocked by popup blockers after the async compile.
@@ -470,11 +559,16 @@
     target.value = ''
   }
 
-  function handleImageSaved(path: string, bytes: Uint8Array, objectUrl: string, _mimeType: string) {
+  function handleImageSaved(
+    path: string,
+    bytes: Uint8Array<ArrayBuffer>,
+    objectUrl: string,
+    _mimeType: string,
+  ) {
     imageAssets[path] = { bytes, objectUrl }
   }
 
-  function collectReferencedImageAssets(md: string): Record<string, Uint8Array> {
+  function collectReferencedImageAssets(md: string): ImageMap {
     const referenced = new Set<string>()
     // The tail also covers HackMD `=WxH` sizing, not just a quoted title.
     const markdownImageRegex = /!\[[^\]]*]\(([^)\s]+)(?:\s+[^)]*)?\)/g
@@ -509,14 +603,28 @@
     document.addEventListener('mouseup', stopResize)
   }
 
+  // A width write relayouts both panes, so collapse the mousemove stream to
+  // one write per frame.
+  let resizeRaf: number | null = null
+  let pendingPaneWidth = 50
+
   function onResize(e: MouseEvent) {
     if (!isResizing) return
-    const newWidth = (e.clientX / window.innerWidth) * 100
-    leftPaneWidth = Math.min(Math.max(newWidth, 20), 80)
+    pendingPaneWidth = Math.min(Math.max((e.clientX / window.innerWidth) * 100, 20), 80)
+    if (resizeRaf !== null) return
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = null
+      leftPaneWidth = pendingPaneWidth
+    })
   }
 
   function stopResize() {
     isResizing = false
+    if (resizeRaf !== null) {
+      cancelAnimationFrame(resizeRaf)
+      resizeRaf = null
+      leftPaneWidth = pendingPaneWidth
+    }
     document.removeEventListener('mousemove', onResize)
     document.removeEventListener('mouseup', stopResize)
   }
@@ -856,12 +964,12 @@
             <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
             <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
             <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
-            <button onclick={fitWidth} disabled={!vectorBytes}>Fit</button>
+            <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
           </div>
           <button
             class="btn btn-primary btn-sm"
             onclick={downloadPdf}
-            disabled={!vectorBytes || status === 'compiling'}
+            disabled={!previewDoc || status === 'compiling'}
           >
             {status === 'compiling' ? t('generating') : t('export')}
           </button>
@@ -876,7 +984,7 @@
           style="--svg-scale: {svgScale}"
           bind:this={svgContainerEl}
         ></div>
-        {#if status === 'compiling' && !vectorBytes}
+        {#if status === 'compiling' && !previewDoc}
           <div class="preview-placeholder">
             <div class="loading-spinner"></div>
           </div>
@@ -1217,18 +1325,26 @@
     background: var(--preview-bg);
   }
 
-  .svg-preview-container :global(svg) {
-    display: block;
+  /* One box per page. It keeps the page's footprint whether or not the page
+     itself is currently mounted, so scrolling and document height stay put. */
+  .svg-preview-container :global(.page-slot) {
     margin: 0 auto var(--space-md);
     box-shadow: var(--paper-shadow);
     background: white;
     width: calc(100% * var(--svg-scale, 1));
-    height: auto;
-    /* Skip layout/paint for off-screen pages. Pages are ~A4 portrait, so
-       hint a sensible default size; the browser will use the real size once
-       a page becomes visible. */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 800px auto 1100px;
+    contain: strict;
+  }
+  .svg-preview-container :global(.page-slot > svg) {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  /* Shared glyph definitions: referenced by the pages, never displayed. */
+  .svg-preview-container :global(svg.typst-defs) {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
   }
 
   /* ========================================

@@ -97,7 +97,7 @@ describe('documentStore persistence guards', () => {
 
 		vi.useFakeTimers();
 		restoredModule.documentStore.autoSave(original.id, '');
-		await vi.advanceTimersByTimeAsync(1000);
+		await vi.advanceTimersByTimeAsync(restoredModule.AUTOSAVE_DEBOUNCE_MS);
 
 		expect(docs.get(original.id)?.content).toBe('# Template content');
 	});
@@ -115,7 +115,7 @@ describe('documentStore persistence guards', () => {
 
 		vi.useFakeTimers();
 		storeModule.documentStore.autoSave(doc.id, '# Updated Slide Title');
-		await vi.advanceTimersByTimeAsync(1000);
+		await vi.advanceTimersByTimeAsync(storeModule.AUTOSAVE_DEBOUNCE_MS);
 
 		expect(documentsMock.docs.get(doc.id)?.content).toBe('# Updated Slide Title');
 	});
