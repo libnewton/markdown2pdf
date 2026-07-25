@@ -20,11 +20,28 @@ const DB_NAME = 'md2pdf_documents';
 const DB_VERSION = 1;
 const STORE_NAME = 'documents';
 
+// One connection for the page's lifetime. Opening a fresh IDBDatabase per
+// call cost an async round-trip (and leaked a connection) on every autosave.
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 function openDB(): Promise<IDBDatabase> {
-	return new Promise((resolve, reject) => {
+	if (dbPromise) return dbPromise;
+	dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
 		const request = indexedDB.open(DB_NAME, DB_VERSION);
 		request.onerror = () => reject(request.error);
-		request.onsuccess = () => resolve(request.result);
+		request.onsuccess = () => {
+			const db = request.result;
+			// Another tab upgrading, or the connection being closed, must not
+			// leave a dead handle cached.
+			db.onversionchange = () => {
+				db.close();
+				dbPromise = null;
+			};
+			db.onclose = () => {
+				dbPromise = null;
+			};
+			resolve(db);
+		};
 		request.onupgradeneeded = (event) => {
 			const db = (event.target as IDBOpenDBRequest).result;
 			if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -32,6 +49,10 @@ function openDB(): Promise<IDBDatabase> {
 			}
 		};
 	});
+	dbPromise.catch(() => {
+		dbPromise = null;
+	});
+	return dbPromise;
 }
 
 export async function saveDocument(doc: SavedDocument): Promise<void> {

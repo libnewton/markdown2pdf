@@ -1,10 +1,12 @@
+import type { SvgDocument } from '$lib/typst/svg-split';
+
 type CompileRequest = {
 	type: 'compile';
 	id: string;
 	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
 	pageNumbers?: boolean;
-	format?: 'pdf' | 'vector';
+	format?: 'pdf' | 'preview';
 };
 
 type CompileResponse =
@@ -19,7 +21,7 @@ type CompileResponse =
 			type: 'compile-result';
 			id: string;
 			ok: true;
-			vector: ArrayBuffer;
+			preview: SvgDocument;
 			diagnostics: string[];
 	  }
 	| {
@@ -32,7 +34,7 @@ type CompileResponse =
 
 type CompileResult = {
 	pdf?: Uint8Array<ArrayBuffer>;
-	vector?: Uint8Array<ArrayBuffer>;
+	preview?: SvgDocument;
 	diagnostics: string[];
 };
 
@@ -44,6 +46,8 @@ type Pending = {
 export class TypstWorkerClient {
 	#worker: Worker;
 	#pending = new Map<string, Pending>();
+	/** Id of the preview compile that has not returned yet, if any. */
+	#pendingPreviewId: string | null = null;
 
 	constructor() {
 		this.#worker = new Worker(new URL('./typst.worker.ts', import.meta.url), { type: 'module' });
@@ -54,6 +58,7 @@ export class TypstWorkerClient {
 			const pending = this.#pending.get(message.id);
 			if (!pending) return;
 			this.#pending.delete(message.id);
+			if (this.#pendingPreviewId === message.id) this.#pendingPreviewId = null;
 
 			if (!message.ok) {
 				pending.reject(new Error(message.error));
@@ -62,7 +67,7 @@ export class TypstWorkerClient {
 
 			const result: CompileResult = { diagnostics: message.diagnostics };
 			if ('pdf' in message) result.pdf = new Uint8Array(message.pdf);
-			if ('vector' in message) result.vector = new Uint8Array(message.vector);
+			if ('preview' in message) result.preview = message.preview;
 			pending.resolve(result);
 		});
 	}
@@ -73,6 +78,18 @@ export class TypstWorkerClient {
 			pending.reject(new Error('Worker terminated'));
 		}
 		this.#pending.clear();
+		this.#pendingPreviewId = null;
+	}
+
+	/**
+	 * Ask the worker to drop a queued preview compile. Only requests that have
+	 * not started are dropped; one already running finishes (its result is
+	 * discarded by the caller's sequence check).
+	 */
+	cancelPendingPreview(): void {
+		if (!this.#pendingPreviewId) return;
+		this.#worker.postMessage({ type: 'cancel', id: this.#pendingPreviewId });
+		this.#pendingPreviewId = null;
 	}
 
 	compilePdf(
@@ -86,13 +103,14 @@ export class TypstWorkerClient {
 		}));
 	}
 
-	compileVector(
+	/** Compile and render the preview: page markup, ready to display. */
+	compilePreview(
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>> = {},
 		pageNumbers = true
-	): Promise<{ vector: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
-		return this.#compile(markdown, images, pageNumbers, 'vector').then((r) => ({
-			vector: r.vector!,
+	): Promise<{ preview: SvgDocument; diagnostics: string[] }> {
+		return this.#compile(markdown, images, pageNumbers, 'preview').then((r) => ({
+			preview: r.preview!,
 			diagnostics: r.diagnostics
 		}));
 	}
@@ -101,13 +119,14 @@ export class TypstWorkerClient {
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>>,
 		pageNumbers: boolean,
-		format: 'pdf' | 'vector'
+		format: 'pdf' | 'preview'
 	): Promise<CompileResult> {
 		const id =
 			typeof crypto !== 'undefined' && 'randomUUID' in crypto
 				? crypto.randomUUID()
 				: String(Date.now());
 		const request: CompileRequest = { type: 'compile', id, markdown, images, pageNumbers, format };
+		if (format === 'preview') this.#pendingPreviewId = id;
 
 		return new Promise((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });

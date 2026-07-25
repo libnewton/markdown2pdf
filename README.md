@@ -68,6 +68,11 @@ remote images; Twemoji emoji (unicode and `:shortcodes:`); YAML frontmatter
 cover page (`cover-*`); DIN 5008 letter mode (`letter-*` fields);
 `[toc]` → `#outline()`.
 
+`tests/extended.md` is the feature demo — it exercises every syntax above and
+documents every frontmatter key, header/footer placeholder and cover option.
+It is also the web app's welcome document (`web/src/lib/templates/pdf-templates.ts`
+holds a copy that must stay in sync).
+
 ## License
 
 [MIT](LICENSE)

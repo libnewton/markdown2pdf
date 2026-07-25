@@ -9,6 +9,14 @@ import {
 } from '$lib/storage/documents';
 
 export type SaveStatus = 'saved' | 'saving';
+
+/**
+ * How long typing has to pause before the document is written to IndexedDB.
+ * Long enough that a burst of typing writes once rather than every second;
+ * `flushPendingSave` covers tab-hide and document switches, so nothing is
+ * lost by waiting.
+ */
+export const AUTOSAVE_DEBOUNCE_MS = 2000;
 type InitOptions = {
 	restoreCurrent?: boolean;
 };
@@ -66,6 +74,24 @@ function setCurrentDocument(id: string | null, persistSession: boolean) {
 
 function upsertRecentDocument(doc: SavedDocument) {
 	recentDocuments = [doc, ...recentDocuments.filter((existing) => existing.id !== doc.id)];
+	docMeta.set(doc.id, doc);
+}
+
+// Last known record per document, so an autosave can `put()` straight away.
+// Re-reading the record first meant deserializing the whole document —
+// including every embedded image — on each save, on the main thread.
+const docMeta = new Map<string, SavedDocument>();
+
+/** Refresh an already-listed document in place, without a new array identity. */
+function touchRecentDocument(doc: SavedDocument) {
+	const existing = recentDocuments.find((d) => d.id === doc.id);
+	if (!existing) {
+		upsertRecentDocument(doc);
+		return;
+	}
+	existing.name = doc.name;
+	existing.updatedAt = doc.updatedAt;
+	docMeta.set(doc.id, doc);
 }
 
 export const documentStore = {
@@ -97,6 +123,7 @@ export const documentStore = {
 
 	async refreshList() {
 		recentDocuments = await listDocuments();
+		for (const doc of recentDocuments) docMeta.set(doc.id, doc);
 	},
 
 	async flushPendingSave(): Promise<void> {
@@ -114,6 +141,7 @@ export const documentStore = {
 		await this.flushPendingSave();
 		const doc = await getDocument(id);
 		if (!doc) return null;
+		docMeta.set(doc.id, doc);
 		if (saveTimer) {
 			clearTimeout(saveTimer);
 			saveTimer = null;
@@ -172,18 +200,22 @@ export const documentStore = {
 			saveTimer = null;
 		}
 		pendingSave = null;
-		const existing = await getDocument(id);
-		if (!existing) {
+		const known = docMeta.get(id) ?? (await getDocument(id));
+		if (!known) {
 			saveStatus = 'saved';
 			return;
 		}
-		existing.content = content;
-		existing.assets = assets;
-		existing.name = deriveNameFromContent(content);
-		existing.updatedAt = Date.now();
-		await saveDocument(existing);
+		const next: SavedDocument = {
+			...known,
+			content,
+			assets: assets ?? known.assets,
+			name: deriveNameFromContent(content),
+			updatedAt: Date.now()
+		};
+		docMeta.set(id, next);
+		await saveDocument(next);
 		saveStatus = 'saved';
-		upsertRecentDocument({ ...existing });
+		touchRecentDocument(next);
 	},
 
 	autoSave(id: string, content: string, assets?: Record<string, SavedDocumentAsset>) {
@@ -198,7 +230,7 @@ export const documentStore = {
 				return;
 			}
 			await this.saveNow(id, content, assets);
-		}, 1000);
+		}, AUTOSAVE_DEBOUNCE_MS);
 	},
 
 	async deleteDocument(id: string) {
@@ -209,6 +241,7 @@ export const documentStore = {
 		}
 		pendingSave = null;
 		await deleteDocFromDB(id);
+		docMeta.delete(id);
 		if (currentDocId === id) {
 			setCurrentDocument(null, true);
 		}

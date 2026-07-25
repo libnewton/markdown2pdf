@@ -16,11 +16,27 @@
   let editorView = $state<EditorView | null>(null)
   let editorContainerEl = $state<HTMLDivElement | null>(null)
   let suppressEditorUpdate = false
-  // Tracks the last document string the editor emitted upward. Lets the
-  // external-sync effect bail without calling `doc.toString()` on every
-  // keystroke — for large documents that string conversion alone is the
-  // bulk of the per-keystroke cost.
+  // The last string handed upward. Also lets the external-sync effect below
+  // bail out without calling `doc.toString()`.
   let lastEmittedDoc = ''
+  // Handing the text upward is deferred: `doc.toString()` flattens
+  // CodeMirror's rope into a fresh 100 kB+ string, and the write fans out to
+  // autosave, the compile scheduler and the document menu. Nothing downstream
+  // needs the text sooner than this.
+  const EMIT_DELAY_MS = 150
+  let emitTimer: number | null = null
+
+  /** Hand any buffered edit upward now — before a compile, save or export. */
+  export function flushPendingEdit() {
+    if (emitTimer !== null) {
+      clearTimeout(emitTimer)
+      emitTimer = null
+    }
+    const next = editorView?.state.doc.toString()
+    if (next === undefined || next === lastEmittedDoc) return
+    lastEmittedDoc = next
+    markdown = next
+  }
 
   export function insertTextAtSelection(text: string): boolean {
     if (!editorView) return false
@@ -35,9 +51,7 @@
       scrollIntoView: true,
     })
     suppressEditorUpdate = false
-    const next = editorView.state.doc.toString()
-    lastEmittedDoc = next
-    markdown = next
+    flushPendingEdit()
     editorView.focus()
     return true
   }
@@ -54,11 +68,12 @@
         oneDark,
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
-          if (update.docChanged && !suppressEditorUpdate) {
-            const next = update.state.doc.toString()
-            lastEmittedDoc = next
-            markdown = next
-          }
+          if (!update.docChanged || suppressEditorUpdate) return
+          if (emitTimer !== null) return
+          emitTimer = window.setTimeout(() => {
+            emitTimer = null
+            flushPendingEdit()
+          }, EMIT_DELAY_MS)
         }),
         EditorView.theme({
           '&': {
@@ -85,6 +100,7 @@
     })
 
     return () => {
+      if (emitTimer !== null) clearTimeout(emitTimer)
       editorView?.destroy()
     }
   })
