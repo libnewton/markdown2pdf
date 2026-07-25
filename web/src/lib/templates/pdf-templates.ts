@@ -296,17 +296,22 @@ title: md2pdf Feature Demo
 authors: [md2pdf Team]
 date: 2026-07-25
 cover: arcs
-cover-color: ocean                     # ocean | ink | ember | plum | any #hex
+cover-color: ocean                     # see the palette list below
 cover-subtitle: Every feature, one document
 cover-logo: "![](logo.svg)"            # optional, placed top-right
 ---
 \`\`\`
 
 The four geometries fill the bottom of the page: \`arcs\` (quarter-discs from
-the bottom-left), \`strata\` (slanted bands), \`wedge\` (one diagonal), \`grid\` (a
-fading dot lattice over solid bars). The palette tints the geometry and the
-hairline under the title; cover text is always black. Cover mode and letter
-mode are mutually exclusive — letter mode wins.
+the bottom-left), \`strata\` (slanted bands), \`wedge\` (one layered diagonal),
+\`grid\` (a fading dot lattice over solid bars).
+
+\`cover-color\` takes a named palette — \`ocean\`, \`ink\`, \`ember\`, \`plum\`,
+\`forest\`, \`crimson\`, \`teal\`, \`gold\`, or \`rub\` (Ruhr-Universität Bochum house
+colours) — or any hex value such as \`"#0074de"\`, from which the lighter tones
+are derived. The palette only tints the geometry and the hairline under the
+title; cover text is always black. Cover mode and letter mode are mutually
+exclusive — letter mode wins.
 
 ---
 

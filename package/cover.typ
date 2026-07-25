@@ -13,6 +13,12 @@
   ink: (primary: rgb("#0F172A"), secondary: rgb("#475569"), tint: rgb("#CBD5E1")),
   ember: (primary: rgb("#7C2D12"), secondary: rgb("#EA580C"), tint: rgb("#FED7AA")),
   plum: (primary: rgb("#4C1D95"), secondary: rgb("#7C3AED"), tint: rgb("#DDD6FE")),
+  forest: (primary: rgb("#14532D"), secondary: rgb("#16A34A"), tint: rgb("#BBF7D0")),
+  crimson: (primary: rgb("#7F1D1D"), secondary: rgb("#DC2626"), tint: rgb("#FECACA")),
+  teal: (primary: rgb("#134E4A"), secondary: rgb("#0D9488"), tint: rgb("#99F6E4")),
+  gold: (primary: rgb("#713F12"), secondary: rgb("#CA8A04"), tint: rgb("#FEF08A")),
+  // Ruhr-Universität Bochum house colours: RUB-Blau, RUB-Grün, RUB-Grau.
+  rub: (primary: rgb("#17365C"), secondary: rgb("#8DAE10"), tint: rgb("#E7E7E7")),
 )
 
 // A palette name, or any hex colour — tints are derived from it.
@@ -49,15 +55,12 @@
   place(bottom + left, rect(width: _w, height: 1.5mm, fill: pal.secondary))
 }
 
-// One diagonal wedge filling the bottom-right, with a thin echo of its
-// hypotenuse offset above it.
+// One diagonal cut, layered back to front so the edge reads as a stack of
+// tones rather than a single hard line.
 #let _wedge(pal) = {
-  place(bottom + left, dy: -6mm, line(
-    start: (0mm, 104mm),
-    end: (_w, 0mm),
-    stroke: 0.8pt + pal.secondary,
-  ))
-  place(bottom + left, polygon(fill: pal.primary, stroke: none, (0mm, 104mm), (_w, 0mm), (_w, 104mm)))
+  for (rise, fill) in ((126mm, pal.tint), (114mm, pal.secondary), (100mm, pal.primary)) {
+    place(bottom + left, polygon(fill: fill, stroke: none, (0mm, rise), (_w, 0mm), (_w, rise)))
+  }
 }
 
 // Dot lattice fading upward over two solid bars. A `tiling` cannot do this —
