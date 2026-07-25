@@ -8,6 +8,8 @@
 #let article(title: "", authors: (), ..args, body) = {
   let page-numbers = args.at("page-numbers", default: true)
   let date = args.at("date", default: none)
+  let lang = args.at("lang", default: "en")
+  let region = args.at("region", default: none)
   let remotes = args.at("remotes", default: ())
   let asset = args.at("asset", default: image)
   let letter-return = args.at("letter-return", default: "")
@@ -87,7 +89,10 @@
       "Libertinus Sans",
     ),
     size: 10.5pt,
-    lang: "en",
+    // Drives hyphenation, smart quotes, and Typst's localised titles — a
+    // `[toc]` renders as "Inhaltsverzeichnis" under `lang: de`.
+    lang: lang,
+    region: region,
   )
 
   // 3) Paragraphs: no first-line indent, paragraph-spacing mode (closer to web reading)

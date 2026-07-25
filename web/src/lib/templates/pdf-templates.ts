@@ -242,6 +242,9 @@ back to page one, or to the top of any page, to see each one at work.
 - \`title:\` — the document title; also the \`{title}\` placeholder
 - \`authors:\` — one name or a list
 - \`date:\` — feeds the cover page and the \`{date}\` placeholder
+- \`lang:\` — \`en\`, \`de\`, \`de-AT\`, … drives hyphenation, smart quotes and
+  Typst's built-in titles: under \`lang: de\` a \`[toc]\` is headed
+  "Inhaltsverzeichnis" instead of "Contents"
 - \`pageNumbers:\` — \`true\`, \`false\`, or a format: \`"1"\` for a bare number,
   \`"1/1"\` for \`3 / 12\` (what this document uses). The menu toggle is only a
   default — frontmatter wins.

@@ -74,6 +74,17 @@
 // for unquoted dates, which `str()` cannot take.
 #let _text-of(v) = if type(v) == datetime { v.display() } else { str(v) }
 
+// Frontmatter `lang`, as `(lang, region)`. Accepts "de" or "de-AT"; the region
+// is optional. Typst localises `outline(title: auto)` and friends from this, so
+// `[toc]` becomes "Inhaltsverzeichnis" under `lang: de`.
+#let _lang-of(fm) = {
+  let raw = fm.at("lang", default: "en")
+  let parts = _text-of(raw).trim().split("-")
+  let lang = lower(parts.at(0))
+  if lang == "" { lang = "en" }
+  (lang, if parts.len() > 1 { upper(parts.at(1)) } else { none })
+}
+
 // Frontmatter `date`, as a display string.
 #let _date-of(fm) = {
   let d = fm.at("date", default: none)
@@ -148,6 +159,8 @@
         title: title,
         authors: named.at("authors", default: _authors-of(fm)),
         date: _date-of(fm),
+        lang: _lang-of(fm).at(0),
+        region: _lang-of(fm).at(1),
         remotes: remotes,
         asset: named.at("asset", default: image),
         // The document declares its own layout: frontmatter beats the caller's

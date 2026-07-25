@@ -63,7 +63,7 @@ strikethrough, footnotes, autolinks); `==highlight==`, super/subscript,
 underline; admonitions (`:::info` …), spoilers (`+++++`), `:::row/center`
 layout; math via `mitex`; Mermaid via `mmdr`; HackMD `=WxH` image sizing;
 remote images; Twemoji emoji (unicode and `:shortcodes:`); YAML frontmatter
-(title / authors / date / page numbers); running header and footer
+(title / authors / date / `lang` / page numbers); running header and footer
 (`header-*` / `footer-*`, with `{page}`-style placeholders); optional title
 cover page (`cover-*`); DIN 5008 letter mode (`letter-*` fields);
 `[toc]` → `#outline()`.
