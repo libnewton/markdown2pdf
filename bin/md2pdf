@@ -23,10 +23,12 @@ manifest="$docdir/.md2pdf-remotes-$$.json"
 trap 'rm -f "$main" "$manifest"' EXIT
 
 # The eval happens here, in the document's directory, so image() paths in the
-# generated body resolve against the document root (not the package).
+# generated body resolve against the document root (not the package). `asset`
+# is the same trick for images the template itself places (header/footer, cover
+# logo): the image() call has to live in this file to resolve correctly.
 cat > "$main" <<EOF
 #import "@local/md2pdf:0.1.0": prepare
-#let _d = prepare(read("$docname"))
+#let _d = prepare(read("$docname"), asset: (p, ..a) => image(p, ..a))
 #metadata(_d.remotes) <md2pdf-remote-images>
 #if not _d.skip {
   show: _d.template

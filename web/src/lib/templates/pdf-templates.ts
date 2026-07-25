@@ -12,7 +12,13 @@ title: md2pdf Feature Demo
 authors:
   - md2pdf Team
 date: ${date}
-pageNumbers: true
+pageNumbers: "1/1"
+cover: arcs
+cover-color: ocean
+cover-subtitle: Every feature, one document
+header-left: "{title}"
+header-right: "{date}"
+footer-left: md2pdf
 ---
 
 # Welcome — every feature, on one page
@@ -230,13 +236,82 @@ graph LR
 
 ## Frontmatter & controls
 
-The YAML block at the top of this document sets:
+Everything below is switched on in *this* document's own YAML block — scroll
+back to page one, or to the top of any page, to see each one at work.
 
-- \`title:\` — appears centered at the top of page one
-- \`authors:\` — listed under the title
-- \`date:\` — surfaced for your own use
-- \`pageNumbers: true\` — toggle off to suppress footer numbers; the menu
-  toggle is a default, frontmatter wins
+- \`title:\` — the document title; also the \`{title}\` placeholder
+- \`authors:\` — one name or a list
+- \`date:\` — feeds the cover page and the \`{date}\` placeholder
+- \`lang:\` — \`en\`, \`de\`, \`de-AT\`, … drives hyphenation, smart quotes and
+  Typst's built-in titles: under \`lang: de\` a \`[toc]\` is headed
+  "Inhaltsverzeichnis" instead of "Contents"
+- \`pageNumbers:\` — \`true\`, \`false\`, or a format: \`"1"\` for a bare number,
+  \`"1/1"\` for \`3 / 12\` (what this document uses). The menu toggle is only a
+  default — frontmatter wins.
+
+---
+
+## Running header & footer
+
+Six optional slots — \`header-left\`, \`header-center\`, \`header-right\` and the
+same three for \`footer-\`. They are small, grey, have no separating rule, and
+start on the **second** page, so a cover or title page stays clean. This
+document uses four of them:
+
+\`\`\`yaml
+---
+pageNumbers: "1/1"      # -> the "4 / 12" in the footer centre
+header-left: "{title}"
+header-right: "{date}"
+footer-left: md2pdf
+---
+\`\`\`
+
+Placeholders: \`{page}\`, \`{pages}\`, \`{title}\`, \`{subtitle}\`, \`{author}\`,
+\`{authors}\`, \`{date}\`. Anything unrecognised is left as written.
+
+A slot can hold a graphic instead of text, using ordinary Markdown image
+syntax. A remote \`https://\` URL works there too, and is fetched exactly like a
+body image:
+
+\`\`\`yaml
+header-right: "![](logo.png =0x22)"   # =WxH in points, =x22 sets height only
+\`\`\`
+
+\`footer-center\` defaults to the page number, so leaving every slot unset keeps
+the familiar centered number and nothing else.
+
+---
+
+## Cover page
+
+Page one of this document is a cover. Set \`cover:\` to one of \`arcs\`,
+\`strata\`, \`wedge\` or \`grid\`. The cover counts as page one, so the first
+content page is numbered 2 and the header and footer begin there. Title,
+subtitle, authors and date all move onto it.
+
+\`\`\`yaml
+---
+title: md2pdf Feature Demo
+authors: [md2pdf Team]
+date: 2026-07-25
+cover: arcs
+cover-color: ocean                     # see the palette list below
+cover-subtitle: Every feature, one document
+cover-logo: "![](logo.svg)"            # optional, placed top-right
+---
+\`\`\`
+
+The four geometries fill the bottom of the page: \`arcs\` (quarter-discs from
+the bottom-left), \`strata\` (slanted bands), \`wedge\` (one layered diagonal),
+\`grid\` (a fading dot lattice over solid bars).
+
+\`cover-color\` takes a named palette — \`ocean\`, \`ink\`, \`ember\`, \`plum\`,
+\`forest\`, \`crimson\`, \`teal\`, \`gold\`, or \`rub\` (Ruhr-Universität Bochum house
+colours) — or any hex value such as \`"#0074de"\`, from which the lighter tones
+are derived. The palette only tints the geometry and the hairline under the
+title; cover text is always black. Cover mode and letter mode are mutually
+exclusive — letter mode wins.
 
 ---
 

@@ -476,7 +476,8 @@
 
   function collectReferencedImageAssets(md: string): Record<string, Uint8Array> {
     const referenced = new Set<string>()
-    const markdownImageRegex = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+    // The tail also covers HackMD `=WxH` sizing, not just a quoted title.
+    const markdownImageRegex = /!\[[^\]]*]\(([^)\s]+)(?:\s+[^)]*)?\)/g
 
     for (const match of md.matchAll(markdownImageRegex)) {
       const path = match[1]

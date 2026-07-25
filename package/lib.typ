@@ -70,6 +70,50 @@
   r
 }
 
+// Any scalar frontmatter value as a display string. YAML hands back a datetime
+// for unquoted dates, which `str()` cannot take.
+#let _text-of(v) = if type(v) == datetime { v.display() } else { str(v) }
+
+// Frontmatter `lang`, as `(lang, region)`. Accepts "de" or "de-AT"; the region
+// is optional. Typst localises `outline(title: auto)` and friends from this, so
+// `[toc]` becomes "Inhaltsverzeichnis" under `lang: de`.
+#let _lang-of(fm) = {
+  let raw = fm.at("lang", default: "en")
+  let parts = _text-of(raw).trim().split("-")
+  let lang = lower(parts.at(0))
+  if lang == "" { lang = "en" }
+  (lang, if parts.len() > 1 { upper(parts.at(1)) } else { none })
+}
+
+// Frontmatter `date`, as a display string.
+#let _date-of(fm) = {
+  let d = fm.at("date", default: none)
+  if d == none { none } else { _text-of(d) }
+}
+
+// Collect the running header/footer slots present in the frontmatter.
+#let _furniture-args(fm) = {
+  let r = (:)
+  for edge in ("header", "footer") {
+    for side in ("left", "center", "right") {
+      let key = edge + "-" + side
+      let v = fm.at(key, default: fm.at(edge + "_" + side, default: none))
+      if v != none { r.insert(key, _text-of(v)) }
+    }
+  }
+  r
+}
+
+// Collect the cover-page fields present in the frontmatter.
+#let _cover-args(fm) = {
+  let r = (:)
+  for key in ("cover", "cover-color", "cover-subtitle", "cover-logo", "cover-date") {
+    let v = fm.at(key, default: fm.at(key.replace("-", "_"), default: none))
+    if v != none { r.insert(key, if type(v) == bool { v } else { _text-of(v) }) }
+  }
+  r
+}
+
 // Remote-image manifest [(url, alias), ...], discovered by the engine.
 #let _remotes(md) = {
   str(_engine.remotes(bytes(md)))
@@ -86,7 +130,11 @@
 // Returns `(skip, remotes, body, template, scope)`. The caller (`main.typ`)
 // does the final `eval`, so `image()` paths resolve against the document root.
 //
-// Named `..opts` (title, authors, page-numbers) override frontmatter.
+// Named `..opts`: `title` / `authors` override frontmatter, `page-numbers` is a
+// default frontmatter can override, and `asset` loads a document-relative image
+// path. `asset` must be a closure defined in the calling file — an `image()`
+// call written inside this package would resolve against the package root, not
+// the document root.
 #let prepare(markdown, ..opts) = {
   let remotes = _remotes(markdown)
   if _querying {
@@ -110,11 +158,23 @@
       template: article.with(
         title: title,
         authors: named.at("authors", default: _authors-of(fm)),
-        page-numbers: named.at(
-          "page-numbers",
-          default: fm.at("pageNumbers", default: fm.at("page-numbers", default: true)),
+        date: _date-of(fm),
+        lang: _lang-of(fm).at(0),
+        region: _lang-of(fm).at(1),
+        remotes: remotes,
+        asset: named.at("asset", default: image),
+        // The document declares its own layout: frontmatter beats the caller's
+        // value (the web app's page-numbers toggle is a default, not an override).
+        page-numbers: fm.at(
+          "pageNumbers",
+          default: fm.at(
+            "page-numbers",
+            default: named.at("page-numbers", default: true),
+          ),
         ),
         .._letter-args(fm),
+        .._furniture-args(fm),
+        .._cover-args(fm),
       ),
       scope: (
         admonition: admonition,
