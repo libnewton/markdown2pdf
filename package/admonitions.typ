@@ -73,12 +73,17 @@
       radius: 2pt,
     )
   }
+  // Items need more air between them than the 1em leading inside one, or a
+  // checklist of wrapped items reads as a single block of text.
   block(
     width: 100%,
-    above: 0.35em,
-    below: 0.35em,
+    above: 1em,
+    below: 1em,
     {
-      stack(dir: ltr, spacing: 0.5em, mark, body)
+      // The stack lines the box up with the top of the first *line box*, which
+      // sits above the cap height — hence the nudge, so the box reads as
+      // centred on the first line instead of hanging below its baseline.
+      stack(dir: ltr, spacing: 0.5em, move(dy: -0.1em, mark), body)
     },
   )
 }

@@ -24,7 +24,7 @@
   import { settingsStore } from '$lib/stores/settingsStore.svelte'
   import { SOCIAL_IMAGE } from '$lib/seo'
 
-  import type { SavedDocument } from '$lib/storage/documents'
+  import type { SavedDocument, SavedDocumentAsset } from '$lib/storage/documents'
 
   // Props
   interface Props {
@@ -48,12 +48,19 @@
 
   type LocalImageAsset = {
     bytes: Uint8Array<ArrayBuffer>
-    objectUrl: string
+    mimeType: string
   }
 
   let imageAssets = $state<Record<string, LocalImageAsset>>({})
   // Images handed to the Typst worker, keyed by their path in the document.
   type ImageMap = Record<string, Uint8Array<ArrayBuffer>>
+
+  // What gets stored in IndexedDB. Unproxied — IndexedDB cannot clone a
+  // `$state` proxy — and a fresh identity on every upload, which is how the
+  // autosave below knows the bytes need writing again.
+  const documentAssets = $derived(
+    $state.snapshot(imageAssets) as Record<string, SavedDocumentAsset>,
+  )
 
   // PWA Service Worker — useRegisterSW touches `navigator` at setup time, so
   // we can only call it in the browser. SSR/prerender gets a fallback store
@@ -86,6 +93,7 @@
 
   function applyLoadedDocument(doc: SavedDocument) {
     markdown = doc.content
+    imageAssets = (doc.assets ?? {}) as Record<string, LocalImageAsset>
     documentStore.finishDocumentTransition()
   }
 
@@ -306,17 +314,20 @@
       window.removeEventListener('pagehide', handleHide)
       window.removeEventListener('keydown', handleKey, true)
       if (resizeTimer) clearTimeout(resizeTimer)
-      for (const asset of Object.values(imageAssets)) {
-        URL.revokeObjectURL(asset.objectUrl)
-      }
     }
   })
 
-  // Auto-save document to IndexedDB
+  // Auto-save document to IndexedDB. Images are written only when they change:
+  // a save without them keeps the stored ones, so ordinary typing does not
+  // re-serialize every image in the document on each keystroke.
+  let savedAssets: Record<string, SavedDocumentAsset> | null = null
   $effect(() => {
     if (!browser || !hasInitializedMarkdown || !documentStore.currentDocId) return
     if (documentStore.isTransitioningDocument) return
-    documentStore.autoSave(documentStore.currentDocId, markdown)
+    const assets = documentAssets
+    const changed = assets !== savedAssets
+    savedAssets = assets
+    documentStore.autoSave(documentStore.currentDocId, markdown, changed ? assets : undefined)
   })
 
   // Auto-compile effect (debounce 450ms). Gated by the live-update setting:
@@ -559,13 +570,8 @@
     target.value = ''
   }
 
-  function handleImageSaved(
-    path: string,
-    bytes: Uint8Array<ArrayBuffer>,
-    objectUrl: string,
-    _mimeType: string,
-  ) {
-    imageAssets[path] = { bytes, objectUrl }
+  function handleImageSaved(path: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string) {
+    imageAssets[path] = { bytes, mimeType }
   }
 
   function collectReferencedImageAssets(md: string): ImageMap {
@@ -785,6 +791,7 @@
         mode="pdf"
         templates={PDF_TEMPLATES}
         currentContent={markdown}
+        {documentAssets}
         onDocumentLoad={(doc) => { applyLoadedDocument(doc) }}
       />
     </div>

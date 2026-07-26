@@ -26,7 +26,11 @@
   // Cover page. Mutually exclusive with letter mode: a cover would push the
   // DIN 5008 address field to page 2 and break the envelope-window alignment.
   let cover-style = args.at("cover", default: none)
-  let cover-mode = cover-style != none and cover-style != false and not letter-mode
+  let cover-image = args.at("cover-image", default: none)
+  // A cover image is enough on its own — `cover: true` alongside it is optional.
+  let cover-mode = (
+    (cover-style != none and cover-style != false) or cover-image != none
+  ) and not letter-mode
   let cover-subtitle = args.at("cover-subtitle", default: "")
   let cover-date = args.at("cover-date", default: if date == none { "" } else { date })
 
@@ -165,18 +169,38 @@
   }
 
   // 7) Inline code: light background + rounded corners
-  // Inline code sits at 0.95em — close enough to the body to read at a
-  // glance, but a hair smaller because monospace x-height runs hot.
-  // `outset` extends the background up/down beyond the layout box so tall
-  // glyphs (brackets, descenders) sit inside the tint without pushing the
-  // surrounding line apart.
-  show raw.where(block: false): it => box(
-    fill: luma(238),
-    inset: (x: 4pt, y: 0pt),
-    outset: (top: 2pt, bottom: 3pt),
-    radius: 3pt,
-    text(size: 0.95em, it),
-  )
+  // Typst renders `raw` at 0.8 of the surrounding size, which leaves code
+  // visibly smaller than the prose; the size below is absolute because an `em`
+  // here would resolve against that 0.8 and shrink it again.
+  //
+  // Short spans are a `box`: padding on all four sides, and they are short
+  // enough never to need a line break. A long one is a `highlight` instead,
+  // because a box is a single unbreakable unit — a full path would overhang
+  // the margin or stretch the line before it into a row of gaps. The highlight
+  // is paint rather than layout, so its side padding has to be real spacing
+  // inside the tint (`extent` would paint over the following word space) and
+  // its vertical padding comes from the edges, which cost no layout at all.
+  // The vertical padding is measured, not guessed: braces, parentheses and
+  // descenders reach past the mono font's own line box, and the tint has to
+  // stay clear of all of them. The two branches use different mechanisms, so
+  // their edges are tuned to land in the same place.
+  let code-size = body-size * 0.86
+  let code-fill = luma(238)
+  show raw.where(block: false): it => {
+    let code = text(size: code-size, it)
+    if it.text.clusters().len() <= 40 {
+      box(fill: code-fill, inset: (x: 0.2em), outset: (y: 0.25em), radius: 3pt, code)
+    } else {
+      highlight(
+        fill: code-fill,
+        extent: 0pt,
+        radius: 3pt,
+        top-edge: 0.95em,
+        bottom-edge: -0.34em,
+        { h(0.2em); code; h(0.2em) },
+      )
+    }
+  }
 
   // 8) Code blocks: rounded corners + light grey background + left-gutter line numbers
   // Scope the raw.line rule inside the block rule so it does not fire for
@@ -230,6 +254,8 @@
       logo: args.at("cover-logo", default: none),
       palette: args.at("cover-color", default: "ocean"),
       decoration: if type(cover-style) == str { cover-style } else { "arcs" },
+      cover-image: cover-image,
+      text-color: args.at("cover-text-color", default: black),
       remotes: remotes,
       asset: asset,
     )
