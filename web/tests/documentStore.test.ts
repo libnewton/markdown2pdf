@@ -120,6 +120,22 @@ describe('documentStore persistence guards', () => {
 		expect(documentsMock.docs.get(doc.id)?.content).toBe('# Updated Slide Title');
 	});
 
+	it('keeps assets a superseded autosave was about to write', async () => {
+		const { documentsMock, storeModule } = await loadStoreWithMock();
+		const doc = await storeModule.documentStore.createDocument('pdf', '', undefined, 'blank');
+		storeModule.documentStore.finishDocumentTransition();
+
+		vi.useFakeTimers();
+		const assets = { 'images/cover.png': { bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png' } };
+		storeModule.documentStore.autoSave(doc.id, '# With image', assets);
+		// A keystroke before the debounce elapses — it carries no assets.
+		storeModule.documentStore.autoSave(doc.id, '# With image!');
+		await vi.advanceTimersByTimeAsync(storeModule.AUTOSAVE_DEBOUNCE_MS);
+
+		expect(documentsMock.docs.get(doc.id)?.content).toBe('# With image!');
+		expect(Object.keys(documentsMock.docs.get(doc.id)?.assets ?? {})).toEqual(['images/cover.png']);
+	});
+
 	it('flushes pending saves before creating another document', async () => {
 		const { documentsMock, storeModule } = await loadStoreWithMock();
 		const first = await storeModule.documentStore.createDocument(

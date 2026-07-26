@@ -107,7 +107,16 @@
 // Collect the cover-page fields present in the frontmatter.
 #let _cover-args(fm) = {
   let r = (:)
-  for key in ("cover", "cover-color", "cover-subtitle", "cover-logo", "cover-date") {
+  let keys = (
+    "cover",
+    "cover-color",
+    "cover-subtitle",
+    "cover-logo",
+    "cover-date",
+    "cover-image",
+    "cover-text-color",
+  )
+  for key in keys {
     let v = fm.at(key, default: fm.at(key.replace("-", "_"), default: none))
     if v != none { r.insert(key, if type(v) == bool { v } else { _text-of(v) }) }
   }

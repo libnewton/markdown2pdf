@@ -3,7 +3,8 @@
 // Two independent choices: a geometry preset (`cover:`) drawn into the page
 // background, and a colour palette (`cover-color:`). Everything is anchored to
 // the physical page edges — background content resolves `100%` against the full
-// page, ignoring margins.
+// page, ignoring margins. A `cover-image:` replaces the geometry with a
+// full-bleed image; `cover-text-color:` keeps the title legible on a dark one.
 
 #import "furniture.typ": image-args, parse-image-field, resolve-path
 
@@ -28,6 +29,25 @@
   if not name.starts-with("#") { return cover-palettes.ocean }
   let c = rgb(name)
   (primary: c, secondary: c.lighten(25%), tint: c.lighten(75%))
+}
+
+// Cover text is black unless the document says otherwise — a dark cover image
+// needs `cover-text-color: "#ffffff"` to stay legible.
+#let resolve-text-color(value) = {
+  if type(value) == color { return value }
+  if type(value) != str or value.trim() == "" { return black }
+  let v = value.trim()
+  if v.starts-with("#") { return rgb(v) }
+  (white: white, black: black).at(lower(v), default: black)
+}
+
+// A cover image is either a Markdown image (`![](path)` — the form that gets a
+// remote URL prefetched, as for `cover-logo`) or a bare path. Any `=WxH` sizing
+// is ignored: the image always covers the whole page.
+#let _cover-image-path(value) = {
+  if value == none or type(value) != str or value.trim() == "" { return none }
+  let img = parse-image-field(value)
+  if img != none { img.path } else { value.trim() }
 }
 
 // The template fixes `paper: "a4"`, so page-edge geometry can be absolute.
@@ -99,17 +119,26 @@
   logo: none,
   palette: "ocean",
   decoration: "arcs",
+  cover-image: none,
+  text-color: black,
   remotes: (),
   asset: image,
   margin-x: 24mm,
 ) = {
   let pal = resolve-palette(palette)
+  let bg-path = _cover-image-path(cover-image)
   page(
     header: none,
     footer: none,
     numbering: none,
     margin: (x: margin-x, y: 22mm),
-    background: resolve-decoration(decoration)(pal),
+    // An image is the whole background; the geometry preset only draws when
+    // there is none. `fit: "cover"` crops instead of distorting a non-A4 image.
+    background: if bg-path == none {
+      resolve-decoration(decoration)(pal)
+    } else {
+      asset(resolve-path(bg-path, remotes), width: 100%, height: 100%, fit: "cover")
+    },
     {
       if logo != none and logo != "" {
         let img = parse-image-field(logo)
@@ -119,10 +148,11 @@
       }
 
       // Title block starts ~100mm down the page (content area begins at 22mm).
-      // All cover text is black; only the hairline carries the palette colour.
+      // Only the hairline carries the palette colour; the text follows
+      // `cover-text-color:`, black unless the document overrides it.
       v(78mm)
       set par(justify: false, leading: 0.5em, spacing: 0pt)
-      set text(fill: black)
+      set text(fill: resolve-text-color(text-color))
       text(30pt, weight: "black", title)
       if subtitle != "" {
         v(4mm)

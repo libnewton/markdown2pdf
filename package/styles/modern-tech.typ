@@ -26,7 +26,11 @@
   // Cover page. Mutually exclusive with letter mode: a cover would push the
   // DIN 5008 address field to page 2 and break the envelope-window alignment.
   let cover-style = args.at("cover", default: none)
-  let cover-mode = cover-style != none and cover-style != false and not letter-mode
+  let cover-image = args.at("cover-image", default: none)
+  // A cover image is enough on its own — `cover: true` alongside it is optional.
+  let cover-mode = (
+    (cover-style != none and cover-style != false) or cover-image != none
+  ) and not letter-mode
   let cover-subtitle = args.at("cover-subtitle", default: "")
   let cover-date = args.at("cover-date", default: if date == none { "" } else { date })
 
@@ -230,6 +234,8 @@
       logo: args.at("cover-logo", default: none),
       palette: args.at("cover-color", default: "ocean"),
       decoration: if type(cover-style) == str { cover-style } else { "arcs" },
+      cover-image: cover-image,
+      text-color: args.at("cover-text-color", default: black),
       remotes: remotes,
       asset: asset,
     )

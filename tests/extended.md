@@ -305,6 +305,8 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | `cover-subtitle`                             | text                                          | none                |
 | `cover-logo`                                 | an image, placed top-right                    | none                |
 | `cover-date`                                 | text                                          | value of `date`     |
+| `cover-image`                                | an image, filling the whole cover             | none                |
+| `cover-text-color`                           | `white`, `black`, or a hex value              | `black`             |
 | `letter-return`                              | one line                                      | none                |
 | `letter-to`                                  | one line or a list (up to six)                | none                |
 | `letter-from`                                | one line or a list                            | none                |
@@ -384,7 +386,23 @@ cover-date: May 2026                   # optional, overrides `date` here only
 
 The four geometries fill the bottom of the page: `arcs` (quarter-discs from the bottom-left), `strata` (slanted bands), `wedge` (one layered diagonal), `grid` (a fading dot lattice over solid bars).
 
-`cover-color` takes a named palette — `ocean`, `ink`, `ember`, `plum`, `forest`, `crimson`, `teal`, `gold`, or `rub` (Ruhr-Universität Bochum house colours) — or any hex value such as `"#0074de"`, from which the lighter tones are derived. The palette only tints the geometry and the hairline under the title; cover text is always black. Cover mode and letter mode are mutually exclusive — letter mode wins.
+`cover-color` takes a named palette — `ocean`, `ink`, `ember`, `plum`, `forest`, `crimson`, `teal`, `gold`, or `rub` (Ruhr-Universität Bochum house colours) — or any hex value such as `"#0074de"`, from which the lighter tones are derived. The palette only tints the geometry and the hairline under the title. Cover mode and letter mode are mutually exclusive — letter mode wins.
+
+### A ready-made cover
+
+`cover-image` puts an existing design — an exported A4 background, a company template — behind the whole cover page, edge to edge. It switches the cover on by itself, and it replaces the geometry, so `cover:` is neither needed nor drawn:
+
+```yaml
+---
+title: Quarterly Report
+cover-image: cover-a4.png              # or "![](https://…/cover.png)" for a remote one
+cover-text-color: "#ffffff"            # dark artwork needs light text
+---
+```
+
+The path is resolved like any other image: relative to the document in the CLI, and to the uploaded asset path in the web app — drop the image into the editor, then move the inserted `images/…` path into `cover-image:`. A remote cover needs the Markdown form (`"![](url)"`), which is what gets it prefetched. Sizing is ignored: the image always covers the page, cropped rather than distorted if it is not A4. PDF covers are not supported — export them as PNG or SVG first.
+
+Title, subtitle, authors and date stay where they always are, so `cover-text-color` is usually all a dark background needs; it takes `white`, `black`, or a hex value. The hairline keeps its `cover-color` tint.
 
 ---
 

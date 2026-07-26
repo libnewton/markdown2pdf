@@ -223,13 +223,15 @@ export const documentStore = {
 		if (isTransitioningDocument) return;
 		saveStatus = 'saving';
 		if (saveTimer) clearTimeout(saveTimer);
-		pendingSave = { id, content, assets };
+		// The debounce coalesces calls, so a save that carries no assets has to
+		// inherit the ones a superseded call was about to write — otherwise the
+		// next keystroke silently drops a freshly added image.
+		const carried = assets ?? (pendingSave?.id === id ? pendingSave.assets : undefined);
+		const mine = { id, content, assets: carried };
+		pendingSave = mine;
 		saveTimer = setTimeout(async () => {
-			const pending = pendingSave;
-			if (!pending || pending.id !== id || pending.content !== content || pending.assets !== assets) {
-				return;
-			}
-			await this.saveNow(id, content, assets);
+			if (pendingSave !== mine) return;
+			await this.saveNow(id, content, carried);
 		}, AUTOSAVE_DEBOUNCE_MS);
 	},
 

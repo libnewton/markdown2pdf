@@ -14,12 +14,7 @@
     pageBreakToken?: string | null
     pageBreakLabel?: string | null
     pageBreakTitle?: string | null
-    onImageSaved?: (
-      path: string,
-      bytes: Uint8Array<ArrayBuffer>,
-      objectUrl: string,
-      mimeType: string,
-    ) => void
+    onImageSaved?: (path: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string) => void
   }
 
   let {
@@ -70,10 +65,9 @@
 
     const path = `images/${createAssetId()}.${getImageExtension(file)}`
     const bytes = new Uint8Array(await file.arrayBuffer())
-    const objectUrl = URL.createObjectURL(file)
     const mimeType = file.type || 'application/octet-stream'
 
-    onImageSaved?.(path, bytes, objectUrl, mimeType)
+    onImageSaved?.(path, bytes, mimeType)
 
     return path
   }
