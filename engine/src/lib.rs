@@ -279,22 +279,19 @@ fn fence_marker(line: &str) -> Option<(char, usize)> {
 /// `+` in delimiter rows, so the `+`s are stripped here and the widths recorded
 /// behind a `<!--tablewidths:N-->` placeholder before the header row.
 fn preprocess_table_widths(src: &str) -> (String, Vec<Vec<usize>>) {
-    let mut blocks: Vec<Vec<usize>> = Vec::new();
     let lines: Vec<&str> = src.split('\n').collect();
+    if !lines
+        .iter()
+        .any(|l| l.contains('+') && l.contains('-') && l.contains('|'))
+    {
+        return (src.to_string(), Vec::new());
+    }
+    let code = code_block_lines(src);
+    let mut blocks: Vec<Vec<usize>> = Vec::new();
     let mut out: Vec<String> = Vec::new();
-    let mut fence: Option<(char, usize)> = None;
     for i in 0..lines.len() {
         let line = lines[i];
-        if let Some((fc, fl)) = fence_marker(line) {
-            match fence {
-                None => fence = Some((fc, fl)),
-                Some((c, l)) if c == fc && fl >= l => fence = None,
-                _ => {}
-            }
-            out.push(line.to_string());
-            continue;
-        }
-        if fence.is_some() {
+        if code.contains(&(i + 1)) {
             out.push(line.to_string());
             continue;
         }
@@ -303,9 +300,12 @@ fn preprocess_table_widths(src: &str) -> (String, Vec<Vec<usize>>) {
             let id = blocks.len();
             blocks.push(widths);
             let header = out.pop().unwrap_or_default();
-            out.push(String::new());
-            out.push(format!("<!--tablewidths:{id}-->"));
-            out.push(String::new());
+            // The placeholder inherits the header's container prefix so a table
+            // inside a list item or a blockquote stays inside it. No blank lines
+            // around it: an HTML comment is a block on its own and can interrupt
+            // a paragraph, and blank lines would loosen an enclosing list.
+            let (prefix, _) = split_prefix(&header);
+            out.push(format!("{prefix}<!--tablewidths:{id}-->"));
             out.push(header);
             out.push(stripped);
             continue;
@@ -315,17 +315,39 @@ fn preprocess_table_widths(src: &str) -> (String, Vec<Vec<usize>>) {
     (out.join("\n"), blocks)
 }
 
+/// 1-based line numbers comrak reads as code, fenced or indented. The width
+/// pass leaves those alone: a `+` there is sample text, not a marker. Asking
+/// the parser is the only reliable way to tell an indented code block from a
+/// table nested in a list item.
+fn code_block_lines(src: &str) -> HashSet<usize> {
+    let arena = Arena::new();
+    let root = parse_document(&arena, src, &build_options());
+    let mut set = HashSet::new();
+    for node in root.descendants() {
+        let data = node.data.borrow();
+        if matches!(data.value, NodeValue::CodeBlock(_)) {
+            set.extend(data.sourcepos.start.line..=data.sourcepos.end.line);
+        }
+    }
+    set
+}
+
 /// If `line` is a GFM separator row carrying `+` width markers (and `prev` is
 /// its header row), return the column widths and the `+`-stripped separator.
 fn parse_separator_widths(line: &str, prev: Option<&str>) -> Option<(Vec<usize>, String)> {
-    if !is_pipe_row(line) {
+    let (prefix, body) = split_prefix(line);
+    if !is_pipe_row(body) {
         return None;
     }
-    let prev = prev?;
-    if !is_pipe_row(prev) || split_cells(prev).iter().all(|c| is_sep_cell(c)) {
+    let (prev_prefix, prev_body) = split_prefix(prev?);
+    // Both rows must sit at the same blockquote depth to belong to one table.
+    if quote_depth(prefix) != quote_depth(prev_prefix) {
         return None;
     }
-    let cells = split_cells(line);
+    if !is_pipe_row(prev_body) || split_cells(prev_body).iter().all(|c| is_sep_cell(c)) {
+        return None;
+    }
+    let cells = split_cells(body);
     if cells.is_empty() || !cells.iter().all(|c| is_sep_cell(c)) {
         return None;
     }
@@ -334,24 +356,38 @@ fn parse_separator_widths(line: &str, prev: Option<&str>) -> Option<(Vec<usize>,
     }
     let widths = cells.iter().map(|c| 1 + c.matches('+').count()).collect();
     let stripped: Vec<String> = cells.iter().map(|c| c.replace('+', "")).collect();
-    Some((widths, rebuild_row(line, &stripped)))
+    Some((widths, format!("{prefix}{}", rebuild_row(body, &stripped))))
 }
 
-fn is_pipe_row(line: &str) -> bool {
-    let t = line.trim();
-    t.len() >= 2 && t.starts_with('|') && t.ends_with('|')
+/// Split off a line's block-container prefix (indentation and `>` markers).
+fn split_prefix(line: &str) -> (&str, &str) {
+    let end = line
+        .find(|c: char| c != ' ' && c != '\t' && c != '>')
+        .unwrap_or(line.len());
+    line.split_at(end)
 }
 
-/// A GFM separator cell, optionally with trailing `+` width markers:
-/// `^\s*:?-{2,}\+*:?\s*$`.
+fn quote_depth(prefix: &str) -> usize {
+    prefix.matches('>').count()
+}
+
+/// A table row: any line with a `|` in it. GFM allows the outer pipes to be
+/// omitted, so a leading/trailing `|` cannot be required.
+fn is_pipe_row(body: &str) -> bool {
+    body.contains('|')
+}
+
+/// A GFM separator cell, optionally with `+` width markers on either side of
+/// the alignment colon: `^\s*:?-+(\+*:?|:?\+*)\s*$`.
 fn is_sep_cell(cell: &str) -> bool {
     let t = cell.trim();
     let t = t.strip_prefix(':').unwrap_or(t);
     let dashes = t.chars().take_while(|&c| c == '-').count();
-    if dashes < 2 {
+    if dashes == 0 {
         return false;
     }
-    let rest = t[dashes..].strip_suffix(':').unwrap_or(&t[dashes..]);
+    let rest = t[dashes..].trim_end_matches('+');
+    let rest = rest.strip_suffix(':').unwrap_or(rest);
     rest.chars().all(|c| c == '+')
 }
 
@@ -589,6 +625,12 @@ impl<'a> Ctx<'a> {
 
     fn render_block(&self, node: &'a AstNode<'a>, indent: usize) -> String {
         let value = node.data.borrow().value.clone();
+        // A pending width id belongs to the table that directly follows its
+        // placeholder. If anything else intervenes the markers never became a
+        // table, so drop them rather than let them land on a later one.
+        if !matches!(value, NodeValue::Table(_) | NodeValue::HtmlBlock(_)) {
+            self.pending_widths.set(None);
+        }
         let out = match value {
             NodeValue::FrontMatter(_) => String::new(),
             NodeValue::Document => self.render_block_children(node),
@@ -869,6 +911,9 @@ impl<'a> Ctx<'a> {
             NodeValue::HtmlInline(h) => match h.trim().to_ascii_lowercase().as_str() {
                 "<u>" => "#underline[".to_string(),
                 "</u>" => "]".to_string(),
+                // Table cells hold inline content only, so `<br>` is the one
+                // way to get a second line into one.
+                "<br>" | "<br/>" | "<br />" => "#linebreak()".to_string(),
                 _ => esc_text(&h),
             },
             NodeValue::ShortCode(s) => render_emoji(&s.emoji),
@@ -1077,7 +1122,14 @@ fn collect_twemoji_codepoints(src: &str) -> Vec<String> {
 }
 
 fn render_inline_code(literal: &str) -> String {
-    format!("`{}`", literal.replace('`', "\\`"))
+    // Typst raw text has no escape sequences, so a literal backtick cannot be
+    // escaped inside `…` — it would close the raw early and leave the rest of
+    // the document unbalanced. The function form takes a normal string.
+    if literal.contains('`') {
+        format!("#raw(\"{}\")", esc_string(literal))
+    } else {
+        format!("`{}`", literal)
+    }
 }
 
 /// Math is delegated to the Typst package's `md-math` helper (mitex-backed),
@@ -1302,4 +1354,67 @@ fn indent_lines(text: &str, indent: usize) -> String {
         .map(|l| format!("{pad}{l}"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn widths(md: &str) -> Vec<Vec<usize>> {
+        preprocess_table_widths(md).1
+    }
+
+    fn stripped(md: &str) -> String {
+        preprocess_table_widths(md).0
+    }
+
+    #[test]
+    fn counts_pluses_per_column() {
+        assert_eq!(widths("| a | b |\n| --- | ---++ |\n"), vec![vec![1, 3]]);
+    }
+
+    #[test]
+    fn accepts_single_dash_and_alignment_colons() {
+        assert_eq!(widths("| a | b | c |\n| - | :-+ | -:+ |\n"), vec![vec![1, 2, 2]]);
+    }
+
+    #[test]
+    fn accepts_missing_outer_pipes() {
+        assert_eq!(widths("a | b\n--- | ---+\n"), vec![vec![1, 2]]);
+    }
+
+    #[test]
+    fn keeps_the_blockquote_prefix() {
+        let out = stripped("> | a | b |\n> | - | -+ |\n");
+        assert_eq!(widths("> | a | b |\n> | - | -+ |\n"), vec![vec![1, 2]]);
+        assert!(out.lines().all(|l| l.starts_with('>')), "{out}");
+    }
+
+    #[test]
+    fn keeps_the_list_item_indent() {
+        let out = stripped("1. step\n\n   | a | b |\n   | - | -+ |\n");
+        assert!(out.contains("   <!--tablewidths:0-->"), "{out}");
+    }
+
+    #[test]
+    fn ignores_code_blocks() {
+        let fenced = "```\n| a | b |\n| - | -+ |\n```\n";
+        assert!(widths(fenced).is_empty());
+        assert_eq!(stripped(fenced), fenced);
+        let indented = "text\n\n    | a | b |\n    | - | -+ |\n";
+        assert!(widths(indented).is_empty());
+        assert_eq!(stripped(indented), indented);
+    }
+
+    #[test]
+    fn ignores_rows_that_are_not_separators() {
+        assert!(widths("| a | b |\n| c+ | d |\n").is_empty());
+        assert!(widths("| --- | ---+ |\n").is_empty());
+    }
+
+    #[test]
+    fn inline_code_with_a_backtick_uses_the_function_form() {
+        assert_eq!(render_inline_code("a`b"), "#raw(\"a`b\")");
+        assert_eq!(render_inline_code("ab"), "`ab`");
+    }
 }

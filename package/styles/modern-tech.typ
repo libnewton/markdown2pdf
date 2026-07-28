@@ -186,11 +186,10 @@
   // their edges are tuned to land in the same place.
   let code-size = body-size * 0.86
   let code-fill = luma(238)
-  show raw.where(block: false): it => {
-    let code = text(size: code-size, it)
-    if it.text.clusters().len() <= 40 {
-      box(fill: code-fill, inset: (x: 0.2em), outset: (y: 0.25em), radius: 3pt, code)
-    } else {
+  let mono-font = ("JetBrains Mono", "Fira Code", "Consolas", "DejaVu Sans Mono")
+  let code-tint(body, breakable) = {
+    let code = text(size: code-size, body)
+    if breakable {
       highlight(
         fill: code-fill,
         extent: 0pt,
@@ -199,8 +198,11 @@
         bottom-edge: -0.34em,
         { h(0.2em); code; h(0.2em) },
       )
+    } else {
+      box(fill: code-fill, inset: (x: 0.2em), outset: (y: 0.25em), radius: 3pt, code)
     }
   }
+  show raw.where(block: false): it => code-tint(it, it.text.clusters().len() > 40)
 
   // 8) Code blocks: rounded corners + light grey background + left-gutter line numbers
   // Scope the raw.line rule inside the block rule so it does not fire for
@@ -222,7 +224,7 @@
       it
     },
   )
-  show raw: set text(font: ("JetBrains Mono", "Fira Code", "Consolas", "DejaVu Sans Mono"))
+  show raw: set text(font: mono-font)
 
   // 9) Tables: light grey header + rounded border
   set table(
@@ -230,12 +232,38 @@
     inset: 8pt,
     fill: (x, y) => if y == 0 { luma(240) } else { none },
   )
+  // A column is only as wide as its share of the page, so anything that cannot
+  // break inside a cell paints over the neighbouring column. Four defences:
+  // trim the padding on wide tables; hyphenate prose; measure every code span
+  // against the cell it landed in and give the ones that do not fit the
+  // breakable tint (the box branch is one atomic unit — fine in a paragraph,
+  // too rigid in a cell); and offer runs the line breaker has no purchase on —
+  // identifiers, compounds, hashes — a break between every character. That
+  // last character class excludes the punctuation Typst already breaks after,
+  // so URLs and paths keep breaking at their natural seams.
   show table: it => block(
     radius: 6pt,
     stroke: 0.5pt + luma(200),
     clip: true,
     inset: 0pt,
-    it,
+    {
+      // Past half a dozen columns the padding costs more than the text it
+      // frames, so buy the space back sideways.
+      let cols = if type(it.columns) == array { it.columns.len() } else { 1 }
+      set table(inset: (x: if cols > 6 { 4pt } else { 8pt }, y: 8pt))
+      set text(hyphenate: true)
+      // The span goes in as plain mono text, not as `raw`: the rule above also
+      // matches `raw`, and a nested match would tint the span twice.
+      show table.cell: c => layout(cell => {
+        show raw.where(block: false): it => context {
+          let code = text(font: mono-font, it.text)
+          code-tint(code, measure(code-tint(code, false)).width > cell.width)
+        }
+        c
+      })
+      show regex("[^\\s\u{200b}/?&=#,;:]{15,}"): t => t.text.clusters().join("\u{200b}")
+      it
+    },
   )
   show table: set par(justify: false, spacing: 0.6em)
   show table.cell.where(y: 0): set text(weight: "bold")
