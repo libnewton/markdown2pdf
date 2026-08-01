@@ -374,11 +374,5 @@
     v(1em)
   }
 
-  {
-    // Images: centered (the generator adds a caption when alt text is present).
-    // Scoped to the body so it cannot stretch the cover logo or a header image,
-    // which are sized boxes rather than full-width figures.
-    show image: it => align(center, it)
-    body
-  }
+  body
 }

@@ -200,7 +200,7 @@ The summary can sit on the opening line, as here, or on the first line of the bo
 
 ## Layout & alignment
 
-Wrap any block in \`:::left\`, \`:::center\`, or \`:::right\` to align it. Wrap several blocks (separated by blank lines) in \`::::row\` to lay them out side by side as equal-width columns.
+Wrap content in \`:::left\`, \`:::center\`, or \`:::right\` to align prose, headings, images, display math, and diagrams. Full-width structures such as tables and code blocks keep their own layout. Wrap several blocks (separated by blank lines) in \`::::row\` to lay them out side by side as equal-width columns.
 
 :::center
 #### A centered subheading
@@ -232,7 +232,7 @@ Warning on the right.
 
 ## Images
 
-Images are centered automatically and fill the text width unless you give them a size. Alt text becomes a small caption underneath; leave it empty for a bare image. \`http(s)\` URLs are fetched and embedded — in the browser they go through \`fetch\` (set a CORS proxy in the settings menu if a host refuses), in the CLI through a prefetch pass before the compile.
+Images are centered by default and fill the text width unless you give them a size. Wrap a sized image in an alignment directive to move it; its caption stays centered beneath the image. Alt text becomes the caption; leave it empty for a bare image. \`http(s)\` URLs are fetched and embedded — in the browser they go through \`fetch\` (set a CORS proxy in the settings menu if a host refuses), in the CLI through a prefetch pass before the compile.
 
 The path may be a file next to the document or an \`http(s)\` URL — both take the same size syntax.
 
@@ -244,7 +244,9 @@ The path may be a file next to the document or an \`http(s)\` URL — both take 
 | \`![Alt](img.png "=320x")\`    | 320 pt wide, height follows       |
 | \`![Alt](<img.png =320x200>)\` | same sizing, angle-bracket form   |
 
-![Octocat — fetched live from GitHub, sized 200×200](https://octodex.github.com/images/minion.png "=200x200")
+:::right
+![Octocat — fetched live from GitHub, sized 200×200 and right-aligned](https://octodex.github.com/images/minion.png "=200x200")
+:::
 
 ---
 

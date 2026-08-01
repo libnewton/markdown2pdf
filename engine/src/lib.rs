@@ -66,6 +66,10 @@ pub fn twemojis(markdown: &[u8]) -> Result<Vec<u8>, String> {
 /// Full Markdown -> Typst markup pipeline. Recursive: admonition and spoiler
 /// bodies are re-run through it so nested custom syntax works.
 fn convert_str(src: &str, strip_h1: bool) -> String {
+    convert_str_aligned(src, strip_h1, None)
+}
+
+fn convert_str_aligned(src: &str, strip_h1: bool, alignment: Option<Alignment>) -> String {
     let pre = preprocess(src);
     let arena = Arena::new();
     let root = parse_document(&arena, &pre.markdown, &build_options());
@@ -75,6 +79,7 @@ fn convert_str(src: &str, strip_h1: bool) -> String {
         spoilers: pre.spoilers,
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
+        alignment,
     };
     ctx.collect_footnotes(root);
     let children: Vec<&AstNode> = root.children().collect();
@@ -590,6 +595,32 @@ fn parse_placeholder(literal: &str, kind: &str) -> Option<usize> {
 // Rendering context
 // ==========================================================================
 
+#[derive(Clone, Copy)]
+enum Alignment {
+    Left,
+    Center,
+    Right,
+}
+
+impl Alignment {
+    fn from_kind(kind: &str) -> Option<Self> {
+        match kind {
+            "left" => Some(Self::Left),
+            "center" => Some(Self::Center),
+            "right" => Some(Self::Right),
+            _ => None,
+        }
+    }
+
+    fn typst(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
+        }
+    }
+}
+
 struct Ctx<'a> {
     /// Footnote definitions keyed by name, rendered inline at the reference.
     footnotes: HashMap<String, &'a AstNode<'a>>,
@@ -601,6 +632,7 @@ struct Ctx<'a> {
     table_widths: Vec<Vec<usize>>,
     /// Width id set by a `tablewidths` placeholder, consumed by the next table.
     pending_widths: std::cell::Cell<Option<usize>>,
+    alignment: Option<Alignment>,
 }
 
 impl<'a> Ctx<'a> {
@@ -665,7 +697,7 @@ impl<'a> Ctx<'a> {
             }
             NodeValue::Table(_) => return self.render_table(node, indent),
             NodeValue::FootnoteDefinition(_) => String::new(),
-            NodeValue::Math(m) => render_math(m.display_math, &m.literal),
+            NodeValue::Math(m) => render_math(m.display_math, &m.literal, self.visual_alignment()),
             // Anything else: fall back to inline rendering.
             _ => self.render_inline(node),
         };
@@ -691,17 +723,22 @@ impl<'a> Ctx<'a> {
         match a.kind.as_str() {
             // Layout directives render to plain Typst primitives.
             "left" | "center" | "right" => {
-                let inner = convert_str(&a.source, false);
+                let alignment = Alignment::from_kind(&a.kind).unwrap();
+                let inner = convert_str_aligned(&a.source, false, Some(alignment));
                 if inner.trim().is_empty() {
                     String::new()
                 } else {
-                    format!("#align({})[\n{}\n]", a.kind, indent_lines(&inner, 1))
+                    format!(
+                        "#align({})[\n{}\n]",
+                        alignment.typst(),
+                        indent_lines(&inner, 1)
+                    )
                 }
             }
-            "row" => render_row(&a.source),
+            "row" => render_row(&a.source, self.alignment),
             // Styled callout box.
             _ => {
-                let inner = convert_str(&a.source, false);
+                let inner = convert_str_aligned(&a.source, false, self.alignment);
                 let title = if a.title.is_empty() {
                     String::new()
                 } else {
@@ -722,7 +759,7 @@ impl<'a> Ctx<'a> {
             Some(s) => s,
             None => return String::new(),
         };
-        let inner = convert_str(&s.source, false);
+        let inner = convert_str_aligned(&s.source, false, self.alignment);
         format!(
             "#spoiler(summary: \"{}\")[\n{}\n]",
             esc_string(&s.summary),
@@ -735,7 +772,14 @@ impl<'a> Ctx<'a> {
         let info = info.trim();
         // `mermaid` fences are rendered as diagrams via the mmdr Typst package.
         if info.eq_ignore_ascii_case("mermaid") {
-            return indent_lines(&format!("#md-mermaid(\"{}\")", esc_string(code)), indent);
+            return indent_lines(
+                &format!(
+                    "#align({})[#md-mermaid(\"{}\")]",
+                    self.visual_alignment().typst(),
+                    esc_string(code)
+                ),
+                indent,
+            );
         }
         let fence = "`".repeat(max_backtick_run(code) + 1);
         let open = if info.is_empty() {
@@ -907,7 +951,7 @@ impl<'a> Ctx<'a> {
             NodeValue::Subscript => format!("#sub[{}]", self.render_inlines(node)),
             NodeValue::Underline => format!("#underline[{}]", self.render_inlines(node)),
             NodeValue::Code(c) => render_inline_code(&c.literal),
-            NodeValue::Math(m) => render_math(m.display_math, &m.literal),
+            NodeValue::Math(m) => render_math(m.display_math, &m.literal, self.visual_alignment()),
             NodeValue::HtmlInline(h) => match h.trim().to_ascii_lowercase().as_str() {
                 "<u>" => "#underline[".to_string(),
                 "</u>" => "]".to_string(),
@@ -918,7 +962,12 @@ impl<'a> Ctx<'a> {
             },
             NodeValue::ShortCode(s) => render_emoji(&s.emoji),
             NodeValue::Link(l) => render_link(&l.url, &self.render_inlines(node)),
-            NodeValue::Image(l) => render_image(&l.url, &l.title, &plain_text(node)),
+            NodeValue::Image(l) => render_image(
+                &l.url,
+                &l.title,
+                &plain_text(node),
+                self.visual_alignment(),
+            ),
             NodeValue::FootnoteReference(r) => self.render_footnote(&r.name),
             // Block nodes should not appear here, but render defensively.
             _ => self.render_inlines(node),
@@ -939,10 +988,14 @@ impl<'a> Ctx<'a> {
             }
         }
     }
+
+    fn visual_alignment(&self) -> Alignment {
+        self.alignment.unwrap_or(Alignment::Center)
+    }
 }
 
 /// Render a `:::row` block: each top-level child block becomes a grid column.
-fn render_row(source: &str) -> String {
+fn render_row(source: &str, alignment: Option<Alignment>) -> String {
     if source.trim().is_empty() {
         return String::new();
     }
@@ -955,6 +1008,7 @@ fn render_row(source: &str) -> String {
         spoilers: pre.spoilers,
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
+        alignment,
     };
     ctx.collect_footnotes(root);
     let cells: Vec<String> = root
@@ -1134,8 +1188,13 @@ fn render_inline_code(literal: &str) -> String {
 
 /// Math is delegated to the Typst package's `md-math` helper (mitex-backed),
 /// so the engine carries no LaTeX->Typst conversion.
-fn render_math(display: bool, latex: &str) -> String {
-    format!("#md-math({display}, \"{}\")", esc_string(latex.trim()))
+fn render_math(display: bool, latex: &str, alignment: Alignment) -> String {
+    let math = format!("#md-math({display}, \"{}\")", esc_string(latex.trim()));
+    if display {
+        format!("#align({})[#box[{math}]]", alignment.typst())
+    } else {
+        math
+    }
 }
 
 fn render_link(url: &str, label: &str) -> String {
@@ -1148,7 +1207,7 @@ fn render_link(url: &str, label: &str) -> String {
 }
 
 /// Port of `renderImage`: HackMD `=WxH` dimension syntax + remote-URL aliasing.
-fn render_image(url: &str, title: &str, alt: &str) -> String {
+fn render_image(url: &str, title: &str, alt: &str, alignment: Alignment) -> String {
     let mut url = url.to_string();
     let mut dims = parse_dims(title);
     if dims.is_none() {
@@ -1181,16 +1240,22 @@ fn render_image(url: &str, title: &str, alt: &str) -> String {
         None => args.push("width: 100%".to_string()),
     }
     let image_call = format!("#image({})", args.join(", "));
+    let figure_width = dims
+        .as_ref()
+        .and_then(|(width, _)| width.as_ref())
+        .map(|width| format!("{width}pt"))
+        .unwrap_or_else(|| "100%".to_string());
 
     // Alt text becomes a small centered caption, unless it is just a dim spec.
     let caption = alt.trim();
     let caption_is_dims =
         caption.starts_with('=') || caption.chars().next().is_some_and(|c| c.is_ascii_digit());
     if caption.is_empty() || caption_is_dims {
-        return image_call;
+        return format!("#align({})[{image_call}]", alignment.typst());
     }
     format!(
-        "#block(width: 100%, breakable: false)[\n  #align(center)[{image_call}]\n  #v(0.3em, weak: true)\n  #align(center, text(size: 0.85em, fill: luma(120), [{}]))\n]",
+        "#align({})[\n  #block(width: {figure_width}, breakable: false)[\n    #align(center)[{image_call}]\n    #v(0.3em, weak: true)\n    #align(center, text(size: 0.85em, fill: luma(120), [{}]))\n  ]\n]",
+        alignment.typst(),
         esc_text(caption)
     )
 }
@@ -1416,5 +1481,87 @@ mod tests {
     fn inline_code_with_a_backtick_uses_the_function_form() {
         assert_eq!(render_inline_code("a`b"), "#raw(\"a`b\")");
         assert_eq!(render_inline_code("ab"), "`ab`");
+    }
+
+    #[test]
+    fn keeps_visuals_centered_without_a_directive() {
+        assert_eq!(
+            render_image("image.png", "=80x", "", Alignment::Center),
+            "#align(center)[#image(\"image.png\", width: 80pt)]"
+        );
+        assert_eq!(
+            render_math(true, "x = 1", Alignment::Center),
+            "#align(center)[#box[#md-math(true, \"x = 1\")]]"
+        );
+    }
+
+    #[test]
+    fn aligns_a_captioned_image_as_one_sized_figure() {
+        let out = convert_str(":::left\n![Caption](image.png \"=80x\")\n:::\n", false);
+        assert!(out.contains("#align(left)[\n  #align(left)["), "{out}");
+        assert!(
+            out.contains("#block(width: 80pt, breakable: false)"),
+            "{out}"
+        );
+        assert!(out.contains("#align(center, text(size: 0.85em"), "{out}");
+    }
+
+    #[test]
+    fn nearest_alignment_reaches_visuals_in_nested_containers() {
+        let out = convert_str(
+            "::::::right\n:::::tip\n![](right.png \"=80x\")\n\n:::center\n![](center.png \"=80x\")\n:::\n:::::\n::::::\n",
+            false,
+        );
+        assert!(out.contains("#align(right)["), "{out}");
+        assert!(out.contains("#admonition(kind: \"tip\")"), "{out}");
+        assert!(
+            out.contains("#align(right)[#image(\"right.png\", width: 80pt)]"),
+            "{out}"
+        );
+        assert!(
+            out.contains("#align(center)[#image(\"center.png\", width: 80pt)]"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn inherited_alignment_reaches_rows_and_spoilers() {
+        let row = convert_str(
+            ":::::right\n::::row\n![](row.png \"=80x\")\n::::\n:::::\n",
+            false,
+        );
+        assert!(row.contains("#grid("), "{row}");
+        assert!(
+            row.contains("#align(right)[#image(\"row.png\", width: 80pt)]"),
+            "{row}"
+        );
+
+        let spoiler = convert_str(
+            ":::left\n+++++ Summary\n![](spoiler.png \"=80x\")\n+++++\n:::\n",
+            false,
+        );
+        assert!(spoiler.contains("#spoiler(summary: \"Summary\")"), "{spoiler}");
+        assert!(
+            spoiler.contains("#align(left)[#image(\"spoiler.png\", width: 80pt)]"),
+            "{spoiler}"
+        );
+    }
+
+    #[test]
+    fn aligns_display_math_and_mermaid_but_not_structural_blocks() {
+        let out = convert_str(
+            ":::right\n$$x = 1$$\n\n```mermaid\ngraph LR\n```\n\n```txt\ncode\n```\n\n| a | b |\n| - | - |\n| c | d |\n:::\n",
+            false,
+        );
+        assert!(
+            out.contains("#align(right)[#box[#md-math(true, \"x = 1\")]]"),
+            "{out}"
+        );
+        assert!(
+            out.contains("#align(right)[#md-mermaid(\"graph LR\")]"),
+            "{out}"
+        );
+        assert!(out.contains("```txt\n  code\n  ```"), "{out}");
+        assert!(out.contains("#table("), "{out}");
     }
 }
