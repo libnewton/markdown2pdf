@@ -15,13 +15,30 @@ initiate_protocol!();
 
 /// Token marking a preserved run of 3+ blank lines.
 const EXTRA_BLANK_LINE_TOKEN: &str = "[[md2pdf-blank-line]]";
+const CITATION_OPEN_TOKEN: &str = "\u{e000}md2pdf-cite:";
+const CITATION_CLOSE_TOKEN: &str = "\u{e001}";
 
 /// Convert Markdown (UTF-8 bytes) to Typst markup (UTF-8 bytes).
-/// `strip_h1` non-empty => drop a leading level-1 heading (it became the title).
+/// `strip_h1` non-empty drops a leading level-1 heading; `citations` non-empty
+/// enables `[@key]` citation rendering for an extracted inline bibliography.
 #[wasm_func]
-pub fn convert(markdown: &[u8], strip_h1: &[u8]) -> Result<Vec<u8>, String> {
+pub fn convert(markdown: &[u8], strip_h1: &[u8], citations: &[u8]) -> Result<Vec<u8>, String> {
     let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
-    Ok(convert_str(src, !strip_h1.is_empty()).into_bytes())
+    Ok(convert_str_with_citations(src, !strip_h1.is_empty(), !citations.is_empty()).into_bytes())
+}
+
+/// Markdown preceding a trailing inline BibTeX block, or the original source.
+#[wasm_func]
+pub fn without_inline_bibliography(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    Ok(split_inline_bibliography(src).0.into_bytes())
+}
+
+/// A trailing inline BibTeX block, or empty when none is present.
+#[wasm_func]
+pub fn inline_bibliography(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    Ok(split_inline_bibliography(src).1.into_bytes())
 }
 
 /// Plain text of a leading level-1 heading, or empty — used as the title.
@@ -65,12 +82,27 @@ pub fn twemojis(markdown: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Full Markdown -> Typst markup pipeline. Recursive: admonition and spoiler
 /// bodies are re-run through it so nested custom syntax works.
+#[cfg(test)]
 fn convert_str(src: &str, strip_h1: bool) -> String {
-    convert_str_aligned(src, strip_h1, None)
+    convert_str_with_citations(src, strip_h1, false)
 }
 
-fn convert_str_aligned(src: &str, strip_h1: bool, alignment: Option<Alignment>) -> String {
-    let pre = preprocess(src);
+fn convert_str_with_citations(src: &str, strip_h1: bool, citations: bool) -> String {
+    convert_str_aligned(src, strip_h1, None, citations)
+}
+
+fn convert_str_aligned(
+    src: &str,
+    strip_h1: bool,
+    alignment: Option<Alignment>,
+    citations: bool,
+) -> String {
+    let citation_source = if citations {
+        preprocess_citations(src)
+    } else {
+        src.to_string()
+    };
+    let pre = preprocess(&citation_source);
     let arena = Arena::new();
     let root = parse_document(&arena, &pre.markdown, &build_options());
     let mut ctx = Ctx {
@@ -80,6 +112,7 @@ fn convert_str_aligned(src: &str, strip_h1: bool, alignment: Option<Alignment>) 
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
         alignment,
+        citations,
     };
     ctx.collect_footnotes(root);
     let children: Vec<&AstNode> = root.children().collect();
@@ -154,8 +187,100 @@ struct Preprocessed {
     table_widths: Vec<Vec<usize>>,
 }
 
+/// Split a trailing inline BibTeX section from Markdown. Entry openers inside
+/// fenced code are ignored, so examples remain ordinary document content.
+fn split_inline_bibliography(src: &str) -> (String, String) {
+    let mut fence: Option<(char, usize)> = None;
+    let mut offset = 0;
+    for line in src.split_inclusive('\n') {
+        let plain = line.strip_suffix('\n').unwrap_or(line);
+        if let Some((fc, fl)) = fence_marker(plain) {
+            match fence {
+                None => fence = Some((fc, fl)),
+                Some((c, l)) if c == fc && fl >= l => fence = None,
+                _ => {}
+            }
+        } else if fence.is_none() && is_bibtex_entry_open(plain.trim()) {
+            return (
+                src[..offset].trim_end().to_string(),
+                src[offset..].trim().to_string(),
+            );
+        }
+        offset += line.len();
+    }
+    (src.to_string(), String::new())
+}
+
+fn is_bibtex_entry_open(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix('@') else {
+        return false;
+    };
+    let kind_len = rest.bytes().take_while(|b| b.is_ascii_alphabetic()).count();
+    kind_len > 0 && rest.as_bytes().get(kind_len) == Some(&b'{')
+}
+
+fn preprocess_citations(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut fence: Option<(char, usize)> = None;
+    for line in src.split_inclusive('\n') {
+        let plain = line.strip_suffix('\n').unwrap_or(line);
+        if let Some((fc, fl)) = fence_marker(plain) {
+            match fence {
+                None => fence = Some((fc, fl)),
+                Some((c, l)) if c == fc && fl >= l => fence = None,
+                _ => {}
+            }
+            out.push_str(line);
+        } else if fence.is_some() {
+            out.push_str(line);
+        } else {
+            out.push_str(&replace_citations_outside_code_spans(line));
+        }
+    }
+    out
+}
+
+fn replace_citations_outside_code_spans(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    let mut code_ticks = 0;
+    while !rest.is_empty() {
+        let ticks = rest.bytes().take_while(|b| *b == b'`').count();
+        if ticks > 0 {
+            if code_ticks == 0 {
+                code_ticks = ticks;
+            } else if code_ticks == ticks {
+                code_ticks = 0;
+            }
+            out.push_str(&rest[..ticks]);
+            rest = &rest[ticks..];
+            continue;
+        }
+        if code_ticks == 0 && rest.starts_with("[@") {
+            if let Some(end) = rest.find(']') {
+                let key = &rest[2..end];
+                if !key.is_empty()
+                    && key
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "_:.+-".contains(c))
+                {
+                    out.push_str(CITATION_OPEN_TOKEN);
+                    out.push_str(key);
+                    out.push_str(CITATION_CLOSE_TOKEN);
+                    rest = &rest[end + 1..];
+                    continue;
+                }
+            }
+        }
+        let char_len = rest.chars().next().unwrap().len_utf8();
+        out.push_str(&rest[..char_len]);
+        rest = &rest[char_len..];
+    }
+    out
+}
+
 const ADMONITION_KINDS: &[&str] = &[
-    "success", "warning", "tip", "info", "danger", "note", // styled callouts
+    "success", "warning", "tip", "info", "danger", "note", "caution", "important",
     "left", "center", "right", "row", // layout directives
 ];
 
@@ -633,6 +758,7 @@ struct Ctx<'a> {
     /// Width id set by a `tablewidths` placeholder, consumed by the next table.
     pending_widths: std::cell::Cell<Option<usize>>,
     alignment: Option<Alignment>,
+    citations: bool,
 }
 
 impl<'a> Ctx<'a> {
@@ -724,7 +850,7 @@ impl<'a> Ctx<'a> {
             // Layout directives render to plain Typst primitives.
             "left" | "center" | "right" => {
                 let alignment = Alignment::from_kind(&a.kind).unwrap();
-                let inner = convert_str_aligned(&a.source, false, Some(alignment));
+                let inner = convert_str_aligned(&a.source, false, Some(alignment), self.citations);
                 if inner.trim().is_empty() {
                     String::new()
                 } else {
@@ -735,10 +861,10 @@ impl<'a> Ctx<'a> {
                     )
                 }
             }
-            "row" => render_row(&a.source, self.alignment),
+            "row" => render_row(&a.source, self.alignment, self.citations),
             // Styled callout box.
             _ => {
-                let inner = convert_str_aligned(&a.source, false, self.alignment);
+                let inner = convert_str_aligned(&a.source, false, self.alignment, self.citations);
                 let title = if a.title.is_empty() {
                     String::new()
                 } else {
@@ -759,7 +885,7 @@ impl<'a> Ctx<'a> {
             Some(s) => s,
             None => return String::new(),
         };
-        let inner = convert_str_aligned(&s.source, false, self.alignment);
+        let inner = convert_str_aligned(&s.source, false, self.alignment, self.citations);
         format!(
             "#spoiler(summary: \"{}\")[\n{}\n]",
             esc_string(&s.summary),
@@ -938,7 +1064,7 @@ impl<'a> Ctx<'a> {
     fn render_inline(&self, node: &'a AstNode<'a>) -> String {
         let value = node.data.borrow().value.clone();
         match value {
-            NodeValue::Text(t) => render_text(&t),
+            NodeValue::Text(t) => render_text(&t, self.citations),
             // Soft breaks (source line wraps) become hard breaks, matching the
             // web app's pipeline — it preserves the author's line wrapping.
             NodeValue::SoftBreak => "\\\n".to_string(),
@@ -995,7 +1121,7 @@ impl<'a> Ctx<'a> {
 }
 
 /// Render a `:::row` block: each top-level child block becomes a grid column.
-fn render_row(source: &str, alignment: Option<Alignment>) -> String {
+fn render_row(source: &str, alignment: Option<Alignment>, citations: bool) -> String {
     if source.trim().is_empty() {
         return String::new();
     }
@@ -1009,6 +1135,7 @@ fn render_row(source: &str, alignment: Option<Alignment>) -> String {
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
         alignment,
+        citations,
     };
     ctx.collect_footnotes(root);
     let cells: Vec<String> = root
@@ -1033,15 +1160,40 @@ fn render_row(source: &str, alignment: Option<Alignment>) -> String {
 
 /// Render a text run, turning `==mark==` spans into `#highlight[...]`.
 /// Matches the former `remark-mark` plugin: flat text only, no nested markup.
-fn render_text(s: &str) -> String {
+fn render_text(s: &str, citations: bool) -> String {
     let mut out = String::new();
     let mut rest = s;
-    while let Some(start) = rest.find("==") {
-        let after = &rest[start + 2..];
+    loop {
+        let mark = rest.find("==");
+        let citation = if citations {
+            rest.find(CITATION_OPEN_TOKEN)
+        } else {
+            None
+        };
+        let next = match (mark, citation) {
+            (None, None) => break,
+            (Some(m), None) => (m, false),
+            (None, Some(c)) => (c, true),
+            (Some(m), Some(c)) if c < m => (c, true),
+            (Some(m), Some(_)) => (m, false),
+        };
+
+        if next.1 {
+            let after = &rest[next.0 + CITATION_OPEN_TOKEN.len()..];
+            if let Some(end) = after.find(CITATION_CLOSE_TOKEN) {
+                let key = &after[..end];
+                out.push_str(&emit_text(&rest[..next.0]));
+                out.push_str(&format!("#cite(label(\"{}\"))", esc_string(key)));
+                rest = &after[end + CITATION_CLOSE_TOKEN.len()..];
+                continue;
+            }
+        }
+
+        let after = &rest[next.0 + 2..];
         if let Some(end_rel) = after.find("==") {
             let inner = &after[..end_rel];
             if !inner.is_empty() && !inner.starts_with('=') && !inner.ends_with('=') {
-                out.push_str(&emit_text(&rest[..start]));
+                out.push_str(&emit_text(&rest[..next.0]));
                 out.push_str("#highlight[");
                 out.push_str(&emit_text(inner));
                 out.push(']');
@@ -1049,9 +1201,8 @@ fn render_text(s: &str) -> String {
                 continue;
             }
         }
-        // Not a mark span: emit the first `=` literally and keep scanning.
-        out.push_str(&emit_text(&rest[..start + 1]));
-        rest = &rest[start + 1..];
+        out.push_str(&emit_text(&rest[..next.0 + 1]));
+        rest = &rest[next.0 + 1..];
     }
     out.push_str(&emit_text(rest));
     out
@@ -1431,6 +1582,73 @@ mod tests {
 
     fn stripped(md: &str) -> String {
         preprocess_table_widths(md).0
+    }
+
+    #[test]
+    fn extracts_only_a_trailing_bibtex_block() {
+        let source = "Text [@example].\n\n@article{example,\n  title = {Example}\n}\n";
+        assert_eq!(
+            split_inline_bibliography(source),
+            (
+                "Text [@example].".to_string(),
+                "@article{example,\n  title = {Example}\n}".to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn ignores_bibtex_openers_inside_code_fences() {
+        let source = "```bibtex\n@article{example,\n}\n```\n\nAfter.\n";
+        assert_eq!(
+            split_inline_bibliography(source),
+            (source.to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn leaves_a_malformed_bibtex_opener_in_the_document() {
+        let source = "Text.\n\n@article example\n";
+        assert_eq!(
+            split_inline_bibliography(source),
+            (source.to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn citation_rendering_is_opt_in_and_repeatable() {
+        let source = "See [@first], [@missing], and [@first].";
+        let ordinary = convert_str(source, false);
+        assert!(ordinary.contains(r"\[\@first\]"), "{ordinary}");
+
+        let cited = convert_str_with_citations(source, false, true);
+        assert_eq!(cited.matches("#cite(label(\"first\"))").count(), 2);
+        assert!(cited.contains("#cite(label(\"missing\"))"), "{cited}");
+    }
+
+    #[test]
+    fn malformed_citation_syntax_remains_text() {
+        let out = convert_str_with_citations("See [@two keys] and [@].", false, true);
+        assert!(out.contains(r"\[\@two keys\]"), "{out}");
+        assert!(out.contains(r"\[\@\]"), "{out}");
+    }
+
+    #[test]
+    fn citations_in_code_remain_literal() {
+        let out = convert_str_with_citations("`[@inline]`\n\n```txt\n[@fenced]\n```", false, true);
+        assert!(out.contains("`[@inline]`"), "{out}");
+        assert!(out.contains("[@fenced]"), "{out}");
+        assert!(!out.contains("#cite"), "{out}");
+    }
+
+    #[test]
+    fn recognizes_the_additional_callout_kinds() {
+        for kind in ["caution", "important"] {
+            let out = convert_str(&format!(":::{kind}\nBody\n:::\n"), false);
+            assert!(
+                out.contains(&format!("#admonition(kind: \"{kind}\")")),
+                "{out}"
+            );
+        }
     }
 
     #[test]

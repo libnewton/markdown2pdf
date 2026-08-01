@@ -60,12 +60,16 @@ the `rust-wasm` package on Arch).
 
 Core CommonMark + GFM (tables incl. `+` column-width markers, task lists,
 strikethrough, footnotes, autolinks); `==highlight==`, super/subscript,
-underline; admonitions (`:::info` …), spoilers (`+++++`), `:::row/center`
+underline; language-aware admonitions (`:::info` …, including `caution` and
+`important`), spoilers (`+++++`), `:::row/center`
 layout; math via `mitex`; Mermaid via `mmdr`; HackMD `=WxH` image sizing;
 remote images; Twemoji emoji (unicode and `:shortcodes:`); YAML frontmatter
 (title / authors / date / `lang` / page numbers); running header and footer
-(`header-*` / `footer-*`, with `{page}`-style placeholders); optional title
-cover page (`cover-*`); DIN 5008 letter mode (`letter-*` fields);
+(`header-*` / `footer-*`, optional `header-height` / `footer-height`, and
+`{page}`-style placeholders); optional title
+cover page (`cover-*`); opt-in inline BibTeX citations (`bibliography: inline`,
+`[@key]`, blue citation numerals, and `bibliography-style`, default `ieee`);
+DIN 5008 letter mode (`letter-*` fields);
 `[toc]` → `#outline()`.
 
 `tests/extended.md` is the feature demo — it exercises every syntax above and

@@ -2,17 +2,20 @@
 // Imported by every style template.
 
 #let _admonition-themes = (
-  "success": (accent: rgb("#16A34A"), bg: rgb("#F0FDF4"), label: "SUCCESS"),
-  "warning": (accent: rgb("#D97706"), bg: rgb("#FFFBEB"), label: "WARNING"),
-  "tip":     (accent: rgb("#0EA5E9"), bg: rgb("#F0F9FF"), label: "TIP"),
-  "info":    (accent: rgb("#2563EB"), bg: rgb("#EFF6FF"), label: "INFO"),
-  "danger":  (accent: rgb("#DC2626"), bg: rgb("#FEF2F2"), label: "DANGER"),
-  "note":    (accent: rgb("#6B7280"), bg: rgb("#F9FAFB"), label: "NOTE"),
+  "success": (accent: rgb("#16A34A"), bg: rgb("#F0FDF4"), label: (en: "SUCCESS", de: "Erfolg")),
+  "warning": (accent: rgb("#D97706"), bg: rgb("#FFFBEB"), label: (en: "WARNING", de: "Warnung")),
+  "tip":     (accent: rgb("#0EA5E9"), bg: rgb("#F0F9FF"), label: (en: "TIP", de: "Tipp")),
+  "info":    (accent: rgb("#2563EB"), bg: rgb("#EFF6FF"), label: (en: "INFO", de: "Info")),
+  "danger":  (accent: rgb("#DC2626"), bg: rgb("#FEF2F2"), label: (en: "DANGER", de: "Gefahr")),
+  "note":    (accent: rgb("#6B7280"), bg: rgb("#F9FAFB"), label: (en: "NOTE", de: "Hinweis")),
+  "caution": (accent: rgb("#B91C1C"), bg: rgb("#FEF2F2"), label: (en: "CAUTION", de: "Vorsicht")),
+  "important": (accent: rgb("#7E22CE"), bg: rgb("#FAF5FF"), label: (en: "IMPORTANT", de: "Wichtig")),
 )
 
-#let admonition(kind: "info", title: "", body) = {
+#let admonition(kind: "info", title: "", lang: "en", body) = {
   let theme = _admonition-themes.at(kind, default: _admonition-themes.at("info"))
-  let label = if title != "" { title } else { theme.at("label") }
+  let language = if lang == "de" { "de" } else { "en" }
+  let label = if title != "" { title } else { theme.at("label").at(language) }
   block(
     fill: theme.at("bg"),
     stroke: (left: 3pt + theme.at("accent")),

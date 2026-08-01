@@ -12,6 +12,8 @@
   let region = args.at("region", default: none)
   let remotes = args.at("remotes", default: ())
   let asset = args.at("asset", default: image)
+  let header-height = args.at("header-height", default: none)
+  let footer-height = args.at("footer-height", default: none)
   let letter-return = args.at("letter-return", default: "")
   let letter-to = args.at("letter-to", default: ())
   let letter-from = args.at("letter-from", default: ())
@@ -68,19 +70,29 @@
   // Letter mode uses 20mm x-margin (DIN 5008 body margin).
   let page-margin-x = if letter-mode { 20mm } else { 1.8cm }
   let page-margin-y = 2cm
+  let top-margin = if header-height == none {
+    page-margin-y
+  } else {
+    calc.max(page-margin-y, header-height + 6mm)
+  }
+  let bottom-margin = if footer-height == none {
+    page-margin-y
+  } else {
+    calc.max(page-margin-y, footer-height + 6mm)
+  }
   set page(
     paper: "a4",
-    margin: (x: page-margin-x, y: page-margin-y),
+    margin: (left: page-margin-x, right: page-margin-x, top: top-margin, bottom: bottom-margin),
     numbering: if page-numbers != false { "1" } else { none },
     header-ascent: 6mm,
     footer-descent: 6mm,
     // Page furniture starts on the second page: page one is either the cover
     // or the title page, and neither wants a running head.
     header: context {
-      if here().page() > 1 { bar(..header-slots, vars, remotes, asset) }
+      if here().page() > 1 { bar(..header-slots, vars, remotes, asset, height: header-height) }
     },
     footer: context {
-      if here().page() > 1 { bar(..footer-slots, vars, remotes, asset) }
+      if here().page() > 1 { bar(..footer-slots, vars, remotes, asset, height: footer-height) }
     },
   )
   set document(title: title, author: authors, date: none)
@@ -153,6 +165,10 @@
 
   // 5) Link colour: tech blue
   show link: set text(fill: rgb("#0074de"))
+  show cite: it => {
+    show regex("[0-9]+"): set text(fill: rgb("#0074de"))
+    it
+  }
 
   // 6) Blockquotes: left accent line + light background
   set quote(block: true)

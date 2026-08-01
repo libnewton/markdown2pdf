@@ -10,7 +10,11 @@ cover-color: ocean
 cover-subtitle: Every feature, every option
 header-left: "{title}"
 header-right: "{date}"
+header-height: 10mm
 footer-left: md2pdf
+footer-height: 10mm
+bibliography: inline
+bibliography-style: ieee
 ---
 
 # Welcome — every feature, one document
@@ -148,7 +152,7 @@ $$
 
 ### Themed admonitions
 
-Six kinds — `success`, `warning`, `tip`, `info`, `danger`, `note`. Write any text after the kind to replace the default label.
+Eight kinds — `success`, `warning`, `tip`, `info`, `danger`, `note`, `caution`, `important`. Default labels follow `lang` (`de` uses “Erfolg”, “Warnung”, “Tipp”, “Info”, “Gefahr”, “Hinweis”, “Vorsicht”, and “Wichtig”); text after the kind always replaces the default.
 
 :::success
 **Looks good.** Use `:::success` for confirmations, completed steps, or positive results.
@@ -172,6 +176,14 @@ Six kinds — `success`, `warning`, `tip`, `info`, `danger`, `note`. Write any t
 
 :::note Custom label
 This one was opened with `:::note Custom label` — the trailing text replaces the "NOTE" label.
+:::
+
+:::caution
+Use `:::caution` for a serious pitfall.
+:::
+
+:::important
+Use `:::important` for information the reader must not miss.
 :::
 
 ### Spoiler
@@ -301,7 +313,9 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | `lang`                                       | `en`, `de`, `de-AT`, …                        | `en`                |
 | `pageNumbers` or `page-numbers`              | `true`, `false`, `"1"`, `"1/1"`, or a template | `true`              |
 | `header-left` `header-center` `header-right` | text or an image                              | empty               |
+| `header-height`                              | positive `pt`, `mm`, `cm`, or `in` length     | automatic           |
 | `footer-left` `footer-center` `footer-right` | text or an image                              | centre = page number |
+| `footer-height`                              | positive `pt`, `mm`, `cm`, or `in` length     | automatic           |
 | `cover`                                      | `arcs`, `strata`, `wedge`, `grid`, `true`, `false` | `false`         |
 | `cover-color`                                | palette name or a hex value                   | `ocean`             |
 | `cover-subtitle`                             | text                                          | none                |
@@ -309,6 +323,8 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | `cover-date`                                 | text                                          | value of `date`     |
 | `cover-image`                                | an image, filling the whole cover             | none                |
 | `cover-text-color`                           | `white`, `black`, or a hex value              | `black`             |
+| `bibliography`                               | `inline` enables trailing BibTeX               | disabled            |
+| `bibliography-style`                         | a Typst bibliography style                     | `ieee`               |
 | `letter-return`                              | one line                                      | none                |
 | `letter-to`                                  | one line or a list (up to six)                | none                |
 | `letter-from`                                | one line or a list                            | none                |
@@ -320,8 +336,9 @@ What each group does:
 - **`title` / `authors` / `date`** — printed as a centered title block on page one, or moved onto the cover when one is set. They also feed the header and footer placeholders.
 - **`lang`** — drives hyphenation, smart quotes and Typst's built-in titles: under `lang: de` a `[toc]` is headed "Inhaltsverzeichnis" instead of "Contents". A region may be appended, as in `de-AT`.
 - **`pageNumbers`** — see the table below. The web app's menu toggle is only a default: frontmatter always wins.
-- **`header-*` / `footer-*`** — see *Running header & footer*.
+- **`header-*` / `footer-*`** — see *Running header & footer*. Set the matching height when a tall image or multi-line slot needs more room; the body margin grows so furniture cannot overlap it.
 - **`cover-*`** — see *Cover page*.
+- **`bibliography`** — see *Inline bibliography*.
 - **`letter-*`** — any one of them switches on DIN 5008 letter mode.
 
 ### Page numbering
@@ -346,9 +363,13 @@ Six optional slots — `header-left`, `header-center`, `header-right` and the sa
 pageNumbers: "1/1"      # -> the "4 / 12" in the footer centre
 header-left: "{title}"
 header-right: "{date}"
+header-height: 8mm
 footer-left: md2pdf
+footer-height: 10mm
 ---
 ```
+
+The height fields accept a positive `pt`, `mm`, `cm`, or `in` length. They reserve a fixed content envelope plus the normal gap from the body; leave them out for the original automatic furniture layout. Content that is taller than its configured envelope stops compilation instead of overlapping the page body.
 
 Placeholders, usable in any slot and in a `pageNumbers` template:
 
@@ -450,3 +471,16 @@ Use `---` for a horizontal rule. Leaving three or more blank lines in the source
 Anything after the token continues on the next page. Combine with sections to keep chapters cleanly separated.
 
 > **One more tip**: Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> in the editor to trigger a compile immediately, even when live preview is paused.
+
+---
+
+## Inline bibliography
+
+Set `bibliography: inline` to cite a trailing BibTeX entry as `[@md2pdf]`. This sentence contains an actual citation [@md2pdf]. Numeric citation content is always blue while brackets and punctuation stay black, including under non-IEEE styles. The bibliography is generated automatically, headed “Referenzen” for `lang: de` and “References” otherwise. `bibliography-style` selects a Typst style and defaults to `ieee`. BibTeX-looking examples inside fenced code remain ordinary content.
+
+@misc{md2pdf,
+  author = {md2pdf contributors},
+  title = {md2pdf},
+  year = {2026},
+  url = {https://github.com/typst/typst}
+}

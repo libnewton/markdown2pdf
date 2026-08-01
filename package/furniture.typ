@@ -90,17 +90,35 @@
 }
 
 // The three-column bar shared by header and footer. Small, grey, no rule.
-#let bar(left-slot, center-slot, right-slot, vars, remotes, asset) = {
+#let bar(left-slot, center-slot, right-slot, vars, remotes, asset, height: none) = {
   let cells = (left-slot, center-slot, right-slot).map(v => slot(v, vars, remotes, asset))
   if cells.all(c => c == none) { return none }
-  block(width: 100%, spacing: 0pt, {
+  let contents = {
     set text(size: 8.5pt, fill: luma(140))
-    set par(justify: false, leading: 0.5em)
+    set par(
+      justify: false,
+      leading: 0.5em,
+      spacing: if height == none { 1.2em } else { 0pt },
+    )
     grid(
       columns: (1fr, auto, 1fr),
       align: (left + horizon, center + horizon, right + horizon),
       column-gutter: 1em,
       ..cells.map(c => if c == none { [] } else { c }),
     )
-  })
+  }
+  if height == none {
+    block(width: 100%, spacing: 0pt, contents)
+  } else {
+    layout(size => {
+      let natural = measure(block(width: size.width, spacing: 0pt, contents))
+      if natural.height > height {
+        panic(
+          "running header or footer content is " + repr(natural.height)
+            + ", exceeding its configured " + repr(height),
+        )
+      }
+      block(width: size.width, height: height, spacing: 0pt, align(horizon, contents))
+    })
+  }
 }

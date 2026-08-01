@@ -74,6 +74,34 @@
 // for unquoted dates, which `str()` cannot take.
 #let _text-of(v) = if type(v) == datetime { v.display() } else { str(v) }
 
+#let _length-of(fm, key) = {
+  let value = fm.at(key, default: fm.at(key.replace("-", "_"), default: none))
+  if value == none { return none }
+
+  let raw = _text-of(value).trim()
+  let unit = (("pt", 1pt), ("mm", 1mm), ("cm", 1cm), ("in", 1in)).find(
+    pair => raw.ends-with(pair.at(0)),
+  )
+  if unit == none {
+    panic(key + " must be a positive length using pt, mm, cm, or in")
+  }
+
+  let number = raw.slice(0, raw.len() - unit.at(0).len())
+  let parts = number.split(".")
+  let valid = number != "" and number != "." and parts.len() <= 2 and number.clusters().all(
+    char => "0123456789.".contains(char),
+  )
+  if not valid {
+    panic(key + " must be a positive length using pt, mm, cm, or in")
+  }
+
+  let length = float(number) * unit.at(1)
+  if length <= 0pt {
+    panic(key + " must be greater than zero")
+  }
+  length
+}
+
 // Frontmatter `lang`, as `(lang, region)`. Accepts "de" or "de-AT"; the region
 // is optional. Typst localises `outline(title: auto)` and friends from this, so
 // `[toc]` becomes "Inhaltsverzeichnis" under `lang: de`.
@@ -100,6 +128,10 @@
       let v = fm.at(key, default: fm.at(edge + "_" + side, default: none))
       if v != none { r.insert(key, _text-of(v)) }
     }
+  }
+  for key in ("header-height", "footer-height") {
+    let value = _length-of(fm, key)
+    if value != none { r.insert(key, value) }
   }
   r
 }
@@ -152,24 +184,48 @@
   } else {
     let fm = _frontmatter(markdown)
     let named = opts.named()
+    let doc-lang = _lang-of(fm)
+    let bibliography-mode = fm.at("bibliography", default: none)
+    let inline-bibliography = (
+      type(bibliography-mode) == str and lower(bibliography-mode.trim()) == "inline"
+    )
+    let bib = if inline-bibliography {
+      str(_engine.inline_bibliography(bytes(markdown)))
+    } else {
+      ""
+    }
+    let source = if bib != "" {
+      str(_engine.without_inline_bibliography(bytes(markdown)))
+    } else {
+      markdown
+    }
+    let bibliography-style = _text-of(fm.at(
+      "bibliography-style",
+      default: fm.at("bibliography_style", default: "ieee"),
+    ))
+    let bibliography-title = if doc-lang.at(0) == "de" { [Referenzen] } else { [References] }
 
     // Title precedence: explicit opt > frontmatter > leading H1. When the
     // title comes from a leading H1, the engine drops that H1 from the body.
     let explicit-title = named.at("title", default: fm.at("title", default: ""))
-    let h1 = str(_engine.leading_h1(bytes(markdown)))
+    let h1 = str(_engine.leading_h1(bytes(source)))
     let from-h1 = explicit-title == "" and h1 != ""
     let title = if explicit-title != "" { explicit-title } else { h1 }
 
     (
       skip: false,
       remotes: remotes,
-      body: str(_engine.convert(bytes(markdown), bytes(if from-h1 { "1" } else { "" }))),
+      body: str(_engine.convert(
+        bytes(source),
+        bytes(if from-h1 { "1" } else { "" }),
+        bytes(if bib != "" { "1" } else { "" }),
+      )) + if bib != "" { "\n\n#md-bibliography()" } else { "" },
       template: article.with(
         title: title,
         authors: named.at("authors", default: _authors-of(fm)),
         date: _date-of(fm),
-        lang: _lang-of(fm).at(0),
-        region: _lang-of(fm).at(1),
+        lang: doc-lang.at(0),
+        region: doc-lang.at(1),
         remotes: remotes,
         asset: named.at("asset", default: image),
         // The document declares its own layout: frontmatter beats the caller's
@@ -186,12 +242,17 @@
         .._cover-args(fm),
       ),
       scope: (
-        admonition: admonition,
+        admonition: admonition.with(lang: doc-lang.at(0)),
         spoiler: spoiler,
         task-item: task-item,
         md-math: _md-math,
         md-mermaid: _md-mermaid,
         twemoji: _twemoji,
+        md-bibliography: () => bibliography(
+          bytes(bib),
+          style: bibliography-style,
+          title: bibliography-title,
+        ),
       ),
     )
   }
