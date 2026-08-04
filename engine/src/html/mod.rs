@@ -116,7 +116,11 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     main.push_str(&doc.footnote_section());
     main.push_str(&bibliography(&bib_src, &doc));
 
-    let outline = toc(&doc.headings, doc.german);
+    let outline = if wants_outline(&fm) {
+        toc(&doc.headings, doc.german)
+    } else {
+        String::new()
+    };
     let main = main.replace(TOC_SLOT, &inline_toc(&doc.headings));
 
     let lang = fm.first("lang").unwrap_or(if doc.german { "de" } else { "en" });
@@ -180,8 +184,16 @@ fn title_block(fm: &Frontmatter, title: Option<&str>, doc: &Doc) -> String {
     out
 }
 
+/// Frontmatter `toc: false` (or `no` / `off` / `0`) drops the floating outline
+/// button and its drawer. An explicit `[toc]` in the body is unaffected — that
+/// one was asked for.
+fn wants_outline(fm: &Frontmatter) -> bool {
+    !fm.first("toc")
+        .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "no" | "off" | "0" | "none"))
+}
+
 /// The drawer outline plus the controls that open it. Pure CSS: a checkbox
-/// drives the transform, so the export needs no script for this.
+/// drives the transform, so opening it needs no script.
 fn toc(headings: &[Heading], german: bool) -> String {
     if headings.len() < 2 {
         return String::new();

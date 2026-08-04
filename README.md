@@ -23,7 +23,9 @@ The engine has two renderers over one parse. PDF goes through Typst for
 typesetting; HTML comes straight out of the engine, styled, self-contained
 (images and diagrams embedded as `data:` URIs) and responsive, in light and
 dark. Page-only features — cover page, DIN letter mode, running header/footer,
-page numbers — have no HTML counterpart and are skipped there.
+page numbers — have no HTML counterpart and are skipped there. HTML also gets a
+collapsible outline, hidden behind a button in the corner; `toc: false` in the
+frontmatter drops it.
 
 ## Repository layout
 

@@ -303,16 +303,6 @@ pub(crate) const STYLE: &str = r#"
   user-select: none;
   -webkit-user-select: none;
 }
-.md2pdf-code[data-lang]::after {
-  content: attr(data-lang);
-  position: absolute;
-  top: .5em; right: .6em;
-  font-size: .72em;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--md-muted);
-  pointer-events: none;
-}
 .md2pdf-copy {
   position: absolute;
   top: .4em; right: .4em;
@@ -331,7 +321,6 @@ pub(crate) const STYLE: &str = r#"
 .md2pdf-code:hover .md2pdf-copy,
 .md2pdf-copy:focus-visible { opacity: 1; }
 .md2pdf-copy:hover { color: var(--md-fg); }
-.md2pdf-code:has(.md2pdf-copy)[data-lang]::after { right: 4.4em; }
 
 .md2pdf-t-c { color: var(--md-t-c); font-style: italic; }
 .md2pdf-t-s { color: var(--md-t-s); }
@@ -380,7 +369,10 @@ pub(crate) const STYLE: &str = r#"
 }
 .md2pdf-mermaid { margin: 1.6em auto; max-width: 100%; text-align: center; }
 .md2pdf-mermaid svg { max-width: 100%; height: auto; }
-.md2pdf-math-block { display: block; margin: 1.4em 0; overflow-x: auto; }
+/* No scroll container: `overflow-x` would drag `overflow-y` to `auto` with it,
+   and every formula paints a few pixels outside its box, so each one ended up
+   scrollable and clipped. Overflow stays visible instead. */
+.md2pdf-math-block { display: block; margin: 1.4em 0; text-align: center; }
 .md2pdf math { font-size: 1.05em; }
 .md2pdf-math-error { color: var(--md-adm-danger); }
 
@@ -533,23 +525,48 @@ pub(crate) const STYLE: &str = r#"
 }
 "#;
 
-/// Copy-to-clipboard for code blocks — the only script in the export.
-/// Scoped to the fragment root so it also works inside the editor's shadow DOM.
+/// The only script in the export: copy-to-clipboard on code blocks, and
+/// in-document links.
+///
+/// It binds one listener to `document` and resolves the scope from the element
+/// that was clicked. That is what makes it work in the editor too: the same
+/// markup lives in a shadow root there, where the browser cannot resolve a
+/// `#fragment` because the ids are not in the document — and where
+/// `document.currentScript` is null, so the script cannot find its own root.
 pub(crate) const SCRIPT: &str = r#"
 (function () {
-  var root = document.currentScript && document.currentScript.getRootNode
-    ? document.currentScript.getRootNode()
-    : document;
-  root.addEventListener('click', function (e) {
-    var btn = e.target && e.target.closest && e.target.closest('.md2pdf-copy');
-    if (!btn) return;
-    var code = btn.parentNode.querySelector('code');
-    if (!code || !navigator.clipboard) return;
-    navigator.clipboard.writeText(code.innerText).then(function () {
-      var was = btn.textContent;
-      btn.textContent = btn.dataset.done;
-      setTimeout(function () { btn.textContent = was; }, 1200);
-    });
+  if (window.__md2pdfBound) return;
+  window.__md2pdfBound = true;
+  document.addEventListener('click', function (e) {
+    var el = e.composedPath ? e.composedPath()[0] : e.target;
+    if (!el || !el.closest) return;
+
+    var btn = el.closest('.md2pdf-copy');
+    if (btn) {
+      var code = btn.parentNode.querySelector('code');
+      if (!code || !navigator.clipboard) return;
+      navigator.clipboard.writeText(code.innerText).then(function () {
+        var was = btn.textContent;
+        btn.textContent = btn.dataset.done;
+        setTimeout(function () { btn.textContent = was; }, 1200);
+      });
+      return;
+    }
+
+    var link = el.closest("a[href^='#']");
+    if (!link) return;
+    var root = link.getRootNode();
+    if (!root.getElementById) return;
+    // Following an outline entry should also put the drawer away.
+    var toggle = root.getElementById('md2pdf-toc-state');
+    if (toggle) toggle.checked = false;
+    var target = root.getElementById(decodeURIComponent(link.hash.slice(1)));
+    // In a real document the browser handles the jump, and the history entry
+    // with it; only a shadow root needs us to scroll it ourselves.
+    if (target && root !== document) {
+      e.preventDefault();
+      target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
   });
 })();
 "#;

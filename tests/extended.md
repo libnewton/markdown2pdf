@@ -323,6 +323,7 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | `cover-date`                                 | text                                          | value of `date`     |
 | `cover-image`                                | an image, filling the whole cover             | none                |
 | `cover-text-color`                           | `white`, `black`, or a hex value              | `black`             |
+| `toc`                                        | `false` hides the HTML outline drawer          | `true`              |
 | `bibliography`                               | `inline` enables trailing BibTeX               | disabled            |
 | `bibliography-style`                         | a Typst bibliography style                     | `ieee`               |
 | `letter-return`                              | one line                                      | none                |
@@ -338,6 +339,7 @@ What each group does:
 - **`pageNumbers`** — see the table below. The web app's menu toggle is only a default: frontmatter always wins.
 - **`header-*` / `footer-*`** — see *Running header & footer*. Set the matching height when a tall image or multi-line slot needs more room; the body margin grows so furniture cannot overlap it.
 - **`cover-*`** — see *Cover page*.
+- **`toc`** — HTML output only: `false` drops the floating outline button and its drawer. An explicit `[toc]` in the body is unaffected, and the PDF ignores the key.
 - **`bibliography`** — see *Inline bibliography*.
 - **`letter-*`** — any one of them switches on DIN 5008 letter mode.
 

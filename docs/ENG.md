@@ -272,8 +272,19 @@ host — the editor sets it on the host, the export never sets it at all.
 
 The preview mounts the fragment in a shadow root
 (`web/src/lib/components/HtmlPreview.svelte`) so the document's CSS and the
-app's CSS cannot reach each other. The only script in the export is the
-copy-to-clipboard handler for code blocks.
+app's CSS cannot reach each other.
+
+The export carries one script: copy-to-clipboard on code blocks, plus
+in-document links. It binds a single listener to `document` and resolves its
+scope from `e.composedPath()[0].getRootNode()`, which is what makes it work in
+both places — inside a shadow root the browser cannot resolve a `#fragment`
+(the ids are not in the document) and `document.currentScript` is null, so the
+script cannot find its own root. A `<script>` that arrives via `innerHTML` is
+inert, so `HtmlPreview` re-executes it once at document level.
+
+The outline drawer opens with a checkbox and needs no script at all;
+`toc: false` in the frontmatter drops the button and drawer entirely, without
+touching an explicit `[toc]` in the body.
 
 ### 10.4 What HTML does not do
 

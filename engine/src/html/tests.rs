@@ -278,6 +278,8 @@ fn a_six_column_row_reports_its_column_count() {
 fn code_blocks_get_a_language_tag_lines_and_a_copy_button() {
     let out = body("```rust\nlet x = 1;\nlet y = 2;\n```");
     assert!(out.contains("<div class=\"md2pdf-code\" data-lang=\"rust\">"), "{out}");
+    // The tag is a hook for styling, not a visible chip.
+    assert!(!html("```rust\nx\n```").contains("content: attr(data-lang)"));
     assert!(
         out.contains("<button class=\"md2pdf-copy\" type=\"button\" data-done=\"Copied\">Copy</button>"),
         "{out}"
@@ -517,6 +519,20 @@ fn the_drawer_appears_once_there_are_two_headings_and_is_closed_by_default() {
     assert!(!out.contains(" checked"), "{out}");
     assert!(out.contains("<li data-level=\"0\"><a href=\"#one\">One</a></li>"), "{out}");
     assert!(out.contains("<li data-level=\"1\"><a href=\"#two\">Two</a></li>"), "{out}");
+}
+
+#[test]
+fn frontmatter_can_drop_the_outline_drawer_without_touching_an_inline_one() {
+    for value in ["false", "no", "off", "0", "None"] {
+        let out = html(&format!("---\ntoc: {value}\n---\n\n## One\n\n## Two"));
+        assert!(!out.contains("md2pdf-toc-btn"), "{value} -> {out}");
+        assert!(!out.contains("md2pdf-toc-state"), "{value} -> {out}");
+    }
+    // Anything else keeps it, and `[toc]` in the body is never affected.
+    assert!(html("---\ntoc: true\n---\n\n## One\n\n## Two").contains("md2pdf-toc-btn"));
+    let out = html("---\ntoc: false\n---\n\n[toc]\n\n## One\n\n## Two");
+    assert!(out.contains("md2pdf-toc-inline"), "{out}");
+    assert!(!out.contains("md2pdf-toc-btn"), "{out}");
 }
 
 #[test]

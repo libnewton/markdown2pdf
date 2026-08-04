@@ -19,7 +19,25 @@
 		// Re-parsing the whole fragment costs a millisecond or two and keeps the
 		// diffing honest; scroll position is on the pane, not inside the root.
 		root.innerHTML = html;
+		hoistScript(root);
 	});
+
+	// A <script> that arrives through innerHTML is inert, so the document's own
+	// behaviour (code copying, outline links) has to be re-executed once. It
+	// binds to `document` and resolves its scope from the clicked element, so
+	// running it outside the shadow root is exactly right.
+	let scriptRun = false;
+
+	function hoistScript(target: ShadowRoot) {
+		const inert = [...target.querySelectorAll('script')];
+		if (!scriptRun && inert[0]?.textContent) {
+			const live = document.createElement('script');
+			live.textContent = inert[0].textContent;
+			document.head.append(live);
+			scriptRun = true;
+		}
+		inert.forEach((s) => s.remove());
+	}
 
 	// `data-theme` on the host wins over `prefers-color-scheme` inside it.
 	$effect(() => {
