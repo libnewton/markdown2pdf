@@ -89,9 +89,18 @@ def check(path):
     ]
     require(not external, "loads external resources: %r" % external[:3])
     require(
-        not re.search(r"@font-face|url\(\s*['\"]?https?://", source),
-        "references a webfont or a remote url() in CSS",
+        not re.search(r"url\(\s*['\"]?https?://", source),
+        "references a remote url() in CSS",
     )
+    # The math font is the one webfont, and it has to travel inside the file.
+    remote_faces = [
+        src
+        for src in re.findall(r"@font-face\s*{[^}]*?src:\s*url\(([^)]*)\)", source)
+        if not src.lstrip("'\"").startswith("data:")
+    ]
+    require(not remote_faces, "@font-face src is not a data: URI: %r" % remote_faces[:2])
+    if "<math" in source:
+        require("@font-face" in source, "document has math but ships no math font")
     for tag, v in doc.attrs:
         if tag == "img":
             require(

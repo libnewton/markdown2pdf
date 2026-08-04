@@ -24,8 +24,9 @@ typesetting; HTML comes straight out of the engine, styled, self-contained
 (images and diagrams embedded as `data:` URIs) and responsive, in light and
 dark. Page-only features — cover page, DIN letter mode, running header/footer,
 page numbers — have no HTML counterpart and are skipped there. HTML also gets a
-collapsible outline, hidden behind a button in the corner; `toc: false` in the
-frontmatter drops it.
+collapsible outline, hidden behind a button in the corner, and real math: the
+MathML is laid out with New Computer Modern Math, the same face the PDF uses,
+embedded in the file as a subsetted `woff2`.
 
 ## Repository layout
 
@@ -34,7 +35,7 @@ frontmatter drops it.
 | `web/`       | The SvelteKit web app (live editor + preview). Deployed to GitLab Pages. |
 | `engine/`    | Rust crate — builds `engine.wasm`, the Markdown engine. |
 | `package/`   | The `md2pdf` Typst package: `lib.typ`, `styles/`, `admonitions.typ`, vendored `mitex`/`mmdr`, bundled Twemoji SVGs, and the built `engine.wasm`. |
-| `bin/md2pdf.py` | CLI host shim — discovers remote images, fetches them, then runs Typst. Pure stdlib Python. |
+| `bin/md2pdf`  | CLI host shim — discovers remote images, fetches them, then runs Typst. Pure stdlib Python. |
 | `fonts/`     | Fonts shared by the CLI and the web app. |
 | `build.sh`   | Builds `engine.wasm` and installs the package to `@local/md2pdf`. |
 | `tests/`     | Markdown fixtures. |
@@ -53,7 +54,7 @@ npm run build        # static build → web/build/
 ```
 
 The preview pane has two tabs: **Pages** is the paged SVG preview of the PDF,
-**Document** is the pageless HTML view. The HTML view needs no Typst compile,
+**Web** is the pageless HTML view. The HTML view needs no Typst compile,
 so it updates as you type.
 
 The `web/vite.config.ts` plugins copy `package/` and `fonts/` into
@@ -61,16 +62,16 @@ The `web/vite.config.ts` plugins copy `package/` and `fonts/` into
 
 ## CLI
 
-`bin/md2pdf.py` runs on Windows, macOS and Linux with a stock Python 3.9+ and
+`bin/md2pdf` runs on Windows, macOS and Linux with a stock Python 3.9+ and
 no third-party packages. It needs the `typst` binary (v0.15+, for `typst eval`)
 and, to rebuild the engine, Rust with the `wasm32-unknown-unknown` target
 (`rustup target add wasm32-unknown-unknown`, or the `rust-wasm` package on Arch).
 
 ```sh
 ./build.sh                                     # build engine.wasm + install @local/md2pdf
-python3 bin/md2pdf.py tests/sample.md          # → tests/sample.pdf
-python3 bin/md2pdf.py tests/sample.md out.html # → HTML (the extension picks the format)
-python3 bin/md2pdf.py --html tests/sample.md   # → tests/sample.html
+python3 bin/md2pdf tests/sample.md             # → tests/sample.pdf
+python3 bin/md2pdf tests/sample.md out.html    # → HTML (the extension picks the format)
+./bin/md2pdf --html tests/sample.md            # → tests/sample.html
 cd engine && cargo test                        # engine unit tests
 python3 tests/check_html.py out.html           # assert the rendered artefact
 ```
@@ -78,7 +79,8 @@ python3 tests/check_html.py out.html           # assert the rendered artefact
 `tests/check_html.py` checks the file that actually ships: WCAG AA contrast for
 every colour token *including the syntax-highlighting ones*, in both themes; an
 `alt` on every image; every in-page link resolving; no external resource, no
-webfont, no inline event handler and no `javascript:`/`data:` anchor.
+remote `url()`, no inline event handler and no `javascript:`/`data:` anchor.
+The one webfont it allows is the math face, and only as a `data:` URI.
 
 Remote images are fetched fresh each run — nothing is cached between runs, so
 no document can read another's downloads. The fetch is limited to public

@@ -115,19 +115,16 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     main.push_str(&doc.footnote_section());
     main.push_str(&bibliography(&bib_src, &doc));
 
-    let outline = if wants_outline(&fm) {
-        toc(&doc.headings, doc.german)
-    } else {
-        String::new()
-    };
+    let outline = toc(&doc.headings, doc.german);
     let main = main.replace(TOC_SLOT, &inline_toc(&doc.headings));
 
     let lang = fm.first("lang").unwrap_or(if doc.german { "de" } else { "en" });
     let fragment = format!(
-        "<style>{style}</style>\
+        "<style>{fonts}{style}</style>\
          <div class=\"md2pdf\" id=\"md2pdf-root\" lang=\"{lang}\">\
          {outline}<main class=\"md2pdf-doc\">{main}</main></div>\
          <script>{script}</script>",
+        fonts = math_font_faces(&doc, &main),
         style = css::style(),
         lang = esc_attr(lang),
         script = css::SCRIPT,
@@ -137,6 +134,35 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     } else {
         fragment
     }
+}
+
+/// `@font-face` rules for the math font, embedded as `data:` URIs.
+///
+/// Only the standalone export asks its host for the font bytes: the preview
+/// pane gets the same faces from the app's own stylesheet, because a
+/// `@font-face` inside a shadow root is ignored by Chromium anyway — and a few
+/// hundred kB of base64 has no business on the per-keystroke render path.
+///
+/// The math alphanumerics (`\mathbb`, `\mathcal`, `\mathfrak`, …) live in a
+/// second file: they are half the font's weight and most documents never use
+/// one, so that face ships only when a character from the block is on the page.
+fn math_font_faces(doc: &Doc, markup: &str) -> String {
+    let Some(base) = doc.assets.data_uri("fonts/math.woff2") else {
+        return String::new();
+    };
+    let face = |extra: &str, uri: &str| {
+        format!(
+            "@font-face{{font-family:\"NewCM Math\";{extra}\
+             src:url({uri}) format(\"woff2\");font-display:swap}}"
+        )
+    };
+    let mut out = face("", &base);
+    if markup.chars().any(|c| ('\u{1D400}'..='\u{1D7FF}').contains(&c)) {
+        if let Some(alpha) = doc.assets.data_uri("fonts/math-alpha.woff2") {
+            out.push_str(&face("unicode-range:U+1D400-1D7FF;", &alpha));
+        }
+    }
+    out
 }
 
 fn document(fragment: &str, lang: &str, title: &str) -> String {
@@ -183,16 +209,9 @@ fn title_block(fm: &Frontmatter, title: Option<&str>, doc: &Doc) -> String {
     out
 }
 
-/// Frontmatter `toc: false` (or `no` / `off` / `0`) drops the floating outline
-/// button and its drawer. An explicit `[toc]` in the body is unaffected — that
-/// one was asked for.
-fn wants_outline(fm: &Frontmatter) -> bool {
-    !fm.first("toc")
-        .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "no" | "off" | "0" | "none"))
-}
-
 /// The drawer outline plus the controls that open it. Pure CSS: a checkbox
-/// drives the transform, so opening it needs no script.
+/// drives the transform, so opening it needs no script. The button itself is
+/// icon-only — the label rides along for screen readers.
 fn toc(headings: &[Heading], german: bool) -> String {
     if headings.len() < 2 {
         return String::new();
@@ -201,7 +220,8 @@ fn toc(headings: &[Heading], german: bool) -> String {
     format!(
         "<input type=\"checkbox\" class=\"md2pdf-toc-state\" id=\"md2pdf-toc-state\" \
            aria-label=\"{label}\">\
-         <label class=\"md2pdf-toc-btn\" for=\"md2pdf-toc-state\">{label}</label>\
+         <label class=\"md2pdf-toc-btn\" for=\"md2pdf-toc-state\">\
+           <span class=\"md2pdf-sr\">{label}</span></label>\
          <label class=\"md2pdf-toc-scrim\" for=\"md2pdf-toc-state\" aria-hidden=\"true\"></label>\
          <nav class=\"md2pdf-toc\" aria-label=\"{label}\">\
            <p class=\"md2pdf-toc-title\">{label}</p>{}</nav>",

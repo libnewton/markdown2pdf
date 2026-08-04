@@ -98,6 +98,18 @@ pub fn html_images(markdown: &[u8]) -> Result<Vec<u8>, String> {
     Ok(html::local_images(src).join("\n").into_bytes())
 }
 
+/// The font files a standalone HTML export needs, one key per line — empty
+/// unless the document has math. MathML laid out without a MATH-table font
+/// looks nothing like the PDF, so the export embeds one.
+#[wasm_func]
+pub fn html_fonts(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    if !has_math(src) {
+        return Ok(Vec::new());
+    }
+    Ok(b"fonts/math.woff2\nfonts/math-alpha.woff2\n".to_vec())
+}
+
 /// List the Mermaid diagram sources, one `key<TAB>source` pair per line with
 /// newlines in the source escaped as `\n`. The host renders each to SVG and
 /// returns it under `key`.
@@ -1579,6 +1591,14 @@ fn walk_document(src: &str, visit: &mut impl FnMut(&NodeValue)) {
 }
 
 /// Every ```` ```mermaid ```` fence in the document, deduplicated.
+fn has_math(src: &str) -> bool {
+    let mut found = false;
+    walk_document(src, &mut |value| {
+        found |= matches!(value, NodeValue::Math(_));
+    });
+    found
+}
+
 fn collect_mermaid_sources(src: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();

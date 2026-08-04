@@ -59,6 +59,7 @@ fn mime_for(key: &str, data: &[u8]) -> &'static str {
         "bmp" => "image/bmp",
         "ico" => "image/x-icon",
         "svg" => "image/svg+xml",
+        "woff2" => "font/woff2",
         _ => sniff(data).unwrap_or("application/octet-stream"),
     }
 }

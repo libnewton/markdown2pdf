@@ -1,8 +1,9 @@
 import { browser } from '$app/environment';
 
 const LIVE_UPDATE_KEY = 'md2pdf-live-update';
-const PAGE_NUMBERS_KEY = 'md2pdf-page-numbers';
-const CORS_PROXY_KEY = 'md2pdf-cors-proxy';
+export const THEME_KEY = 'md2pdf-theme';
+
+export type Theme = 'light' | 'dark';
 
 function readBool(key: string, fallback: boolean): boolean {
 	if (!browser) return fallback;
@@ -24,44 +25,40 @@ function writeBool(key: string, value: boolean) {
 	}
 }
 
-function readString(key: string, fallback: string): string {
-	if (!browser) return fallback;
+/**
+ * The stored preference, or the system one on a first visit. Resolved once:
+ * from then on the choice is the user's, so a change in the OS setting does
+ * not move a document that is already open.
+ */
+function initialTheme(): Theme {
+	if (!browser) return 'light';
 	try {
-		return localStorage.getItem(key) ?? fallback;
-	} catch {
-		return fallback;
-	}
-}
-
-function writeString(key: string, value: string) {
-	if (!browser) return;
-	try {
-		if (value) localStorage.setItem(key, value);
-		else localStorage.removeItem(key);
+		const stored = localStorage.getItem(THEME_KEY);
+		if (stored === 'light' || stored === 'dark') return stored;
 	} catch {
 		// ignore
 	}
+	return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 class SettingsStore {
 	liveUpdate = $state(readBool(LIVE_UPDATE_KEY, true));
-	pageNumbers = $state(readBool(PAGE_NUMBERS_KEY, true));
-	corsProxy = $state(readString(CORS_PROXY_KEY, ''));
+	theme = $state<Theme>(initialTheme());
 
 	setLiveUpdate(value: boolean) {
 		this.liveUpdate = value;
 		writeBool(LIVE_UPDATE_KEY, value);
 	}
 
-	setPageNumbers(value: boolean) {
-		this.pageNumbers = value;
-		writeBool(PAGE_NUMBERS_KEY, value);
-	}
-
-	setCorsProxy(value: string) {
-		const trimmed = value.trim();
-		this.corsProxy = trimmed;
-		writeString(CORS_PROXY_KEY, trimmed);
+	setTheme(value: Theme) {
+		this.theme = value;
+		if (!browser) return;
+		document.documentElement.dataset.theme = value;
+		try {
+			localStorage.setItem(THEME_KEY, value);
+		} catch {
+			// ignore
+		}
 	}
 }
 

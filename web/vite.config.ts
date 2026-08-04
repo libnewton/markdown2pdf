@@ -40,11 +40,14 @@ function copyMd2pdfPackage(): Plugin {
 					const isTyp = entry.name.endsWith('.typ');
 					const isWasm = entry.name.endsWith('.wasm');
 					const isSvg = entry.name.endsWith('.svg');
-					if (!isTyp && !isWasm && !isSvg) continue;
+					// Fonts are fetched on demand too — the preview pane uses them,
+					// and an HTML download embeds them.
+					const isFont = entry.name.endsWith('.woff2');
+					if (!isTyp && !isWasm && !isSvg && !isFont) continue;
 					mkdirSync(dirname(join(dest, rel)), { recursive: true });
 					copyFileSync(join(dir, entry.name), join(dest, rel));
 					if (isTyp || isWasm) manifest.push(rel);
-					else svgCount++;
+					else if (isSvg) svgCount++;
 				}
 			};
 			walk(src, '');

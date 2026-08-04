@@ -35,10 +35,13 @@ const REST: &str = r#"}
 /* ---- shell ------------------------------------------------------------ */
 
 .md2pdf {
+  --md-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --md-mono: ui-monospace, "JetBrains Mono", "Fira Code", SFMono-Regular,
+    Menlo, Consolas, "DejaVu Sans Mono", monospace;
   background: var(--md-bg);
   color: var(--md-fg);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--md-sans);
   font-size: 17px;
   line-height: 1.65;
   text-rendering: optimizeLegibility;
@@ -61,7 +64,18 @@ const REST: &str = r#"}
    documents that actually have an outline reserve it. The button is positioned
    against the viewport (or, in the editor, against the preview pane), so this
    cannot key off a width — it always has to clear. */
-.md2pdf-doc:not(:first-child) { padding-top: 4.75rem; }
+.md2pdf-doc:not(:first-child) { padding-top: 4rem; }
+
+/* Announced, never seen — the outline button is an icon. */
+.md2pdf-sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* ---- title block ------------------------------------------------------ */
 
@@ -234,8 +248,7 @@ const REST: &str = r#"}
 /* ---- code ------------------------------------------------------------- */
 
 .md2pdf code, .md2pdf kbd, .md2pdf pre {
-  font-family: ui-monospace, "JetBrains Mono", "Fira Code", SFMono-Regular,
-    Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-family: var(--md-mono);
   font-size: .875em;
 }
 .md2pdf :not(pre) > code {
@@ -347,8 +360,43 @@ const REST: &str = r#"}
    and every formula paints a few pixels outside its box, so each one ended up
    scrollable and clipped. Overflow stays visible instead. */
 .md2pdf-math-block { display: block; margin: 1.4em 0; text-align: center; }
-.md2pdf math { font-size: 1.05em; }
 .md2pdf-math-error { color: var(--md-adm-danger); }
+/* Same face the PDF typesets math with. Without a font carrying a MATH table
+   the browser lays MathML out with the body font — stretched braces, wrong
+   radicals, flat fractions — so the export embeds it and the app serves it. */
+.md2pdf math { font-size: 1.05em; font-family: "NewCM Math", math; }
+/* `\text` and friends are meant to read as prose, not as math. */
+.md2pdf mtext { font-family: var(--md-sans); }
+.md2pdf mtext span.math-core-sans-serif-font { font-family: var(--md-sans); }
+.md2pdf mtext span.math-core-serif-font { font-family: ui-serif, Georgia, serif; }
+
+/* Rendering fixes math-core's output requires. Cell padding is the spec's, not
+   Firefox's; the accent gap matches Firefox in the other two engines. */
+.md2pdf mtd { padding: 0.5ex 0.4em; }
+.md2pdf mtr > mtd:first-child { padding-left: 0; }
+.md2pdf mtr > mtd:last-child { padding-right: 0; }
+.md2pdf mover > :nth-child(2) { margin-bottom: 0.05em; }
+/* `menclose` is unimplemented in Chromium; math-core emits an empty <mrow> per
+   strike so the line can be drawn here instead. */
+.md2pdf menclose { position: relative; }
+.md2pdf [class^="menclose-"] {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+}
+.md2pdf .menclose-horizontalstrike {
+  background-image: linear-gradient(currentColor 0 0);
+  background-size: 100% 1px;
+  background-position: 0 50%;
+}
+.md2pdf .menclose-updiagonalstrike {
+  background-image: linear-gradient(to top right, transparent calc(50% - .5px), currentColor 50%, transparent calc(50% + .5px));
+  background-size: 100% 100%;
+}
+.md2pdf .menclose-downdiagonalstrike {
+  background-image: linear-gradient(to bottom right, transparent calc(50% - .5px), currentColor 50%, transparent calc(50% + .5px));
+  background-size: 100% 100%;
+}
 
 /* ---- row layout ------------------------------------------------------- */
 
@@ -391,26 +439,22 @@ const REST: &str = r#"}
   left: max(1rem, calc(50% - var(--md-measure) / 2 - 8rem));
   z-index: 3;
   display: flex;
-  gap: .45em;
   align-items: center;
-  padding: .5em .8em;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
   border: 1px solid var(--md-rule);
   border-radius: 8px;
   background: var(--md-bg);
   color: var(--md-muted);
   box-shadow: var(--md-shadow);
   font: inherit;
-  font-size: .85rem;
+  font-size: 1rem;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
 }
 .md2pdf-toc-btn:hover { color: var(--md-fg); }
-/* Narrow viewports get the icon alone — less of the line is covered. */
-@media (max-width: 480px) {
-  .md2pdf-toc-btn { font-size: 0; gap: 0; padding: .55em; }
-  .md2pdf-toc-btn::before { font-size: 1rem; }
-}
 .md2pdf-toc-btn::before {
   content: "";
   width: 1em; height: 1em;

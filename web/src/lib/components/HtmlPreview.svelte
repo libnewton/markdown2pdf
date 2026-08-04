@@ -5,10 +5,7 @@
 	// same thing the download and the CLI produce. It is mounted in a shadow
 	// root so the document's CSS and the app's CSS can never reach each other.
 
-	let {
-		html = '',
-		theme = 'auto'
-	}: { html?: string; theme?: 'auto' | 'light' | 'dark' } = $props();
+	let { html = '', theme }: { html?: string; theme: 'light' | 'dark' } = $props();
 
 	let host = $state<HTMLDivElement | null>(null);
 	let root: ShadowRoot | null = null;
@@ -41,9 +38,7 @@
 
 	// `data-theme` on the host wins over `prefers-color-scheme` inside it.
 	$effect(() => {
-		if (!host) return;
-		if (theme === 'auto') host.removeAttribute('data-theme');
-		else host.setAttribute('data-theme', theme);
+		host?.setAttribute('data-theme', theme);
 	});
 </script>
 

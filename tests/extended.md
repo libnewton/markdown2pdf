@@ -323,7 +323,6 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | `cover-date`                                 | text                                          | value of `date`     |
 | `cover-image`                                | an image, filling the whole cover             | none                |
 | `cover-text-color`                           | `white`, `black`, or a hex value              | `black`             |
-| `toc`                                        | `false` hides the HTML outline drawer          | `true`              |
 | `bibliography`                               | `inline` enables trailing BibTeX               | disabled            |
 | `bibliography-style`                         | a Typst bibliography style                     | `ieee`               |
 | `letter-return`                              | one line                                      | none                |
@@ -336,10 +335,9 @@ What each group does:
 
 - **`title` / `authors` / `date`** — printed as a centered title block on page one, or moved onto the cover when one is set. They also feed the header and footer placeholders.
 - **`lang`** — drives hyphenation, smart quotes and Typst's built-in titles: under `lang: de` a `[toc]` is headed "Inhaltsverzeichnis" instead of "Contents". A region may be appended, as in `de-AT`.
-- **`pageNumbers`** — see the table below. The web app's menu toggle is only a default: frontmatter always wins.
+- **`pageNumbers`** — see the table below.
 - **`header-*` / `footer-*`** — see *Running header & footer*. Set the matching height when a tall image or multi-line slot needs more room; the body margin grows so furniture cannot overlap it.
 - **`cover-*`** — see *Cover page*.
-- **`toc`** — HTML output only: `false` drops the floating outline button and its drawer. An explicit `[toc]` in the body is unaffected, and the PDF ignores the key.
 - **`bibliography`** — see *Inline bibliography*.
 - **`letter-*`** — any one of them switches on DIN 5008 letter mode.
 

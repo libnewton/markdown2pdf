@@ -35,5 +35,5 @@ tests/*.pdf
 remote
 .md2pdf-main-*.typ
 
-# Python bytecode from bin/md2pdf.py
+# Python bytecode from bin/md2pdf
 __pycache__/

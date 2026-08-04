@@ -9,9 +9,10 @@
   interface Props {
     markdown: string
     placeholder?: string
+    readOnly?: boolean
   }
 
-  let { markdown = $bindable(), placeholder = '' }: Props = $props()
+  let { markdown = $bindable(), placeholder = '', readOnly = false }: Props = $props()
 
   let editorView = $state<EditorView | null>(null)
   let editorContainerEl = $state<HTMLDivElement | null>(null)
@@ -67,6 +68,10 @@
         langMarkdown({ codeLanguages: languages }),
         oneDark,
         EditorView.lineWrapping,
+        // `readOnly` refuses the edit; `editable` also takes away the caret,
+        // so the reference view never looks like something you can type in.
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged || suppressEditorUpdate) return
           if (emitTimer !== null) return

@@ -5,8 +5,8 @@
 // `images` map keyed by `remote/<hash>` — matching the alias the md2pdf
 // engine emits (its `hash_url` is the same FNV-1a hash as `hashUrl` below).
 //
-// If a fetch fails (most commonly CORS) we just skip it; the user can
-// download manually and re-insert via the existing image-paste flow.
+// If a fetch fails (most commonly CORS) we just skip it — the image renders as
+// a placeholder, and the user can download it and re-insert it by hand.
 
 const MARKDOWN_IMAGE_REGEX = /!\[[^\]]*]\((https?:\/\/[^)\s]+)(?:\s+[^)]*)?\)/g;
 
@@ -28,16 +28,7 @@ async function fetchDirect(url: string): Promise<Uint8Array<ArrayBuffer> | null>
 	return new Uint8Array(buf);
 }
 
-async function fetchViaProxy(url: string, proxy: string): Promise<Uint8Array<ArrayBuffer> | null> {
-	const sep = proxy.includes('?') ? '&' : '?';
-	const target = `${proxy}${sep}url=${encodeURIComponent(url)}`;
-	const resp = await fetch(target);
-	if (!resp.ok) return null;
-	const buf = await resp.arrayBuffer();
-	return new Uint8Array(buf);
-}
-
-async function fetchOne(url: string, proxy: string): Promise<Uint8Array<ArrayBuffer> | null> {
+async function fetchOne(url: string): Promise<Uint8Array<ArrayBuffer> | null> {
 	if (cache.has(url)) return cache.get(url) ?? null;
 	try {
 		const direct = await fetchDirect(url);
@@ -46,18 +37,7 @@ async function fetchOne(url: string, proxy: string): Promise<Uint8Array<ArrayBuf
 			return direct;
 		}
 	} catch {
-		/* fall through to proxy */
-	}
-	if (proxy) {
-		try {
-			const viaProxy = await fetchViaProxy(url, proxy);
-			if (viaProxy) {
-				cache.set(url, viaProxy);
-				return viaProxy;
-			}
-		} catch {
-			/* give up */
-		}
+		/* a blocked or broken URL is remembered as a miss */
 	}
 	cache.set(url, null);
 	return null;
@@ -69,24 +49,6 @@ export function collectRemoteImageUrls(markdown: string): string[] {
 		urls.add(m[1]);
 	}
 	return [...urls];
-}
-
-export async function loadRemoteImages(
-	markdown: string,
-	corsProxy = ''
-): Promise<Record<string, Uint8Array<ArrayBuffer>>> {
-	const urls = collectRemoteImageUrls(markdown);
-	const entries = await Promise.all(
-		urls.map(async (url) => {
-			const bytes = await fetchOne(url, corsProxy);
-			return bytes ? ([`remote/${hashUrl(url)}`, bytes] as const) : null;
-		})
-	);
-	const out: Record<string, Uint8Array<ArrayBuffer>> = {};
-	for (const e of entries) {
-		if (e) out[e[0]] = e[1];
-	}
-	return out;
 }
 
 /**
@@ -118,8 +80,8 @@ export function cachedRemoteImages(markdown: string): {
  * Resolves to true when at least one new image became available, i.e. when a
  * recompile would show something new.
  */
-export async function prefetchRemoteImages(urls: string[], corsProxy = ''): Promise<boolean> {
+export async function prefetchRemoteImages(urls: string[]): Promise<boolean> {
 	if (urls.length === 0) return false;
-	const results = await Promise.all(urls.map((url) => fetchOne(url, corsProxy)));
+	const results = await Promise.all(urls.map((url) => fetchOne(url)));
 	return results.some((bytes) => bytes !== null);
 }

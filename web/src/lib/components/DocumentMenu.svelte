@@ -1,17 +1,14 @@
 <script lang="ts">
-  import type { Template } from '$lib/templates/pdf-templates'
   import { deriveNameFromContent, documentStore } from '$lib/stores/documentStore.svelte'
   import type { SavedDocument, SavedDocumentAsset } from '$lib/storage/documents'
 
   let {
     mode,
-    templates,
     currentContent,
     documentAssets,
     onDocumentLoad,
   }: {
     mode: 'pdf'
-    templates: Template[]
     currentContent: string
     documentAssets?: Record<string, SavedDocumentAsset>
     onDocumentLoad: (doc: SavedDocument) => void
@@ -55,37 +52,11 @@
     close()
   }
 
-  async function newFromTemplate(template: Template) {
-    await saveCurrentIfNeeded()
-    // Don't duplicate a template doc: if a template-sourced doc already
-    // exists for this mode with the same derived name, reuse it.
-    const proposedName = deriveNameFromContent(template.content)
-    const existing = currentModeDocs.find(
-      (d) => d.creationSource === 'template' && d.name === proposedName,
-    )
-    if (existing) {
-      await openDocument(existing)
-      return
-    }
-    const doc = await documentStore.createDocument(mode, template.content, undefined, 'template')
-    onDocumentLoad(doc)
-    close()
-  }
-
   async function newBlank() {
     await saveCurrentIfNeeded()
     const doc = await documentStore.createDocument(mode, '', undefined, 'blank')
     onDocumentLoad(doc)
     close()
-  }
-
-  async function createFallbackDocument() {
-    const defaultTemplate = templates[0]
-    if (defaultTemplate) {
-      await newFromTemplate(defaultTemplate)
-      return
-    }
-    await newBlank()
   }
 
   async function saveCurrentIfNeeded() {
@@ -97,13 +68,13 @@
     e.stopPropagation()
     const wasCurrent = doc.id === documentStore.currentDocId
     await documentStore.deleteDocument(doc.id)
-    // If deleted the current doc, switch to another or recreate from template
+    // Deleting what is on screen has to leave something on screen.
     if (wasCurrent) {
       const remaining = currentModeDocs.filter((d) => d.id !== doc.id)
       if (remaining.length > 0) {
         await openDocument(remaining[0])
       } else {
-        await createFallbackDocument()
+        await newBlank()
       }
     }
   }
@@ -167,15 +138,6 @@
         <div class="doc-divider"></div>
       {/if}
 
-      <div class="doc-section-label">Templates</div>
-      {#each templates as t}
-        <button class="doc-item" onclick={() => newFromTemplate(t)}>
-          <span class="doc-item-icon">{t.icon}</span>
-          <span class="doc-item-name">{t.name}</span>
-        </button>
-      {/each}
-
-      <div class="doc-divider"></div>
       <button class="doc-item doc-new" onclick={newBlank}>
         + New blank document
       </button>
@@ -195,7 +157,8 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
+    height: var(--control-lg);
+    padding: 0 8px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
@@ -220,7 +183,7 @@
   }
 
   .doc-status {
-    font-size: 0.6875rem;
+    font-size: 0.8125rem;
     color: var(--color-gray-400);
     white-space: nowrap;
   }
@@ -286,10 +249,6 @@
   .doc-item.active {
     background: var(--color-gray-100);
     font-weight: 500;
-  }
-
-  .doc-item-icon {
-    flex-shrink: 0;
   }
 
   .doc-item-name {

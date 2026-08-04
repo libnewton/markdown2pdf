@@ -28,7 +28,6 @@ type CompileRequest = {
 	id: string;
 	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
-	pageNumbers?: boolean;
 	format?: 'pdf' | 'preview';
 };
 
@@ -257,17 +256,37 @@ async function renderMermaid(markdown: string): Promise<Asset[]> {
 	});
 }
 
+// The math faces a download embeds, fetched at most once per session. The
+// preview never asks: it gets the same faces from the app's own stylesheet.
+const fontCache = new Map<string, Promise<Uint8Array>>();
+
+function loadFont(key: string): Promise<Uint8Array> {
+	let cached = fontCache.get(key);
+	if (!cached) {
+		cached = fetch('/md2pdf/' + key)
+			.then((r) => r.arrayBuffer())
+			.then((b) => new Uint8Array(b));
+		fontCache.set(key, cached);
+	}
+	return cached;
+}
+
 /**
  * Render the document to HTML. Everything the engine cannot reach itself —
- * image bytes, Twemoji art, Mermaid diagrams — is resolved here and handed
- * over as one blob plus a `key<TAB>byte-length` manifest, exactly as the
- * Typst package does for the CLI.
+ * image bytes, Twemoji art, Mermaid diagrams, the math font — is resolved here
+ * and handed over as one blob plus a `key<TAB>byte-length` manifest, exactly as
+ * the Typst package does for the CLI.
  */
 async function renderHtml(markdown: string, standalone: boolean): Promise<string> {
 	const engine = await getEngine();
 	const md = encode(markdown);
 
 	const assets: Asset[] = [];
+	if (standalone) {
+		for (const key of lines(engine('html_fonts', md))) {
+			assets.push([key, await loadFont(key)]);
+		}
+	}
 	for (const path of lines(engine('html_images', md))) {
 		const bytes = imageStore.get(path);
 		if (bytes) assets.push([path, bytes]);
@@ -299,28 +318,25 @@ async function renderHtml(markdown: string, standalone: boolean): Promise<string
 
 /**
  * The entry document: hand the Markdown to the `md2pdf` package and eval it.
- * `page-numbers` is only a default — a frontmatter `pageNumbers:` wins. `asset`
- * must be defined here, not in the package: an `image()` call written inside a
- * Typst package resolves against the package root, not the document root.
+ * `asset` must be defined here, not in the package: an `image()` call written
+ * inside a Typst package resolves against the package root, not the document
+ * root.
  */
-function buildMain(pageNumbersDefault: boolean): string {
-	return `#import "/md2pdf/lib.typ": prepare
-#let _d = prepare(read("/doc.md"), page-numbers: ${pageNumbersDefault}, asset: (p, ..a) => image(p, ..a))
+const MAIN = `#import "/md2pdf/lib.typ": prepare
+#let _d = prepare(read("/doc.md"), asset: (p, ..a) => image(p, ..a))
 #if not _d.skip { show: _d.template; eval(_d.body, mode: "markup", scope: _d.scope) }
 `;
-}
 
 // What the VFS already holds, so a live-preview recompile only writes what
 // actually changed. Re-mapping identical bytes would throw away Typst's
 // incremental caches for those files (images get re-decoded, the emoji scan
 // re-runs) on every keystroke.
 let mappedMarkdown: string | null = null;
-let mappedMain: string | null = null;
+let mainMapped = false;
 
 async function compileTypst(
 	markdown: string,
 	images: Record<string, Uint8Array<ArrayBuffer>> = {},
-	pageNumbers = true,
 	format: 'pdf' | 'preview' = 'pdf'
 ): Promise<{ result: Uint8Array; diagnostics: string[] }> {
 	const compiler = await getCompiler();
@@ -333,10 +349,9 @@ async function compileTypst(
 		mappedMarkdown = markdown;
 	}
 
-	const main = buildMain(pageNumbers);
-	if (main !== mappedMain) {
-		compiler.addSource('/main.typ', main);
-		mappedMain = main;
+	if (!mainMapped) {
+		compiler.addSource('/main.typ', MAIN);
+		mainMapped = true;
 	}
 
 	for (const [path, data] of Object.entries(images)) {
@@ -377,7 +392,6 @@ async function runOne(message: CompileRequest): Promise<void> {
 		const { result, diagnostics } = await compileTypst(
 			message.markdown,
 			message.images,
-			message.pageNumbers,
 			fmt
 		);
 		if (fmt === 'pdf') {

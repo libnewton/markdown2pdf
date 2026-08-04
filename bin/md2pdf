@@ -9,7 +9,7 @@ logic.
 Standard library only, Python 3.9+, and no behaviour that differs per OS
 beyond one documented symlink fallback.
 
-    md2pdf.py [--html|--pdf] <input.md> [output]
+    md2pdf [--html|--pdf] <input.md> [output]
 """
 
 import argparse

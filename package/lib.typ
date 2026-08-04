@@ -203,6 +203,11 @@
   for cp in _lines(_engine.twemojis(bytes(md))) {
     items.push((key: "twemoji/" + cp + ".svg", data: read("twemoji/" + cp + ".svg", encoding: none)))
   }
+  // Only a document with math asks for these, and the second one only counts
+  // once a formula reaches into the math alphanumerics.
+  for font in _lines(_engine.html_fonts(bytes(md))) {
+    items.push((key: font, data: read(font, encoding: none)))
+  }
   items += _mermaid-assets(md)
   items = items.filter(it => it.data != none)
   (
@@ -290,7 +295,7 @@
         remotes: remotes,
         asset: named.at("asset", default: image),
         // The document declares its own layout: frontmatter beats the caller's
-        // value (the web app's page-numbers toggle is a default, not an override).
+        // value, which is only a default.
         page-numbers: fm.at(
           "pageNumbers",
           default: fm.at(

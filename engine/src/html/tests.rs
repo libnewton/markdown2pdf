@@ -640,17 +640,12 @@ fn the_drawer_appears_once_there_are_two_headings_and_is_closed_by_default() {
 }
 
 #[test]
-fn frontmatter_can_drop_the_outline_drawer_without_touching_an_inline_one() {
-    for value in ["false", "no", "off", "0", "None"] {
-        let out = html(&format!("---\ntoc: {value}\n---\n\n## One\n\n## Two"));
-        assert!(!out.contains("md2pdf-toc-btn"), "{value} -> {out}");
-        assert!(!out.contains("md2pdf-toc-state"), "{value} -> {out}");
-    }
-    // Anything else keeps it, and `[toc]` in the body is never affected.
-    assert!(html("---\ntoc: true\n---\n\n## One\n\n## Two").contains("md2pdf-toc-btn"));
-    let out = html("---\ntoc: false\n---\n\n[toc]\n\n## One\n\n## Two");
-    assert!(out.contains("md2pdf-toc-inline"), "{out}");
-    assert!(!out.contains("md2pdf-toc-btn"), "{out}");
+fn the_drawer_button_carries_its_label_only_for_screen_readers() {
+    let out = html("## One\n\n## Two");
+    assert!(
+        out.contains("<label class=\"md2pdf-toc-btn\" for=\"md2pdf-toc-state\"><span class=\"md2pdf-sr\">Contents</span></label>"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -717,6 +712,33 @@ fn duplicate_diagrams_share_one_asset() {
     assert_eq!(crate::collect_mermaid_sources(md).len(), 1);
     let out = html_with(md, &mermaid_key("same"), b"<svg/>");
     assert_eq!(out.matches("md2pdf-mermaid").count(), 2, "{out}");
+}
+
+#[test]
+fn only_documents_with_math_ask_for_the_math_font() {
+    assert!(crate::has_math("$a$"));
+    assert!(crate::has_math("text\n\n$$x = 1$$"));
+    assert!(!crate::has_math("# Plain\n\nno formulas, just a `$` sign"));
+}
+
+#[test]
+fn the_math_font_is_embedded_only_when_the_host_supplies_it() {
+    // The preview path gets no font bytes and must stay lean.
+    assert!(!render("$a$", "", "", b"").contains("@font-face"));
+
+    let manifest = "fonts/math.woff2\t2\nfonts/math-alpha.woff2\t2\n";
+    let out = render("$a$", "standalone=1\n", manifest, b"abcd");
+    assert_eq!(out.matches("@font-face").count(), 1, "{out}");
+    assert!(out.contains("src:url(data:font/woff2;base64,YWI=)"), "{out}");
+    // Only a document that reaches into the math alphanumerics pays for them.
+    // `\mathbb{R}` does not: it is ℝ, a Letterlike Symbol the base face has.
+    assert_eq!(
+        render(r"$\mathbb{R}$", "standalone=1\n", manifest, b"abcd").matches("@font-face").count(),
+        1
+    );
+    let out = render(r"$\mathbb{A}$", "standalone=1\n", manifest, b"abcd");
+    assert_eq!(out.matches("@font-face").count(), 2, "{out}");
+    assert!(out.contains("unicode-range:U+1D400-1D7FF"), "{out}");
 }
 
 #[test]

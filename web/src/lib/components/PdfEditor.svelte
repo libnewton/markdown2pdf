@@ -1,5 +1,7 @@
 <script lang="ts">
   import { browser } from '$app/environment'
+  import { page } from '$app/state'
+  import { replaceState } from '$app/navigation'
   import { onMount } from 'svelte'
   import { buildHeadElement, buildPageElement } from '$lib/typst/svg-utils'
   import type { SvgDocument, SvgPage } from '$lib/typst/svg-split'
@@ -33,12 +35,15 @@
     seoTitle: string
     seoDescription: string
     initialMarkdown?: string
+    /** The reference view: nothing is edited, nothing is saved. */
+    readOnly?: boolean
   }
 
   let {
     seoTitle,
     seoDescription,
     initialMarkdown = '',
+    readOnly = false,
   }: Props = $props()
 
   // ========================================
@@ -155,42 +160,32 @@
   let isResizing = $state(false)
   let isDragging = $state(false)
 
+  // Which panes are on screen. Mirrored into the URL as `?edit` / `?view` /
+  // `?both`, so a link can open the app the way the sender had it.
+  type ViewMode = 'edit' | 'view' | 'both'
+  const VIEW_MODES: ViewMode[] = ['edit', 'both', 'view']
+  let viewMode = $state<ViewMode>('both')
+  let showEditor = $derived(viewMode !== 'view')
+  let showPreview = $derived(viewMode !== 'edit')
+  // Pausing exists so a heavy document does not recompile under your fingers.
+  // Nobody is typing in view mode, so there it is always live.
+  let liveUpdate = $derived(viewMode === 'view' || settingsStore.liveUpdate)
 
-
-  let templates = $derived(PDF_TEMPLATES)
+  function setViewMode(next: ViewMode) {
+    viewMode = next
+    // View mode has no paged preview: a page is a PDF idea.
+    if (next === 'view') previewMode = 'document'
+    const url = new URL(page.url)
+    for (const mode of VIEW_MODES) url.searchParams.delete(mode)
+    url.searchParams.set(next, '')
+    // `?view` reads better than `?view=`, and both parse the same.
+    replaceState(url.href.replace(/=(?=&|$)/g, ''), page.state)
+  }
 
   // Mobile state
   let activeMobileTab = $state<'editor' | 'preview'>('editor')
-  let isMenuOpen = $state(false)
-  let isCorsModalOpen = $state(false)
-  let corsModalDraft = $state('')
-
-  function openCorsModal() {
-    corsModalDraft = settingsStore.corsProxy
-    isCorsModalOpen = true
-    closeMenu()
-  }
-
-  function saveCorsProxy() {
-    settingsStore.setCorsProxy(corsModalDraft)
-    isCorsModalOpen = false
-  }
-
-  function cancelCorsProxy() {
-    isCorsModalOpen = false
-  }
-
-  function toggleMenu(e?: Event) {
-    if (e) {
-      e.stopPropagation()
-      e.preventDefault()
-    }
-    isMenuOpen = !isMenuOpen
-  }
-
-  function closeMenu() {
-    isMenuOpen = false
-  }
+  let isAboutOpen = $state(false)
+  let isExportOpen = $state(false)
 
   // Compilation state
   let status: 'idle' | 'compiling' | 'done' | 'error' = $state('idle')
@@ -216,11 +211,8 @@
   type PreviewMode = 'pages' | 'document'
   let previewMode = $state<PreviewMode>('pages')
   let htmlDoc = $state('')
-  let htmlTheme = $state<'auto' | 'light' | 'dark'>('auto')
   let htmlTimer: number | null = null
   const HTML_DEBOUNCE_MS = 120
-  const THEME_CYCLE = { auto: 'light', light: 'dark', dark: 'auto' } as const
-  const THEME_LABEL = { auto: 'Auto', light: 'Light', dark: 'Dark' } as const
 
   // Auto-compile
   let compileSeq = 0
@@ -235,9 +227,7 @@
   let lastCycleMs = 0
 
   const UI = {
-    export: 'Export PDF',
     loading: 'Initializing rendering engine...',
-    generating: 'Generating...',
     placeholder: 'Type Markdown here...',
   }
   function t<K extends keyof typeof UI>(key: K): string {
@@ -275,6 +265,16 @@
     loadingText = t('loading')
     client = getSharedTypstWorkerClient()
 
+    // A mode in the URL wins over the default split.
+    const requested = VIEW_MODES.find((mode) => page.url.searchParams.has(mode))
+    if (requested) {
+      viewMode = requested
+      if (requested === 'view') {
+        previewMode = 'document'
+        activeMobileTab = 'preview'
+      }
+    }
+
     // Hide loading overlay and trigger first compile
     isLoading = false
     void compile(markdown)
@@ -284,7 +284,7 @@
     // 5 already short-circuits identical writes, but skipping the call
     // entirely keeps this listener off the hot path.
     const handleClickOutside = () => {
-      if (isMenuOpen) closeMenu()
+      if (isExportOpen) isExportOpen = false
     }
     window.addEventListener('click', handleClickOutside)
 
@@ -353,14 +353,9 @@
     if (!client) return
     if (isLoading) return
 
-    const live = settingsStore.liveUpdate
-    if (hasEverCompiled && !live) return
+    if (hasEverCompiled && !liveUpdate) return
 
     const md = markdown
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _pn = settingsStore.pageNumbers
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _cp = settingsStore.corsProxy
 
     if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
 
@@ -388,7 +383,7 @@
     if (!client) return
     if (isLoading) return
     if (previewMode !== 'document') return
-    if (hasEverCompiled && !settingsStore.liveUpdate) return
+    if (hasEverCompiled && !liveUpdate) return
 
     const md = markdown
     if (htmlTimer) window.clearTimeout(htmlTimer)
@@ -540,14 +535,14 @@
       lastCompiledImages = images
 
       if (missing.length > 0) {
-        void prefetchRemoteImages(missing, settingsStore.corsProxy).then((gotNew) => {
+        void prefetchRemoteImages(missing).then((gotNew) => {
           if (!gotNew || lastCompiledMarkdown !== md) return
           void compile(md)
           if (previewMode === 'document') void renderHtml(md)
         })
       }
 
-      const result = await client.compilePreview(md, imagesToSend(images), settingsStore.pageNumbers)
+      const result = await client.compilePreview(md, imagesToSend(images))
       if (seq !== compileSeq) return
       previewDoc = result.preview
       status = 'done'
@@ -587,7 +582,7 @@
     // blocked by popup blockers after the async compile.
     const newTab = window.open('', '_blank')
     // @ts-ignore
-    const { pdf } = await client.compilePdf(lastCompiledMarkdown, lastCompiledImages, settingsStore.pageNumbers)
+    const { pdf } = await client.compilePdf(lastCompiledMarkdown, lastCompiledImages)
     const blob = new Blob([pdf], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     if (newTab) {
@@ -598,42 +593,53 @@
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
+  function download(blob: Blob, extension: string) {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download =
+      (deriveNameFromContent(markdown) || 'document').replace(/[/\\?%*:|"<>]/g, '-') + extension
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
   async function downloadHtml() {
     editorPane?.flushPendingEdit()
     if (!client) return
     const md = markdown
     const html = await client.renderHtml(md, imagesToSend(documentImages(md)), true)
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = (deriveNameFromContent(md) || 'document').replace(/[/\\?%*:|"<>]/g, '-') + '.html'
-    link.click()
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    download(new Blob([html], { type: 'text/html;charset=utf-8' }), '.html')
+  }
+
+  function downloadMarkdown() {
+    editorPane?.flushPendingEdit()
+    download(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), '.md')
   }
 
   let fileInputEl = $state<HTMLInputElement | null>(null)
 
-  function handleOpenFile() {
+  function handleUpload() {
     fileInputEl?.click()
   }
 
   function onFileSelected(e: Event) {
     const target = e.target as HTMLInputElement
-    const files = target.files
-    if (!files || files.length === 0) return
-
-    const file = files[0]
-    const reader = new FileReader()
-    reader.onload = (evt) => {
-      const content = evt.target?.result
-      if (typeof content === 'string') {
-        markdown = content
-      }
-    }
-    reader.readAsText(file)
-
-    // Reset value so same file can be selected again
+    const file = target.files?.[0]
+    // Reset value so the same file can be picked again
     target.value = ''
+    if (file) void openFile(file)
+  }
+
+  /** An image is inserted where the cursor is; anything else replaces the document. */
+  async function openFile(file: File) {
+    if (file.type.startsWith('image/')) {
+      await editorPane?.insertImageFile(file)
+      return
+    }
+    if (markdown.trim() !== '' && !confirm(`Replace the current document with ${file.name}?`)) {
+      return
+    }
+    markdown = await file.text()
   }
 
   function handleImageSaved(path: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string) {
@@ -655,14 +661,6 @@
     return Object.fromEntries(
       [...referenced].map((path) => [path, imageAssets[path].bytes]),
     )
-  }
-
-  function handleHelp() {
-    const defaultContent = PDF_TEMPLATES[0]?.content || ''
-    if (markdown.trim() !== '' && markdown !== defaultContent) {
-      if (!confirm('This will overwrite current content. Continue?')) return
-    }
-    markdown = defaultContent
   }
 
   // ========================================
@@ -709,7 +707,7 @@
   }
 
   function handleDragOver(e: DragEvent) {
-    if (!hasFiles(e)) return
+    if (!hasFiles(e) || readOnly) return
     e.preventDefault()
     isDragging = true
   }
@@ -724,32 +722,19 @@
     if (!hasFiles(e)) return
     e.preventDefault()
     isDragging = false
+    if (readOnly) return
 
     const files = e.dataTransfer?.files
     if (!files || files.length === 0) return
 
-    const markdownFile = getMarkdownImportFile(files)
-    if (markdownFile) {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const content = event.target?.result
-        if (typeof content === 'string') {
-          markdown = content
-        }
-      }
-      reader.readAsText(markdownFile)
-      return
-    }
-
-    const imageFile = getImageDropFile(files)
-    if (imageFile) {
-      void editorPane?.insertImageFile(imageFile)
-    }
+    // Same two paths as the Upload button, prompt included.
+    const file = getMarkdownImportFile(files) ?? getImageDropFile(files)
+    if (file) void openFile(file)
   }
 
   async function handlePaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items
-    if (!items) return
+    if (!items || readOnly) return
 
     for (const item of items) {
       if (!item.type.startsWith('image/')) continue
@@ -841,7 +826,7 @@
   <!-- File Input (Hidden) -->
   <input
     type="file"
-    accept=".md,.markdown,.txt"
+    accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif,.md,.markdown,.txt"
     style="display: none;"
     bind:this={fileInputEl}
     onchange={onFileSelected}
@@ -853,116 +838,187 @@
       <a href="/" class="logo-link">
         <img src="/logo.png" alt="md2pdf" class="logo-img" />
       </a>
-      <DocumentMenu
-        mode="pdf"
-        templates={PDF_TEMPLATES}
-        currentContent={markdown}
-        {documentAssets}
-        onDocumentLoad={(doc) => { applyLoadedDocument(doc) }}
-      />
+      {#if readOnly}
+        <span class="doc-title">Reference</span>
+      {:else}
+        <DocumentMenu
+          mode="pdf"
+          currentContent={markdown}
+          {documentAssets}
+          onDocumentLoad={(doc) => { applyLoadedDocument(doc) }}
+        />
+      {/if}
     </div>
+
+    <!-- Centred, so a long document name never shifts it. -->
+    <div class="view-switch layout-switch" role="group" aria-label="Layout">
+      {#each VIEW_MODES as mode}
+        <button
+          class:active={viewMode === mode}
+          aria-pressed={viewMode === mode}
+          onclick={() => setViewMode(mode)}
+          title={mode === 'edit' ? 'Editor only' : mode === 'view' ? 'Document only' : 'Split'}
+        >
+          <!-- Which half is filled is which pane you get. -->
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            {#if mode !== 'view'}
+              <rect x="3" y="5" width="9" height="14" fill="currentColor" stroke="none"></rect>
+            {/if}
+            {#if mode !== 'edit'}
+              <rect x="12" y="5" width="9" height="14" fill="currentColor" stroke="none"></rect>
+            {/if}
+            <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+            <path d="M12 5v14"></path>
+          </svg>
+        </button>
+      {/each}
+    </div>
+
     <div class="navbar-right">
+      {#if $needRefresh}
+        <button class="tool-btn update-btn" onclick={() => updateServiceWorker(true)}>
+          Update available
+        </button>
+      {/if}
+      {#if viewMode === 'view'}
+        <!-- Nothing is being edited, so live-or-paused is beside the point;
+             the theme is the one thing a reader still wants. -->
+        {@render themeToggle()}
+      {:else}
+        <button
+          class="live-toggle"
+          class:on={settingsStore.liveUpdate}
+          onclick={() => settingsStore.setLiveUpdate(!settingsStore.liveUpdate)}
+          title={settingsStore.liveUpdate ? 'Pause live preview' : 'Enable live preview'}
+        >
+          <span class="live-dot" aria-hidden="true"></span>
+          {settingsStore.liveUpdate ? 'Live' : 'Paused'}
+        </button>
+      {/if}
+
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="menu-container" onclick={(e) => e.stopPropagation()}>
         <button
-          class="btn btn-ghost btn-sm btn-icon"
-          class:active={isMenuOpen}
-          onclick={toggleMenu}
-          aria-label="Menu"
-          style="color: var(--color-gray-900);"
+          class="btn btn-sm export-btn"
+          onclick={() => (isExportOpen = !isExportOpen)}
+          aria-expanded={isExportOpen}
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"></circle>
-            <circle cx="19" cy="12" r="2" fill="currentColor" stroke="none"></circle>
-            <circle cx="5" cy="12" r="2" fill="currentColor" stroke="none"></circle>
+          Export
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
           </svg>
         </button>
-
-        {#if isMenuOpen}
+        {#if isExportOpen}
           <div class="dropdown-menu">
             <button
               class="menu-item"
-              onclick={() => { handleOpenFile(); closeMenu() }}
-            >
-              <span class="menu-icon">📂</span>
-              Open Local File
-            </button>
-
+              onclick={() => { isExportOpen = false; void downloadPdf() }}
+              disabled={!previewDoc}
+            >PDF</button>
             <button
               class="menu-item"
-              onclick={() => { handleHelp(); closeMenu() }}
-            >
-              <span class="menu-icon">❓</span>
-              Help & Guide
-            </button>
-
-            <div class="menu-divider"></div>
-
-            <button
-              class="menu-item menu-toggle"
-              onclick={(e) => { e.stopPropagation(); settingsStore.setPageNumbers(!settingsStore.pageNumbers) }}
-              title="Frontmatter `pageNumbers:` overrides this setting"
-            >
-              <span class="menu-toggle-label">Page numbers</span>
-              <span class="switch" class:on={settingsStore.pageNumbers} aria-hidden="true">
-                <span class="switch-thumb"></span>
-              </span>
-            </button>
-
+              onclick={() => { isExportOpen = false; downloadMarkdown() }}
+            >Markdown</button>
             <button
               class="menu-item"
-              onclick={openCorsModal}
-              title="Optional CORS proxy for fetching images blocked by CORS"
-            >
-              <span class="menu-icon">🔗</span>
-              CORS proxy{settingsStore.corsProxy ? ' ✓' : '…'}
-            </button>
-
-            <div class="menu-divider"></div>
-
-            <a
-              href="https://github.com/libnewton/markdown2pdf"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="menu-item"
-            >
-              <span class="menu-icon">🐙</span>
-              GitHub
-            </a>
-            {#if $needRefresh}
-              <div class="menu-divider"></div>
-              <button
-                class="menu-item"
-                onclick={() => updateServiceWorker(true)}
-                style="color: var(--color-green-600);"
-              >
-                <span class="menu-icon">⚡</span>
-                Update Available
-              </button>
-            {/if}
+              onclick={() => { isExportOpen = false; void downloadHtml() }}
+            >HTML</button>
           </div>
         {/if}
       </div>
     </div>
   </nav>
 
+  {#snippet themeToggle()}
+    <button
+      class="tool-btn tool-btn-icon"
+      onclick={() => settingsStore.setTheme(settingsStore.theme === 'dark' ? 'light' : 'dark')}
+      title={settingsStore.theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+      aria-label={settingsStore.theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+    >
+      {#if settingsStore.theme === 'dark'}
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>
+        </svg>
+      {:else}
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>
+        </svg>
+      {/if}
+    </button>
+  {/snippet}
+
+  <!-- The document tools, in the strip above the editor. -->
+  {#snippet tools()}
+    <div class="toolbar">
+      {#if !readOnly}
+        <button
+          class="tool-btn"
+          onclick={() => editorPane?.insertMarkdownSnippet(`\n\n${PAGEBREAK_TOKEN}\n\n`)}
+          title="Insert page break"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="2" y1="12" x2="6" y2="12"></line>
+            <line x1="18" y1="12" x2="22" y2="12"></line>
+            <path d="M6 8V4h12v4"></path>
+            <path d="M6 16v4h12v-4"></path>
+          </svg>
+          <span class="tool-label">Break</span>
+        </button>
+        <button class="tool-btn" onclick={handleUpload} title="Insert an image, or open a Markdown file">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span class="tool-label">Upload</span>
+        </button>
+      {/if}
+
+      {@render themeToggle()}
+
+      {#if !readOnly}
+        <a
+          class="tool-btn tool-btn-icon"
+          href="/reference"
+          target="_blank"
+          rel="noopener"
+          title="Reference — every feature, source next to result"
+          aria-label="Reference"
+        >?</a>
+      {/if}
+
+      <button
+        class="tool-btn tool-btn-icon"
+        onclick={() => (isAboutOpen = true)}
+        title="About md2pdf"
+        aria-label="About md2pdf"
+      >
+        <svg class="gh-icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </button>
+    </div>
+  {/snippet}
+
   <!-- Workspace -->
   <main class="workspace">
     <!-- Editor Pane -->
     <section
       class="pane editor-pane"
+      class:hidden={!showEditor}
       class:mobile-hidden={activeMobileTab !== 'editor'}
-      style="width: {leftPaneWidth}%"
+      style="width: {showPreview ? leftPaneWidth : 100}%"
     >
+      {@render tools()}
       <EditorPane
         bind:this={editorPane}
         bind:markdown
         placeholder={t('placeholder')}
         {errorMessage}
-        pageBreakToken={PAGEBREAK_TOKEN}
-        pageBreakLabel="Break"
-        pageBreakTitle="Insert page break"
+        {readOnly}
         onImageSaved={handleImageSaved}
       />
     </section>
@@ -972,6 +1028,7 @@
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="resizer hidden-mobile"
+      class:hidden={viewMode !== 'both'}
       class:active={isResizing}
       onmousedown={startResize}
       role="separator"
@@ -1000,20 +1057,36 @@
     <!-- Preview Pane -->
     <section
       class="pane preview-pane"
+      class:hidden={!showPreview}
       class:mobile-hidden={activeMobileTab !== 'preview'}
-      style="width: {100 - leftPaneWidth}%"
     >
+      <!-- View mode leaves nothing for this bar to hold, so it goes away. -->
+      {#if viewMode !== 'view' || status === 'error'}
       <div class="preview-toolbar">
         <div class="preview-status-wrapper">
-          <button
-            class="live-toggle"
-            class:on={settingsStore.liveUpdate}
-            onclick={() => settingsStore.setLiveUpdate(!settingsStore.liveUpdate)}
-            title={settingsStore.liveUpdate ? 'Pause live preview' : 'Enable live preview'}
-          >
-            <span class="live-dot" aria-hidden="true"></span>
-            {settingsStore.liveUpdate ? 'Live' : 'Paused'}
-          </button>
+          <!-- View mode is for reading: no editing tools, no paged/pageless
+               switch, just the document. -->
+          {#if viewMode !== 'view'}
+            <div class="view-switch" role="group" aria-label="Preview mode">
+              <button
+                class:active={previewMode === 'pages'}
+                aria-pressed={previewMode === 'pages'}
+                onclick={() => (previewMode = 'pages')}
+              >
+                Pages
+              </button>
+              <button
+                class:active={previewMode === 'document'}
+                aria-pressed={previewMode === 'document'}
+                onclick={() => {
+                  previewMode = 'document'
+                  if (!htmlDoc) void renderHtml(markdown)
+                }}
+              >
+                Web
+              </button>
+            </div>
+          {/if}
           {#if previewMode === 'pages'}
             <span class="page-info">{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span>
           {/if}
@@ -1024,32 +1097,12 @@
           {/if}
         </div>
         <div class="preview-toolbar-right">
-          <div class="view-switch" role="group" aria-label="Preview mode">
+          {#if !liveUpdate}
             <button
-              class:active={previewMode === 'pages'}
-              aria-pressed={previewMode === 'pages'}
-              onclick={() => (previewMode = 'pages')}
-            >
-              Pages
-            </button>
-            <button
-              class:active={previewMode === 'document'}
-              aria-pressed={previewMode === 'document'}
-              onclick={() => {
-                previewMode = 'document'
-                if (!htmlDoc) void renderHtml(markdown)
-              }}
-            >
-              Document
-            </button>
-          </div>
-          {#if !settingsStore.liveUpdate}
-            <button
-              class="btn-icon-sm"
+              class="tool-btn"
               onclick={compileNow}
               disabled={status === 'compiling'}
               title="Compile now"
-              style="padding: 4px 10px; font-size: 0.75rem;"
             >
               Update
             </button>
@@ -1061,27 +1114,10 @@
               <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
               <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
             </div>
-            <button
-              class="btn btn-primary btn-sm"
-              onclick={downloadPdf}
-              disabled={!previewDoc || status === 'compiling'}
-            >
-              {status === 'compiling' ? t('generating') : t('export')}
-            </button>
-          {:else}
-            <button
-              class="btn-icon-sm theme-toggle"
-              onclick={() => (htmlTheme = THEME_CYCLE[htmlTheme])}
-              title="Preview theme: {THEME_LABEL[htmlTheme]}"
-            >
-              {THEME_LABEL[htmlTheme]}
-            </button>
-            <button class="btn btn-primary btn-sm" onclick={downloadHtml} disabled={!htmlDoc}>
-              Export HTML
-            </button>
           {/if}
         </div>
       </div>
+      {/if}
       <div class="preview-container" bind:this={previewContainerEl}>
         {#if showPreviewCompilingHint}
           <StatusHint label="Updating preview" />
@@ -1094,7 +1130,7 @@
         ></div>
         {#if previewMode === 'document'}
           <div class="html-preview-container">
-            <HtmlPreview html={htmlDoc} theme={htmlTheme} />
+            <HtmlPreview html={htmlDoc} theme={settingsStore.theme} />
           </div>
         {/if}
         {#if previewMode === 'pages' && status === 'compiling' && !previewDoc}
@@ -1107,33 +1143,29 @@
   </main>
 
 
-  {#if isCorsModalOpen}
+  {#if isAboutOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal-backdrop" onclick={cancelCorsProxy}>
+    <div class="modal-backdrop" onclick={() => (isAboutOpen = false)}>
       <div class="modal-dialog" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h3 class="modal-title">CORS proxy</h3>
+        <h3 class="modal-title">About md2pdf</h3>
         <p class="modal-help">
-          Used as a fallback when an image URL is blocked by CORS. The proxy is called with
-          the image URL appended as <code>url=</code>:
+          Markdown in, typeset PDF or a self-contained HTML page out. Everything — the
+          Markdown engine, the Typst typesetter, the fonts — runs in this browser tab:
+          no account, no upload, and it keeps working offline.
         </p>
-        <ul class="modal-help-list">
-          <li><code>https://proxy.example.com/fetch</code> → <code>?url=&lt;image-url&gt;</code></li>
-          <li><code>https://proxy.example.com/?key=ABC</code> → <code>&amp;url=&lt;image-url&gt;</code></li>
-        </ul>
         <p class="modal-help">
-          The proxy must return the raw image bytes. Leave empty to disable.
+          Your documents live in this browser's storage only. <strong>Export</strong> is
+          how you get them out.
         </p>
-        <input
-          type="url"
-          class="modal-input"
-          placeholder="https://your-proxy.example.com/fetch"
-          bind:value={corsModalDraft}
-          onkeydown={(e) => { if (e.key === 'Enter') saveCorsProxy(); if (e.key === 'Escape') cancelCorsProxy() }}
-        />
         <div class="modal-actions">
-          <button class="btn btn-ghost btn-sm" onclick={cancelCorsProxy}>Cancel</button>
-          <button class="btn btn-primary btn-sm" onclick={saveCorsProxy}>Save</button>
+          <a
+            class="btn btn-secondary btn-sm"
+            href="https://github.com/libnewton/markdown2pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Source on GitHub</a>
+          <button class="btn btn-primary btn-sm" onclick={() => (isAboutOpen = false)}>Close</button>
         </div>
       </div>
     </div>
@@ -1155,7 +1187,7 @@
     position: fixed;
     inset: 0;
     z-index: 999;
-    background: rgba(255, 255, 255, 0.85);
+    background: light-dark(rgba(255, 255, 255, 0.85), rgba(20, 20, 20, 0.85));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1167,22 +1199,24 @@
     flex-direction: column;
     align-items: center;
     gap: 12px;
-    color: var(--color-gray-500, #6b7280);
+    color: var(--color-gray-500);
     font-size: 1rem;
     font-weight: 500;
     padding: 40px 60px;
-    border: 2px dashed var(--color-gray-300, #d1d5db);
+    border: 2px dashed var(--color-gray-300);
     border-radius: 16px;
-    background: var(--color-gray-50, #f9fafb);
+    background: var(--color-gray-50);
   }
 
   /* ========================================
      Navbar
      ======================================== */
+  /* Three columns, so the middle one sits dead centre no matter how wide the
+     document name in the first one gets. */
   .navbar {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     height: var(--navbar-height);
     padding: 0 var(--space-md);
     background: var(--color-white);
@@ -1203,8 +1237,25 @@
   }
 
   .navbar-right {
-    flex: 0 0 auto;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+  }
+
+  /* The document tools, in the strip above the editor. In view mode the same
+     strip is rendered into the preview toolbar instead, so it goes wherever
+     the content is. */
+  .toolbar {
+    display: flex;
+    align-items: center;
     gap: var(--space-xs);
+    flex-shrink: 0;
+  }
+
+  .editor-pane > .toolbar {
+    height: var(--pane-toolbar-height);
+    padding: 0 var(--space-sm);
+    background: var(--color-gray-50);
+    border-bottom: 1px solid var(--color-gray-200);
   }
 
   .logo-link {
@@ -1220,16 +1271,117 @@
     display: block;
   }
 
+  /* The wordmark is dark ink on transparent. Inverting and rotating the hue
+     back keeps the mark's colour while the letters turn light. */
+  :global([data-theme='dark']) .logo-img {
+    filter: invert(1) hue-rotate(180deg);
+  }
+
+  .doc-title {
+    padding: 4px 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-gray-700);
+    white-space: nowrap;
+  }
+
+  /* The layout switch is its own grid column, so the document name beside it
+     can grow to any length without pushing it around. */
+  .layout-switch {
+    justify-self: center;
+  }
+
+  /* Every control in the chrome is the same typeface, weight and size — only
+     the height changes between the navbar row and the pane strips. */
+  .navbar :is(.live-toggle, .btn, .tool-btn, .view-switch button),
+  .toolbar :is(.tool-btn, .view-switch button),
+  .preview-toolbar :is(.tool-btn, .view-switch button, .zoom button, .page-info, .zoom-level) {
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  /* Toolbar buttons: one shape, label optional. */
+  .tool-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: var(--control);
+    padding: 0 8px;
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--color-white);
+    color: var(--color-gray-600);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .tool-btn:hover {
+    background: var(--color-gray-100);
+    border-color: var(--color-gray-300);
+    color: var(--color-gray-900);
+  }
+
+  .tool-btn-icon {
+    width: var(--control);
+    padding: 0;
+  }
+
+  .export-btn {
+    gap: 4px;
+    height: var(--control-lg);
+    padding: 0 0.75rem;
+    background: var(--color-gray-100);
+    color: var(--color-gray-900);
+    border: 1px solid var(--color-gray-300);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .export-btn:hover {
+    background: var(--color-gray-200);
+    border-color: var(--color-gray-400);
+  }
+
+  /* In the navbar the controls are one size up from the pane strips. */
+  .navbar :is(.tool-btn, .view-switch) {
+    height: var(--control-lg);
+  }
+
+  .navbar .tool-btn-icon {
+    width: var(--control-lg);
+  }
+
+  /* The Typst preview's own SVG carries a stylesheet, and an inline `<svg>`
+     stylesheet is document-wide — its `svg { fill: none }` outranks any fill
+     *attribute*. The stroke icons don't care; a solid one has to say it here. */
+  .gh-icon {
+    fill: currentColor;
+  }
+
+  .update-btn {
+    color: var(--color-success);
+    border-color: var(--color-success);
+  }
+
+  @media (max-width: 1100px) {
+    .tool-label {
+      display: none;
+    }
+    .tool-btn {
+      width: 26px;
+      padding: 0;
+    }
+  }
+
   /* Live update toggle */
   .live-toggle {
     display: inline-flex;
     align-items: center;
     gap: 0.5em;
-    padding: calc(0.5rem - 1px) 0.875rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    font-family: var(--font-mono);
-    line-height: 1;
+    height: var(--control-lg);
+    padding: 0 0.75rem;
     background: var(--color-gray-50);
     border: 1px solid var(--color-gray-200);
     border-radius: var(--radius-sm);
@@ -1248,7 +1400,7 @@
     background: var(--color-gray-400);
   }
   .live-toggle.on .live-dot {
-    background: #16a34a;
+    background: var(--color-success);
     box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18);
   }
 
@@ -1272,7 +1424,15 @@
     display: flex;
     flex-direction: column;
     position: relative;
-    background: #fff;
+    background: var(--color-white);
+  }
+
+  /* A hidden pane stays mounted: CodeMirror keeps its state and the preview
+     keeps its measured pages, so switching layout is a style recalc, not a
+     rebuild. */
+  .pane.hidden,
+  .resizer.hidden {
+    display: none;
   }
 
   /* Editor Pane */
@@ -1296,18 +1456,26 @@
     background: var(--color-gray-400);
   }
 
-  /* Preview Pane */
+  /* Preview Pane. It takes whatever the editor and the divider leave, rather
+     than a percentage of its own — three widths adding up to 100% plus a
+     6px divider is 6px too many, and the overflow shows at the right edge. */
   .preview-pane {
+    flex: 1 1 auto;
+    min-width: 0;
     background: var(--preview-bg);
   }
 
+  /* Same height as the editor's strip, so the two line up across the divider. */
   .preview-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-white);
+    height: var(--pane-toolbar-height);
+    /* The right edge lines up with Export's, one bar above. */
+    padding: 0 var(--space-md) 0 var(--space-sm);
+    background: var(--color-gray-50);
     border-bottom: 1px solid var(--color-gray-200);
+    flex-shrink: 0;
   }
 
   .preview-toolbar-right {
@@ -1316,14 +1484,12 @@
     gap: var(--space-sm);
   }
 
-  .preview-toolbar-right > .btn {
-    padding: calc(0.5rem - 1px) 0.875rem;
-    font-size: 0.8125rem;
-  }
-
-  /* Paged PDF preview vs. pageless HTML document view. */
+  /* Segmented controls: the paged/pageless switch and the layout switch. Both
+     are built to the same height as a toolbar button. */
   .view-switch {
     display: flex;
+    align-items: center;
+    height: var(--control);
     background: var(--color-gray-100);
     border: 1px solid var(--color-gray-200);
     border-radius: var(--radius-sm);
@@ -1332,8 +1498,12 @@
   }
 
   .view-switch button {
-    padding: 3px 10px;
-    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-width: 30px;
+    padding: 0 10px;
     color: var(--color-gray-500);
     background: transparent;
     border: 0;
@@ -1342,15 +1512,13 @@
   }
 
   .view-switch button.active {
-    background: var(--color-white, #fff);
-    color: var(--color-gray-900, #111);
+    background: var(--color-white);
+    color: var(--color-gray-900);
     box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
   }
 
-  .theme-toggle {
-    padding: 4px 10px;
-    font-size: 0.75rem;
-    min-width: 3.6rem;
+  .view-switch button svg {
+    display: block;
   }
 
   .zoom {
@@ -1360,12 +1528,20 @@
   }
 
   .zoom button {
-    padding: var(--space-xs) var(--space-sm);
-    font-size: 0.75rem;
-    background: var(--color-gray-100);
+    height: var(--control);
+    min-width: var(--control);
+    padding: 0 var(--space-sm);
+    color: var(--color-gray-600);
+    background: var(--color-white);
     border: 1px solid var(--color-gray-200);
     border-radius: var(--radius-sm);
     cursor: pointer;
+  }
+
+  .zoom button:hover:not(:disabled) {
+    background: var(--color-gray-100);
+    border-color: var(--color-gray-300);
+    color: var(--color-gray-900);
   }
 
   .zoom button:disabled {
@@ -1375,29 +1551,11 @@
 
   .page-info,
   .zoom-level {
-    font-size: 0.75rem;
     color: var(--color-gray-500);
-    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
   }
 
-  .btn-icon-sm {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px;
-    background: var(--color-gray-100);
-    border: 1px solid var(--color-gray-200);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    color: var(--color-gray-500);
-  }
-
-  .btn-icon-sm:hover {
-    color: var(--color-gray-900);
-    background: var(--color-gray-200);
-  }
-
-  .btn-icon-sm:disabled {
+  .tool-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
@@ -1431,8 +1589,8 @@
   }
 
   .error-badge {
-    background: #fef2f2;
-    color: #ef4444;
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
   }
 
   @keyframes spin {
@@ -1514,20 +1672,11 @@
     display: inline-block;
   }
 
-  .btn-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-  }
-
   .dropdown-menu {
     position: absolute;
     top: calc(100% + 4px);
     right: 0;
-    width: 200px;
+    width: 150px;
     background: var(--color-white);
     border: 1px solid var(--color-gray-200);
     border-radius: var(--radius-sm);
@@ -1563,54 +1712,6 @@
     cursor: not-allowed;
   }
 
-  .menu-icon {
-    margin-right: var(--space-sm);
-    font-size: 1rem;
-    line-height: 1;
-  }
-
-  .menu-divider {
-    height: 1px;
-    background: var(--color-gray-100);
-    margin: var(--space-xs) 0;
-  }
-
-  /* Menu toggle with sliding switch */
-  .menu-toggle {
-    justify-content: space-between;
-  }
-  .menu-toggle-label {
-    flex: 1;
-    text-align: left;
-  }
-  .switch {
-    display: inline-block;
-    position: relative;
-    width: 30px;
-    height: 16px;
-    background: var(--color-gray-300);
-    border-radius: 999px;
-    transition: background var(--transition-fast);
-    flex-shrink: 0;
-  }
-  .switch.on {
-    background: #16a34a;
-  }
-  .switch-thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--color-white);
-    transition: transform var(--transition-fast);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  }
-  .switch.on .switch-thumb {
-    transform: translateX(14px);
-  }
-
   .modal-backdrop {
     position: fixed;
     inset: 0;
@@ -1641,34 +1742,6 @@
     font-size: 0.8125rem;
     color: var(--color-gray-600);
     line-height: 1.45;
-  }
-  .modal-help code,
-  .modal-help-list code {
-    background: var(--color-gray-100);
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-  }
-  .modal-help-list {
-    margin: 0;
-    padding-left: 1.1em;
-    font-size: 0.8125rem;
-    color: var(--color-gray-600);
-    line-height: 1.6;
-  }
-  .modal-input {
-    width: 100%;
-    padding: 8px 10px;
-    font-size: 0.875rem;
-    font-family: var(--font-mono);
-    border: 1px solid var(--color-gray-300);
-    border-radius: var(--radius-sm);
-    box-sizing: border-box;
-  }
-  .modal-input:focus {
-    outline: none;
-    border-color: var(--color-gray-500);
   }
   .modal-actions {
     display: flex;
@@ -1712,7 +1785,9 @@
       z-index: 0;
     }
 
-    .resizer {
+    .resizer,
+    /* The bottom Editor|Preview tabs already do this job on a phone. */
+    .layout-switch {
       display: none;
     }
 

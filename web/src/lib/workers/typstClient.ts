@@ -5,7 +5,6 @@ type CompileRequest = {
 	id: string;
 	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
-	pageNumbers?: boolean;
 	format?: 'pdf' | 'preview';
 };
 
@@ -130,10 +129,9 @@ export class TypstWorkerClient {
 
 	compilePdf(
 		markdown: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {},
-		pageNumbers = true
+		images: Record<string, Uint8Array<ArrayBuffer>> = {}
 	): Promise<{ pdf: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
-		return this.#compile(markdown, images, pageNumbers, 'pdf').then((r) => ({
+		return this.#compile(markdown, images, 'pdf').then((r) => ({
 			pdf: r.pdf!,
 			diagnostics: r.diagnostics
 		}));
@@ -142,10 +140,9 @@ export class TypstWorkerClient {
 	/** Compile and render the preview: page markup, ready to display. */
 	compilePreview(
 		markdown: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {},
-		pageNumbers = true
+		images: Record<string, Uint8Array<ArrayBuffer>> = {}
 	): Promise<{ preview: SvgDocument; diagnostics: string[] }> {
-		return this.#compile(markdown, images, pageNumbers, 'preview').then((r) => ({
+		return this.#compile(markdown, images, 'preview').then((r) => ({
 			preview: r.preview!,
 			diagnostics: r.diagnostics
 		}));
@@ -160,11 +157,10 @@ export class TypstWorkerClient {
 	#compile(
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>>,
-		pageNumbers: boolean,
 		format: 'pdf' | 'preview'
 	): Promise<CompileResult> {
 		const id = this.#nextId();
-		const request: CompileRequest = { type: 'compile', id, markdown, images, pageNumbers, format };
+		const request: CompileRequest = { type: 'compile', id, markdown, images, format };
 		if (format === 'preview') this.#pendingPreviewId = id;
 
 		return new Promise((resolve, reject) => {

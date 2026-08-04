@@ -262,7 +262,24 @@ base64s each asset into a `data:` URI, so the output needs no sidecar files.
   `#metadata(...) <md2pdf-html>` and pulled out with `typst eval`, so no
   `--features html` and no experimental Typst flag is involved.
 
-`bin/md2pdf.py` is the host side: stdlib-only Python 3.9+, portable to Windows.
+The math faces in `package/fonts/` are derived from `fonts/NewCMMath-Book.otf`
+and committed like `engine.wasm`. Regenerate them with `hb-subset` (harfbuzz)
+plus `woff2_compress` after changing the ranges:
+
+```sh
+hb-subset --output-file=math.otf --layout-features=ssty,kern,aalt --desubroutinize \
+  --unicodes=U+0020-007E,U+00A0-00FF,U+0370-03FF,U+2000-23FF,U+2500-27BF,U+2A00-2AFF,U+FE00-FE0F \
+  fonts/NewCMMath-Book.otf && woff2_compress math.otf
+hb-subset --output-file=math-alpha.otf --layout-features=ssty,kern,aalt --desubroutinize \
+  --unicodes=U+1D400-1D7FF fonts/NewCMMath-Book.otf && woff2_compress math-alpha.otf
+```
+
+The second file holds the math alphanumerics (`\mathbb`, `\mathfrak`, …). It is
+half the weight and most documents never reach into that block, so the engine
+embeds it only when the rendered MathML actually contains one of those
+characters.
+
+`bin/md2pdf` is the host side: stdlib-only Python 3.9+, portable to Windows.
 It writes a `main.typ` next to the document (so `read()`/`image()` resolve
 against the document root), runs `typst eval` to discover remote image URLs,
 fetches them into a per-run temp directory, exposes that as `<docdir>/remote`
