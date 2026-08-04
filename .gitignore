@@ -34,3 +34,6 @@ engine/target
 tests/*.pdf
 remote
 .md2pdf-main-*.typ
+
+# Python bytecode from bin/md2pdf.py
+__pycache__/

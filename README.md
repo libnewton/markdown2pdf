@@ -72,7 +72,13 @@ python3 bin/md2pdf.py tests/sample.md          # → tests/sample.pdf
 python3 bin/md2pdf.py tests/sample.md out.html # → HTML (the extension picks the format)
 python3 bin/md2pdf.py --html tests/sample.md   # → tests/sample.html
 cd engine && cargo test                        # engine unit tests
+python3 tests/check_html.py out.html           # assert the rendered artefact
 ```
+
+`tests/check_html.py` checks the file that actually ships: WCAG AA contrast for
+every colour token *including the syntax-highlighting ones*, in both themes; an
+`alt` on every image; every in-page link resolving; no external resource, no
+webfont, no inline event handler and no `javascript:`/`data:` anchor.
 
 Remote images are fetched fresh each run — nothing is cached between runs, so
 no document can read another's downloads. The fetch is limited to public
