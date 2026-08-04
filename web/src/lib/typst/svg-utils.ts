@@ -25,6 +25,12 @@ export function buildHeadElement(head: string): SVGSVGElement {
 }
 
 export function buildPageElement(page: SvgPage): SVGSVGElement {
+	if (page.markup.trimStart().startsWith('<svg')) {
+		const doc = new DOMParser().parseFromString(page.markup, 'image/svg+xml');
+		const el = document.adoptNode(doc.documentElement) as unknown as SVGSVGElement;
+		if (!el.hasAttribute('viewBox')) el.setAttribute('viewBox', `0 0 ${page.width} ${page.height}`);
+		return el;
+	}
 	const el = parseSvg(page.markup);
 	el.setAttribute('viewBox', `0 0 ${page.width} ${page.height}`);
 	// The page carries its offset within the full document; standalone it

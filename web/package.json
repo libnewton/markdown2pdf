@@ -29,9 +29,7 @@
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language-data": "^6.5.2",
     "@codemirror/theme-one-dark": "^6.1.3",
-    "@myriaddreamin/typst-ts-renderer": "^0.6.1-rc5",
-    "@myriaddreamin/typst-ts-web-compiler": "^0.6.1-rc5",
-    "@myriaddreamin/typst.ts": "^0.6.1-rc5",
-    "codemirror": "^6.0.2"
+    "codemirror": "^6.0.2",
+    "typst-wasm": "1.0.0"
   }
 }

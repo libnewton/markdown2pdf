@@ -4,18 +4,19 @@
 
 # md2pdf
 
-**Markdown → PDF with perfect typesetting — all Markdown processing lives
+**Markdown → PDF or responsive standalone HTML — all Markdown processing lives
 inside Typst.**
 
 The Markdown engine is a Rust/[`comrak`](https://github.com/kivikakk/comrak)
 parser compiled to a WebAssembly [Typst](https://typst.app/) plugin and shipped
 as a Typst package (`@local/md2pdf`). Both front-ends — the browser app and the
 command-line tool — feed raw Markdown to the *same* engine, so output is
-identical.
+consistent.
 
 ```
-Markdown ─▶ engine.wasm (Rust/comrak) ─▶ Typst markup ─▶ Typst compile ─▶ PDF
-           └──── inside the Typst package ────┘          └── typst / typst.ts ──┘
+Markdown ─▶ engine.wasm (Rust/comrak) ─▶ target-neutral Typst markup
+           └──── inside the Typst package ────┘       ├─ paged template ─▶ PDF/SVG
+                                                       └─ HTML template ─▶ HTML
 ```
 
 ## Repository layout
@@ -42,19 +43,28 @@ npm run dev          # local dev server
 npm run build        # static build → web/build/
 ```
 
-The `web/vite.config.ts` plugins copy `package/` and `fonts/` into
-`web/static/` at build time — the app is fully offline, no CDN calls.
+The web app has PDF and HTML preview tabs. PDF pages stay virtualized; HTML is
+shown through a sandboxed `srcdoc` iframe. The same long-lived `typst-wasm`
+compiler produces both. Package files, fonts, and the compiler are precached;
+there are no CDN calls.
 
 ## CLI
 
-Requires the `typst` binary (v0.13+) and, to rebuild the engine, Rust with the
+Requires Typst 0.15.x and, to rebuild the engine, Rust with the
 `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`, or
 the `rust-wasm` package on Arch).
 
 ```sh
 ./build.sh                       # build engine.wasm + install @local/md2pdf
 ./bin/md2pdf tests/sample.md     # → tests/sample.pdf
+./bin/md2pdf tests/sample.md out.html
+./tests/run.sh                    # compile every fixture to both targets
 ```
+
+An `.html` output runs Typst with `--features html --format html`. The result
+is one responsive file: CSS and script are inline, while local, remote,
+Mermaid, and Twemoji images are data URIs. It opens in light mode and includes
+reader theme and table-of-contents controls.
 
 ## Markdown coverage
 
@@ -69,8 +79,11 @@ remote images; Twemoji emoji (unicode and `:shortcodes:`); YAML frontmatter
 `{page}`-style placeholders); optional title
 cover page (`cover-*`); opt-in inline BibTeX citations (`bibliography: inline`,
 `[@key]`, blue citation numerals, and `bibliography-style`, default `ieee`);
-DIN 5008 letter mode (`letter-*` fields);
-`[toc]` → `#outline()`.
+DIN 5008 letter mode (`letter-*` fields); and `[toc]`.
+
+`cover-*`, `letter-*`, `pageNumbers`/`page-numbers`, `header-*`, and `footer-*`
+affect paged output only. HTML keeps title, authors, date, language,
+bibliography, and document semantics but intentionally has no paper furniture.
 
 `tests/extended.md` is the feature demo — it exercises every syntax above and
 documents every frontmatter key, header/footer placeholder and cover option.

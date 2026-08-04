@@ -85,7 +85,7 @@
   }
   let needRefresh: Readable<boolean> = writable(false)
   let updateServiceWorker: (reload?: boolean) => void = () => {}
-  if (browser) {
+  if (browser && import.meta.env.PROD) {
     const real = useRegisterSW(swOptions)
     needRefresh = real.needRefresh
     updateServiceWorker = real.updateServiceWorker
@@ -162,10 +162,12 @@
   let isMenuOpen = $state(false)
   let isCorsModalOpen = $state(false)
   let corsModalDraft = $state('')
+  let corsModalDialogEl = $state<HTMLDivElement | null>(null)
 
   function openCorsModal() {
     corsModalDraft = settingsStore.corsProxy
     isCorsModalOpen = true
+    requestAnimationFrame(() => corsModalDialogEl?.focus())
     closeMenu()
   }
 
@@ -205,6 +207,13 @@
 
   // SVG preview state
   let previewDoc = $state<SvgDocument | null>(null)
+  let activePreview = $state<'pdf' | 'html'>('pdf')
+  let htmlPreview = $state('')
+  let htmlIframeEl = $state<HTMLIFrameElement | null>(null)
+  let htmlScrollTop = 0
+  let pdfCompiledMarkdown = ''
+  let pdfCompiledPageNumbers: boolean | null = null
+  let htmlCompiledMarkdown = ''
   let svgContainerEl = $state<HTMLDivElement | null>(null)
   let svgPageCount = $state(0)
   let svgScale = $state(1)
@@ -222,10 +231,13 @@
   let lastCycleMs = 0
 
   const UI = {
-    export: 'Export PDF',
     loading: 'Initializing rendering engine...',
     generating: 'Generating...',
     placeholder: 'Type Markdown here...',
+  }
+
+  function hasActivePreview(): boolean {
+    return activePreview === 'pdf' ? previewDoc !== null : htmlPreview !== ''
   }
   function t<K extends keyof typeof UI>(key: K): string {
     return UI[key]
@@ -241,7 +253,7 @@
 
     showPreviewCompilingHint = false
 
-    if (status === 'compiling' && !!previewDoc) {
+    if (status === 'compiling' && hasActivePreview()) {
       compilingHintTimer = window.setTimeout(() => {
         showPreviewCompilingHint = true
       }, 180)
@@ -255,16 +267,28 @@
     }
   })
 
+  $effect(() => {
+    if (!browser) return
+    const theme = settingsStore.theme
+    document.documentElement.dataset.theme = theme
+    document.documentElement.style.colorScheme = theme
+    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute(
+      'content',
+      theme === 'dark' ? '#0d1218' : '#ffffff',
+    )
+    htmlIframeEl?.contentWindow?.postMessage({ type: 'md2pdf-theme', theme }, '*')
+  })
+
   // ========================================
   // Lifecycle
   // ========================================
   onMount(() => {
     loadingText = t('loading')
-    client = getSharedTypstWorkerClient()
-
-    // Hide loading overlay and trigger first compile
-    isLoading = false
-    void compile(markdown)
+    void prepareCompilerRuntime().then((ready) => {
+      if (!ready) return
+      client = getSharedTypstWorkerClient()
+      isLoading = false
+    })
 
     // Close menus on click outside. Guarded so the global click listener
     // doesn't reactively touch state on every click in the editor — Svelte
@@ -279,6 +303,10 @@
     // stopImmediatePropagation so CodeMirror's editor keymap never sees it
     // and never inserts a newline.
     const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isCorsModalOpen) {
+        cancelCorsProxy()
+        return
+      }
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
         e.stopImmediatePropagation()
@@ -287,6 +315,16 @@
       }
     }
     window.addEventListener('keydown', handleKey, true)
+
+    const handlePreviewMessage = (event: MessageEvent) => {
+      if (event.source !== htmlIframeEl?.contentWindow) return
+      if (event.data?.type === 'md2pdf-ready') syncHtmlPreview()
+      if (event.data?.type === 'md2pdf-scroll') htmlScrollTop = Number(event.data.top) || 0
+      if (event.data?.type === 'md2pdf-theme-change') {
+        settingsStore.setTheme(event.data.theme === 'dark' ? 'dark' : 'light')
+      }
+    }
+    window.addEventListener('message', handlePreviewMessage)
 
     // Debounced resize handler for auto-fit
     let resizeTimer: number | null = null
@@ -313,9 +351,44 @@
       document.removeEventListener('visibilitychange', handleHide)
       window.removeEventListener('pagehide', handleHide)
       window.removeEventListener('keydown', handleKey, true)
+      window.removeEventListener('message', handlePreviewMessage)
       if (resizeTimer) clearTimeout(resizeTimer)
     }
   })
+
+  async function prepareCompilerRuntime(): Promise<boolean> {
+    if (crossOriginIsolated || !('serviceWorker' in navigator)) {
+      sessionStorage.removeItem('md2pdf-isolation-reload')
+      return true
+    }
+    if (!import.meta.env.PROD) return true
+    if (!navigator.serviceWorker.controller) {
+      await Promise.race([
+        navigator.serviceWorker.ready.then(() => new Promise<void>((resolve) => {
+          if (navigator.serviceWorker.controller) resolve()
+          else navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true })
+        })),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 8000)),
+      ])
+    }
+    if (navigator.serviceWorker.controller && !sessionStorage.getItem('md2pdf-isolation-reload')) {
+      sessionStorage.setItem('md2pdf-isolation-reload', '1')
+      location.reload()
+      return false
+    }
+    return true
+  }
+
+  function syncHtmlPreview() {
+    htmlIframeEl?.contentWindow?.postMessage(
+      { type: 'md2pdf-theme', theme: settingsStore.theme },
+      '*',
+    )
+    htmlIframeEl?.contentWindow?.postMessage(
+      { type: 'md2pdf-scroll-restore', top: htmlScrollTop },
+      '*',
+    )
+  }
 
   // Auto-save document to IndexedDB. Images are written only when they change:
   // a save without them keeps the stored ones, so ordinary typing does not
@@ -344,6 +417,7 @@
     if (hasEverCompiled && !live) return
 
     const md = markdown
+    const target = activePreview
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _pn = settingsStore.pageNumbers
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -353,7 +427,7 @@
 
     const delay = hasEverCompiled ? Math.min(Math.max(450, lastCycleMs), 2500) : 0
     autoPreviewTimer = window.setTimeout(() => {
-      void compile(md)
+      if (target === activePreview) void compile(md)
     }, delay)
 
     return () => {
@@ -370,7 +444,7 @@
   // Auto-fit on mobile tab switch
   $effect(() => {
     if (!browser) return
-    if (activeMobileTab === 'preview') {
+    if (activeMobileTab === 'preview' && activePreview === 'pdf') {
       setTimeout(() => {
         fitWidth()
       }, 50)
@@ -386,6 +460,7 @@
   const visibleSlots = new Set<number>()
   let headEl: SVGSVGElement | null = null
   let pageObserver: IntersectionObserver | null = null
+  let observerContainer: HTMLDivElement | null = null
 
   function mountPage(index: number) {
     const slot = pageSlots[index]
@@ -395,7 +470,10 @@
   }
 
   function ensureObserver(container: HTMLDivElement): IntersectionObserver {
-    if (pageObserver) return pageObserver
+    if (pageObserver && observerContainer === container) return pageObserver
+    pageObserver?.disconnect()
+    visibleSlots.clear()
+    observerContainer = container
     pageObserver = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -471,6 +549,8 @@
   // engine). The host only resolves images Typst cannot fetch itself.
   async function compile(md: string) {
     if (!client) return
+    const target = activePreview
+    const pageNumbers = settingsStore.pageNumbers
     // Only mark "compiled" once real content exists — otherwise a first
     // compile that races ahead of the document load would, while live
     // update is paused, leave the preview blank until a manual Update.
@@ -499,9 +579,19 @@
         })
       }
 
-      const result = await client.compilePreview(md, imagesToSend(images), settingsStore.pageNumbers)
+      const result = target === 'pdf'
+        ? await client.compilePreview(md, imagesToSend(images), pageNumbers)
+        : await client.compileHtml(md, imagesToSend(images), pageNumbers)
       if (seq !== compileSeq) return
-      previewDoc = result.preview
+      if (target === 'pdf' && 'preview' in result) {
+        previewDoc = result.preview
+        pdfCompiledMarkdown = md
+        pdfCompiledPageNumbers = pageNumbers
+      }
+      if (target === 'html' && 'html' in result) {
+        htmlPreview = result.html
+        htmlCompiledMarkdown = md
+      }
       status = 'done'
       lastCycleMs = performance.now() - startedAt
     } catch (error) {
@@ -510,6 +600,24 @@
       if (seq !== compileSeq) return
       status = 'error'
       errorMessage = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  function selectPreview(target: 'pdf' | 'html') {
+    if (activePreview === target) return
+    editorPane?.flushPendingEdit()
+    activePreview = target
+    if (
+      (target === 'pdf' && (
+        pdfCompiledMarkdown !== markdown || pdfCompiledPageNumbers !== settingsStore.pageNumbers
+      )) ||
+      (target === 'html' && htmlCompiledMarkdown !== markdown)
+    ) {
+      void compile(markdown)
+    } else if (target === 'html') {
+      requestAnimationFrame(syncHtmlPreview)
+    } else {
+      requestAnimationFrame(fitWidth)
     }
   }
 
@@ -527,14 +635,37 @@
     return fresh
   }
 
-  async function downloadPdf() {
+  async function exportDocument() {
     editorPane?.flushPendingEdit()
-    if (!client || !lastCompiledMarkdown) return
+    if (!client || markdown.trim() === '') return
+    if (activePreview === 'html') {
+      let html = htmlPreview
+      if (htmlCompiledMarkdown !== markdown) {
+        const localImages = collectReferencedImageAssets(markdown)
+        const { images: remoteImages } = cachedRemoteImages(markdown)
+        html = (await client.compileHtml(
+          markdown,
+          imagesToSend({ ...localImages, ...remoteImages }),
+          settingsStore.pageNumbers,
+        )).html
+        htmlPreview = html
+        htmlCompiledMarkdown = markdown
+      }
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = 'document.html'
+      anchor.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      return
+    }
     // Open the tab synchronously so it counts as user-initiated and isn't
     // blocked by popup blockers after the async compile.
     const newTab = window.open('', '_blank')
-    // @ts-ignore
-    const { pdf } = await client.compilePdf(lastCompiledMarkdown, lastCompiledImages, settingsStore.pageNumbers)
+    const images = lastCompiledMarkdown === markdown
+      ? lastCompiledImages
+      : { ...collectReferencedImageAssets(markdown), ...cachedRemoteImages(markdown).images }
+    const { pdf } = await client.compilePdf(markdown, imagesToSend(images), settingsStore.pageNumbers)
     const blob = new Blob([pdf], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     if (newTab) {
@@ -753,6 +884,7 @@
 <!-- Main App -->
 <div
   class="app"
+  class:resizing={isResizing}
   ondragover={handleDragOver}
   ondragleave={handleDragLeave}
   ondrop={handleDrop}
@@ -796,6 +928,15 @@
       />
     </div>
     <div class="navbar-right">
+      <button
+        class="btn btn-ghost btn-sm btn-icon"
+        onclick={() => settingsStore.setTheme(settingsStore.theme === 'dark' ? 'light' : 'dark')}
+        aria-label={settingsStore.theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
+        aria-pressed={settingsStore.theme === 'dark'}
+        title={settingsStore.theme === 'dark' ? 'Use light theme' : 'Use dark theme'}
+      >
+        {settingsStore.theme === 'dark' ? '☀' : '☾'}
+      </button>
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="menu-container" onclick={(e) => e.stopPropagation()}>
@@ -908,8 +1049,22 @@
       class="resizer hidden-mobile"
       class:active={isResizing}
       onmousedown={startResize}
+      onkeydown={(e) => {
+        const next = e.key === 'ArrowLeft' ? leftPaneWidth - 2
+          : e.key === 'ArrowRight' ? leftPaneWidth + 2
+            : e.key === 'Home' ? 20
+              : e.key === 'End' ? 80
+                : leftPaneWidth
+        if (next === leftPaneWidth) return
+        e.preventDefault()
+        leftPaneWidth = Math.min(Math.max(next, 20), 80)
+      }}
       role="separator"
       aria-orientation="vertical"
+      aria-label="Resize editor and preview"
+      aria-valuemin="20"
+      aria-valuemax="80"
+      aria-valuenow={Math.round(leftPaneWidth)}
       tabindex="0"
     ></div>
 
@@ -939,6 +1094,20 @@
     >
       <div class="preview-toolbar">
         <div class="preview-status-wrapper">
+          <div class="preview-target-tabs" role="tablist" aria-label="Preview format">
+            <button
+              role="tab"
+              aria-selected={activePreview === 'pdf'}
+              class:active={activePreview === 'pdf'}
+              onclick={() => selectPreview('pdf')}
+            >PDF</button>
+            <button
+              role="tab"
+              aria-selected={activePreview === 'html'}
+              class:active={activePreview === 'html'}
+              onclick={() => selectPreview('html')}
+            >HTML</button>
+          </div>
           <button
             class="live-toggle"
             class:on={settingsStore.liveUpdate}
@@ -948,7 +1117,9 @@
             <span class="live-dot" aria-hidden="true"></span>
             {settingsStore.liveUpdate ? 'Live' : 'Paused'}
           </button>
-          <span class="page-info">{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span>
+          {#if activePreview === 'pdf'}
+            <span class="page-info">{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span>
+          {/if}
           {#if status === 'error'}
             <div class="error-badge">
               <span>⚠️ Failed</span>
@@ -967,18 +1138,20 @@
               Update
             </button>
           {/if}
-          <div class="zoom">
-            <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
-            <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
-            <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
-            <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
-          </div>
+          {#if activePreview === 'pdf'}
+            <div class="zoom">
+              <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
+              <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
+              <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
+              <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
+            </div>
+          {/if}
           <button
             class="btn btn-primary btn-sm"
-            onclick={downloadPdf}
-            disabled={!previewDoc || status === 'compiling'}
+            onclick={exportDocument}
+            disabled={!hasActivePreview() || status === 'compiling'}
           >
-            {status === 'compiling' ? t('generating') : t('export')}
+            {status === 'compiling' ? t('generating') : `Export ${activePreview.toUpperCase()}`}
           </button>
         </div>
       </div>
@@ -988,10 +1161,22 @@
         {/if}
         <div
           class="svg-preview-container"
+          class:preview-hidden={activePreview !== 'pdf'}
           style="--svg-scale: {svgScale}"
           bind:this={svgContainerEl}
         ></div>
-        {#if status === 'compiling' && !previewDoc}
+        {#if htmlPreview}
+          <iframe
+            class="html-preview"
+            class:preview-hidden={activePreview !== 'html'}
+            title="HTML document preview"
+            sandbox="allow-scripts allow-popups"
+            srcdoc={htmlPreview}
+            bind:this={htmlIframeEl}
+            onload={syncHtmlPreview}
+          ></iframe>
+        {/if}
+        {#if status === 'compiling' && !hasActivePreview()}
           <div class="preview-placeholder">
             <div class="loading-spinner"></div>
           </div>
@@ -1005,8 +1190,16 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-backdrop" onclick={cancelCorsProxy}>
-      <div class="modal-dialog" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h3 class="modal-title">CORS proxy</h3>
+      <div
+        class="modal-dialog"
+        onclick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cors-modal-title"
+        tabindex="-1"
+        bind:this={corsModalDialogEl}
+      >
+        <h3 class="modal-title" id="cors-modal-title">CORS proxy</h3>
         <p class="modal-help">
           Used as a fallback when an image URL is blocked by CORS. The proxy is called with
           the image URL appended as <code>url=</code>:
@@ -1049,7 +1242,7 @@
     position: fixed;
     inset: 0;
     z-index: 999;
-    background: rgba(255, 255, 255, 0.85);
+    background: color-mix(in srgb, var(--color-white) 88%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1114,6 +1307,10 @@
     display: block;
   }
 
+  :global(html[data-theme='dark']) .logo-img {
+    filter: brightness(0) invert(1);
+  }
+
   /* Live update toggle */
   .live-toggle {
     display: inline-flex;
@@ -1166,7 +1363,7 @@
     display: flex;
     flex-direction: column;
     position: relative;
-    background: #fff;
+    background: var(--color-white);
   }
 
   /* Editor Pane */
@@ -1208,6 +1405,31 @@
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+  }
+
+  .preview-target-tabs {
+    display: inline-flex;
+    padding: 2px;
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--color-gray-50);
+  }
+
+  .preview-target-tabs button {
+    min-width: 3rem;
+    padding: 0.28rem 0.55rem;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--color-gray-500);
+    font: 600 0.72rem/1 var(--font-mono);
+    cursor: pointer;
+  }
+
+  .preview-target-tabs button.active {
+    background: var(--color-white);
+    color: var(--color-gray-900);
+    box-shadow: var(--shadow-sm);
   }
 
   .preview-toolbar-right > .btn {
@@ -1293,8 +1515,8 @@
   }
 
   .error-badge {
-    background: #fef2f2;
-    color: #ef4444;
+    background: color-mix(in srgb, #ef4444 14%, var(--color-white));
+    color: color-mix(in srgb, #ef4444 80%, var(--color-gray-900));
   }
 
   @keyframes spin {
@@ -1330,6 +1552,23 @@
     overflow: auto;
     padding: var(--space-lg);
     background: var(--preview-bg);
+  }
+
+  .html-preview {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: var(--preview-bg);
+  }
+
+  .preview-hidden {
+    display: none;
+  }
+
+  .app.resizing .html-preview {
+    pointer-events: none;
   }
 
   /* One box per page. It keeps the page's footprint whether or not the page
@@ -1513,6 +1752,8 @@
     border: 1px solid var(--color-gray-300);
     border-radius: var(--radius-sm);
     box-sizing: border-box;
+    background: var(--color-gray-50);
+    color: var(--color-gray-900);
   }
   .modal-input:focus {
     outline: none;
@@ -1532,13 +1773,28 @@
     display: none;
   }
 
-  @media (max-width: 768px) {
+  @media (max-width: 769px) {
     .app {
       height: 100dvh;
     }
 
     .navbar {
       padding: 0 var(--space-sm);
+    }
+
+    .preview-toolbar {
+      gap: var(--space-sm);
+      padding-inline: var(--space-sm);
+    }
+
+    .preview-status-wrapper,
+    .preview-toolbar-right {
+      gap: var(--space-xs);
+    }
+
+    .page-info,
+    .zoom {
+      display: none;
     }
 
     .workspace {

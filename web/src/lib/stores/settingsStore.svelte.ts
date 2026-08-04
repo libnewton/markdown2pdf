@@ -3,6 +3,9 @@ import { browser } from '$app/environment';
 const LIVE_UPDATE_KEY = 'md2pdf-live-update';
 const PAGE_NUMBERS_KEY = 'md2pdf-page-numbers';
 const CORS_PROXY_KEY = 'md2pdf-cors-proxy';
+const THEME_KEY = 'md2pdf-theme';
+
+export type Theme = 'light' | 'dark';
 
 function readBool(key: string, fallback: boolean): boolean {
 	if (!browser) return fallback;
@@ -47,6 +50,7 @@ class SettingsStore {
 	liveUpdate = $state(readBool(LIVE_UPDATE_KEY, true));
 	pageNumbers = $state(readBool(PAGE_NUMBERS_KEY, true));
 	corsProxy = $state(readString(CORS_PROXY_KEY, ''));
+	theme = $state<Theme>(readString(THEME_KEY, 'light') === 'dark' ? 'dark' : 'light');
 
 	setLiveUpdate(value: boolean) {
 		this.liveUpdate = value;
@@ -62,6 +66,11 @@ class SettingsStore {
 		const trimmed = value.trim();
 		this.corsProxy = trimmed;
 		writeString(CORS_PROXY_KEY, trimmed);
+	}
+
+	setTheme(value: Theme) {
+		this.theme = value;
+		writeString(THEME_KEY, value);
 	}
 }
 

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Bundle the `md2pdf` Typst package (engine.wasm + lib.typ + styles + vendored
-// mitex/mmdr) into static/md2pdf/ so the typst.ts worker can load it. This is
+// mitex/mmdr) into static/md2pdf/ so the typst-wasm worker can load it. This is
 // the single Markdown-processing codebase, shared with the CLI.
 function copyMd2pdfPackage(): Plugin {
 	const src = join(__dirname, '../package');
@@ -57,7 +57,7 @@ function copyMd2pdfPackage(): Plugin {
 }
 
 // Copy the fonts md2pdf needs at runtime from the repo's shared `fonts/` dir
-// into static/fonts/, so the typst.ts worker is fully offline — no CDN calls.
+// into static/fonts/, so the typst-wasm worker is fully offline — no CDN calls.
 function bundleFonts(): Plugin {
 	const src = join(__dirname, '../fonts');
 	const dest = join(__dirname, 'static/fonts');
@@ -81,17 +81,46 @@ function bundleFonts(): Plugin {
 	};
 }
 
+function isolationHeaders(): Plugin {
+	const handler = (
+		_request: unknown,
+		response: { setHeader: (name: string, value: string) => void },
+		next: () => void
+	) => {
+		response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+		response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+		next();
+	};
+	return {
+		name: 'md2pdf-isolation-headers',
+		configureServer(server) {
+			server.middlewares.use(handler);
+		},
+		configurePreviewServer(server) {
+			server.middlewares.use(handler);
+		}
+	};
+}
+
 export default defineConfig({
 	plugins: [
 		copyMd2pdfPackage(),
 		bundleFonts(),
+		isolationHeaders(),
 		sveltekit(),
 		SvelteKitPWA({
+			strategies: 'injectManifest',
+			srcDir: 'src',
+			filename: 'service-worker.ts',
 			registerType: 'autoUpdate',
+			injectManifest: {
+				globPatterns: ['**/*.{html,js,css,wasm,json,png,svg,ttf,otf,webmanifest}'],
+				maximumFileSizeToCacheInBytes: 24 * 1024 * 1024
+			},
 			manifest: {
 				name: 'md2pdf',
 				short_name: 'md2pdf',
-				description: 'Markdown to PDF Professional Export Tool',
+				description: 'Markdown to responsive HTML or typeset PDF, entirely in your browser',
 				theme_color: '#ffffff',
 				icons: [
 					{

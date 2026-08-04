@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { EditorView, basicSetup } from 'codemirror'
-  import { EditorState } from '@codemirror/state'
+  import { Compartment, EditorState } from '@codemirror/state'
   import { markdown as langMarkdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
+  import { settingsStore } from '$lib/stores/settingsStore.svelte'
 
   interface Props {
     markdown: string
@@ -16,6 +17,7 @@
   let editorView = $state<EditorView | null>(null)
   let editorContainerEl = $state<HTMLDivElement | null>(null)
   let suppressEditorUpdate = false
+  const theme = new Compartment()
   // The last string handed upward. Also lets the external-sync effect below
   // bail out without calling `doc.toString()`.
   let lastEmittedDoc = ''
@@ -65,7 +67,7 @@
       extensions: [
         basicSetup,
         langMarkdown({ codeLanguages: languages }),
-        oneDark,
+        theme.of(settingsStore.theme === 'dark' ? oneDark : []),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (!update.docChanged || suppressEditorUpdate) return
@@ -123,6 +125,13 @@
     })
     suppressEditorUpdate = false
   })
+
+  $effect(() => {
+    if (!editorView) return
+    editorView.dispatch({
+      effects: theme.reconfigure(settingsStore.theme === 'dark' ? oneDark : []),
+    })
+  })
 </script>
 
 <div class="editor-host" bind:this={editorContainerEl}></div>
@@ -132,7 +141,7 @@
     flex: 1;
     height: 100%;
     overflow: hidden;
-    background-color: #282c34;
+    background-color: var(--editor-bg);
     /* Isolate CodeMirror's internal layout from the rest of the page so
        typing doesn't invalidate layout/paint on the preview pane. */
     contain: strict;

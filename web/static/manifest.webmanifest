@@ -1,7 +1,7 @@
 {
   "name": "md2pdf",
   "short_name": "md2pdf",
-  "description": "Markdown to PDF Professional Export Tool",
+  "description": "Markdown to responsive HTML or typeset PDF, entirely in your browser",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

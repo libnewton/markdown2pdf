@@ -392,3 +392,53 @@
 
   body
 }
+
+#let _md-alignment(kind) = (
+  left: left,
+  center: center,
+  right: right,
+).at(kind, default: left)
+
+#let md-align(kind, boxed: false, body) = align(
+  _md-alignment(kind),
+  if boxed { box(body) } else { body },
+)
+
+#let md-row(..cells) = grid(
+  columns: (1fr,) * cells.pos().len(),
+  column-gutter: 1em,
+  row-gutter: 1em,
+  ..cells.pos(),
+)
+
+#let md-task-list(task-item, ..items) = {
+  for item in items.pos() { task-item(item.checked, item.body) }
+}
+
+#let md-rule() = line(length: 100%, stroke: 0.6pt)
+#let md-toc() = outline(title: auto, indent: auto)
+#let md-pagebreak() = pagebreak()
+#let md-blank() = v(0.5em)
+#let _md-place = align
+
+#let md-image(
+  asset,
+  path,
+  width: auto,
+  height: auto,
+  alt: none,
+  caption: none,
+  align: "center",
+) = {
+  let graphic = asset(path, width: width, height: height, alt: alt)
+  let alignment = _md-alignment(align)
+  if caption == none {
+    _md-place(alignment, graphic)
+  } else {
+    _md-place(alignment, block(width: width, breakable: false, {
+      _md-place(center, graphic)
+      v(0.3em, weak: true)
+      _md-place(center, text(size: 0.85em, fill: luma(120), caption))
+    }))
+  }
+}

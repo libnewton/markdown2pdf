@@ -50,3 +50,14 @@ export function splitSvgDocument(svg: string): SvgDocument {
 
 	return { head, pages };
 }
+
+export function svgPagesDocument(pages: string[]): SvgDocument {
+	return {
+		head: '',
+		pages: pages.map((markup) => ({
+			markup,
+			width: attrNumber(markup, 'width', 595),
+			height: attrNumber(markup, 'height', 842)
+		}))
+	};
+}

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180" role="img" aria-labelledby="title description">
+  <title id="title">Responsive local image</title>
+  <desc id="description">Blue and green geometric shapes on a light background.</desc>
+  <rect width="320" height="180" rx="18" fill="#edf5ff"/>
+  <circle cx="102" cy="90" r="52" fill="#245fc5"/>
+  <path d="M155 142 218 38l63 104Z" fill="#16734a"/>
+</svg>

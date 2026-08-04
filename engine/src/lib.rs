@@ -280,8 +280,18 @@ fn replace_citations_outside_code_spans(line: &str) -> String {
 }
 
 const ADMONITION_KINDS: &[&str] = &[
-    "success", "warning", "tip", "info", "danger", "note", "caution", "important",
-    "left", "center", "right", "row", // layout directives
+    "success",
+    "warning",
+    "tip",
+    "info",
+    "danger",
+    "note",
+    "caution",
+    "important",
+    "left",
+    "center",
+    "right",
+    "row", // layout directives
 ];
 
 /// Extract `:::kind` and `+++++` blocks, replacing each with an HTML-comment
@@ -561,8 +571,10 @@ fn preprocess_admonitions(src: &str) -> (String, Vec<Admonition>) {
             i += 1;
             continue;
         }
-        if let Some((fence_len, kind, title)) =
-            fence.is_none().then(|| parse_admonition_open(lines[i])).flatten()
+        if let Some((fence_len, kind, title)) = fence
+            .is_none()
+            .then(|| parse_admonition_open(lines[i]))
+            .flatten()
         {
             let mut body: Vec<&str> = Vec::new();
             i += 1;
@@ -608,8 +620,10 @@ fn preprocess_spoilers(src: &str) -> (String, Vec<Spoiler>) {
             i += 1;
             continue;
         }
-        if let Some(inline) =
-            fence.is_none().then(|| parse_spoiler_open(lines[i])).flatten()
+        if let Some(inline) = fence
+            .is_none()
+            .then(|| parse_spoiler_open(lines[i]))
+            .flatten()
         {
             let close = ((i + 1)..lines.len()).find(|&j| is_spoiler_closer(lines[j]));
             if let Some(close) = close {
@@ -713,7 +727,12 @@ fn is_spoiler_closer(line: &str) -> bool {
 /// placeholder comrak parsed as an HtmlBlock.
 fn parse_placeholder(literal: &str, kind: &str) -> Option<usize> {
     let inner = literal.trim().strip_prefix("<!--")?.strip_suffix("-->")?;
-    inner.strip_prefix(kind)?.strip_prefix(':')?.trim().parse().ok()
+    inner
+        .strip_prefix(kind)?
+        .strip_prefix(':')?
+        .trim()
+        .parse()
+        .ok()
 }
 
 // ==========================================================================
@@ -797,7 +816,7 @@ impl<'a> Ctx<'a> {
                 format!("{} {}", "=".repeat(level), self.render_inlines(node))
             }
             NodeValue::Paragraph => self.render_paragraph(node),
-            NodeValue::ThematicBreak => "#line(length: 100%, stroke: 0.6pt)".to_string(),
+            NodeValue::ThematicBreak => "#md-rule()".to_string(),
             NodeValue::BlockQuote | NodeValue::MultilineBlockQuote(_) => {
                 let body = self.render_block_children(node);
                 if body.trim().is_empty() {
@@ -808,7 +827,9 @@ impl<'a> Ctx<'a> {
             }
             NodeValue::List(_) => return self.render_list(node, indent),
             NodeValue::Item(_) | NodeValue::TaskItem(_) => self.render_block_children(node),
-            NodeValue::CodeBlock(cb) => return self.render_code_block(&cb.info, &cb.literal, indent),
+            NodeValue::CodeBlock(cb) => {
+                return self.render_code_block(&cb.info, &cb.literal, indent)
+            }
             NodeValue::HtmlBlock(hb) => {
                 if let Some(id) = parse_placeholder(&hb.literal, "admonition") {
                     self.render_admonition(id)
@@ -833,9 +854,9 @@ impl<'a> Ctx<'a> {
     fn render_paragraph(&self, node: &'a AstNode<'a>) -> String {
         let plain = plain_text(node);
         match plain.trim().to_ascii_lowercase().as_str() {
-            "[toc]" => return "#outline(title: auto, indent: auto)".to_string(),
-            "[[pagebreak]]" => return "#pagebreak()".to_string(),
-            "[[md2pdf-blank-line]]" => return "#v(0.5em)".to_string(),
+            "[toc]" => return "#md-toc()".to_string(),
+            "[[pagebreak]]" => return "#md-pagebreak()".to_string(),
+            "[[md2pdf-blank-line]]" => return "#md-blank()".to_string(),
             _ => {}
         }
         self.render_inlines(node)
@@ -855,7 +876,7 @@ impl<'a> Ctx<'a> {
                     String::new()
                 } else {
                     format!(
-                        "#align({})[\n{}\n]",
+                        "#md-align(\"{}\")[\n{}\n]",
                         alignment.typst(),
                         indent_lines(&inner, 1)
                     )
@@ -900,7 +921,7 @@ impl<'a> Ctx<'a> {
         if info.eq_ignore_ascii_case("mermaid") {
             return indent_lines(
                 &format!(
-                    "#align({})[#md-mermaid(\"{}\")]",
+                    "#md-align(\"{}\")[#md-mermaid(\"{}\")]",
                     self.visual_alignment().typst(),
                     esc_string(code)
                 ),
@@ -922,12 +943,13 @@ impl<'a> Ctx<'a> {
             _ => return String::new(),
         };
         if nl.is_task_list {
-            return node
+            let items = node
                 .children()
                 .map(|item| self.render_task_item(item, indent))
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>()
-                .join("\n");
+                .join(",\n");
+            return indent_lines(&format!("#md-task-list(\n{items}\n)"), indent);
         }
         let marker = if nl.list_type == ListType::Ordered {
             "+"
@@ -967,7 +989,6 @@ impl<'a> Ctx<'a> {
     }
 
     fn render_task_item(&self, item: &'a AstNode<'a>, indent: usize) -> String {
-        let base = "  ".repeat(indent);
         let checked = task_checked(item);
         // comrak may wrap the item body inside a TaskItem node — flatten it.
         let mut kids: Vec<&'a AstNode<'a>> = Vec::new();
@@ -992,11 +1013,15 @@ impl<'a> Ctx<'a> {
                 _ => extras.push(self.render_block(child, indent + 1)),
             }
         }
-        let head = format!("{base}#task-item({checked})[{body}]");
-        std::iter::once(head)
-            .chain(extras.into_iter().filter(|s| !s.is_empty()))
-            .collect::<Vec<_>>()
-            .join("\n")
+        let mut parts = Vec::new();
+        if !body.is_empty() {
+            parts.push(body);
+        }
+        parts.extend(extras.into_iter().filter(|s| !s.is_empty()));
+        format!(
+            "(checked: {checked}, body: [\n{}\n])",
+            indent_lines(&parts.join("\n"), 1)
+        )
     }
 
     fn render_table(&self, node: &'a AstNode<'a>, indent: usize) -> String {
@@ -1088,12 +1113,9 @@ impl<'a> Ctx<'a> {
             },
             NodeValue::ShortCode(s) => render_emoji(&s.emoji),
             NodeValue::Link(l) => render_link(&l.url, &self.render_inlines(node)),
-            NodeValue::Image(l) => render_image(
-                &l.url,
-                &l.title,
-                &plain_text(node),
-                self.visual_alignment(),
-            ),
+            NodeValue::Image(l) => {
+                render_image(&l.url, &l.title, &plain_text(node), self.visual_alignment())
+            }
             NodeValue::FootnoteReference(r) => self.render_footnote(&r.name),
             // Block nodes should not appear here, but render defensively.
             _ => self.render_inlines(node),
@@ -1147,11 +1169,7 @@ fn render_row(source: &str, alignment: Option<Alignment>, citations: bool) -> St
     if cells.is_empty() {
         return String::new();
     }
-    let cols = vec!["1fr"; cells.len()].join(", ");
-    format!(
-        "#grid(columns: ({cols}), column-gutter: 1em, row-gutter: 1em,\n{}\n)",
-        cells.join(",\n")
-    )
+    format!("#md-row(\n{}\n)", cells.join(",\n"))
 }
 
 // ==========================================================================
@@ -1342,7 +1360,7 @@ fn render_inline_code(literal: &str) -> String {
 fn render_math(display: bool, latex: &str, alignment: Alignment) -> String {
     let math = format!("#md-math({display}, \"{}\")", esc_string(latex.trim()));
     if display {
-        format!("#align({})[#box[{math}]]", alignment.typst())
+        format!("#md-align(\"{}\", boxed: true)[{math}]", alignment.typst())
     } else {
         math
     }
@@ -1390,25 +1408,15 @@ fn render_image(url: &str, title: &str, alt: &str, alignment: Alignment) -> Stri
         }
         None => args.push("width: 100%".to_string()),
     }
-    let image_call = format!("#image({})", args.join(", "));
-    let figure_width = dims
-        .as_ref()
-        .and_then(|(width, _)| width.as_ref())
-        .map(|width| format!("{width}pt"))
-        .unwrap_or_else(|| "100%".to_string());
-
-    // Alt text becomes a small centered caption, unless it is just a dim spec.
     let caption = alt.trim();
     let caption_is_dims =
         caption.starts_with('=') || caption.chars().next().is_some_and(|c| c.is_ascii_digit());
-    if caption.is_empty() || caption_is_dims {
-        return format!("#align({})[{image_call}]", alignment.typst());
+    args.push(format!("align: \"{}\"", alignment.typst()));
+    if !caption.is_empty() && !caption_is_dims {
+        args.push(format!("alt: \"{}\"", esc_string(caption)));
+        args.push(format!("caption: [{}]", esc_text(caption)));
     }
-    format!(
-        "#align({})[\n  #block(width: {figure_width}, breakable: false)[\n    #align(center)[{image_call}]\n    #v(0.3em, weak: true)\n    #align(center, text(size: 0.85em, fill: luma(120), [{}]))\n  ]\n]",
-        alignment.typst(),
-        esc_text(caption)
-    )
+    format!("#md-image({})", args.join(", "))
 }
 
 /// Parse a `=200x200`, `=200x`, or `200x200` dimension spec.
@@ -1469,8 +1477,7 @@ fn collect_remote_images(src: &str) -> Vec<(String, String)> {
                         let url: String = raw
                             .chars()
                             .take_while(|&c| {
-                                !c.is_whitespace()
-                                    && !matches!(c, ')' | '>' | '"' | '\'')
+                                !c.is_whitespace() && !matches!(c, ')' | '>' | '"' | '\'')
                             })
                             .collect();
                         if seen.insert(url.clone()) {
@@ -1539,7 +1546,10 @@ fn max_backtick_run(s: &str) -> usize {
 fn esc_text(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
     for c in s.chars() {
-        if matches!(c, '\\' | '#' | '*' | '_' | '`' | '[' | ']' | '$' | '<' | '>' | '@') {
+        if matches!(
+            c,
+            '\\' | '#' | '*' | '_' | '`' | '[' | ']' | '$' | '<' | '>' | '@'
+        ) {
             o.push('\\');
         }
         o.push(c);
@@ -1658,7 +1668,10 @@ mod tests {
 
     #[test]
     fn accepts_single_dash_and_alignment_colons() {
-        assert_eq!(widths("| a | b | c |\n| - | :-+ | -:+ |\n"), vec![vec![1, 2, 2]]);
+        assert_eq!(
+            widths("| a | b | c |\n| - | :-+ | -:+ |\n"),
+            vec![vec![1, 2, 2]]
+        );
     }
 
     #[test]
@@ -1705,23 +1718,26 @@ mod tests {
     fn keeps_visuals_centered_without_a_directive() {
         assert_eq!(
             render_image("image.png", "=80x", "", Alignment::Center),
-            "#align(center)[#image(\"image.png\", width: 80pt)]"
+            "#md-image(\"image.png\", width: 80pt, align: \"center\")"
         );
         assert_eq!(
             render_math(true, "x = 1", Alignment::Center),
-            "#align(center)[#box[#md-math(true, \"x = 1\")]]"
+            "#md-align(\"center\", boxed: true)[#md-math(true, \"x = 1\")]"
         );
     }
 
     #[test]
     fn aligns_a_captioned_image_as_one_sized_figure() {
         let out = convert_str(":::left\n![Caption](image.png \"=80x\")\n:::\n", false);
-        assert!(out.contains("#align(left)[\n  #align(left)["), "{out}");
+        assert!(out.contains("#md-align(\"left\")["), "{out}");
         assert!(
-            out.contains("#block(width: 80pt, breakable: false)"),
+            out.contains("#md-image(\"image.png\", width: 80pt"),
             "{out}"
         );
-        assert!(out.contains("#align(center, text(size: 0.85em"), "{out}");
+        assert!(
+            out.contains("alt: \"Caption\", caption: [Caption]"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -1730,14 +1746,14 @@ mod tests {
             "::::::right\n:::::tip\n![](right.png \"=80x\")\n\n:::center\n![](center.png \"=80x\")\n:::\n:::::\n::::::\n",
             false,
         );
-        assert!(out.contains("#align(right)["), "{out}");
+        assert!(out.contains("#md-align(\"right\")["), "{out}");
         assert!(out.contains("#admonition(kind: \"tip\")"), "{out}");
         assert!(
-            out.contains("#align(right)[#image(\"right.png\", width: 80pt)]"),
+            out.contains("#md-image(\"right.png\", width: 80pt, align: \"right\")"),
             "{out}"
         );
         assert!(
-            out.contains("#align(center)[#image(\"center.png\", width: 80pt)]"),
+            out.contains("#md-image(\"center.png\", width: 80pt, align: \"center\")"),
             "{out}"
         );
     }
@@ -1748,9 +1764,9 @@ mod tests {
             ":::::right\n::::row\n![](row.png \"=80x\")\n::::\n:::::\n",
             false,
         );
-        assert!(row.contains("#grid("), "{row}");
+        assert!(row.contains("#md-row("), "{row}");
         assert!(
-            row.contains("#align(right)[#image(\"row.png\", width: 80pt)]"),
+            row.contains("#md-image(\"row.png\", width: 80pt, align: \"right\")"),
             "{row}"
         );
 
@@ -1758,9 +1774,12 @@ mod tests {
             ":::left\n+++++ Summary\n![](spoiler.png \"=80x\")\n+++++\n:::\n",
             false,
         );
-        assert!(spoiler.contains("#spoiler(summary: \"Summary\")"), "{spoiler}");
         assert!(
-            spoiler.contains("#align(left)[#image(\"spoiler.png\", width: 80pt)]"),
+            spoiler.contains("#spoiler(summary: \"Summary\")"),
+            "{spoiler}"
+        );
+        assert!(
+            spoiler.contains("#md-image(\"spoiler.png\", width: 80pt, align: \"left\")"),
             "{spoiler}"
         );
     }
@@ -1772,14 +1791,78 @@ mod tests {
             false,
         );
         assert!(
-            out.contains("#align(right)[#box[#md-math(true, \"x = 1\")]]"),
+            out.contains("#md-align(\"right\", boxed: true)[#md-math(true, \"x = 1\")]"),
             "{out}"
         );
         assert!(
-            out.contains("#align(right)[#md-mermaid(\"graph LR\")]"),
+            out.contains("#md-align(\"right\")[#md-mermaid(\"graph LR\")]"),
             "{out}"
         );
         assert!(out.contains("```txt\n  code\n  ```"), "{out}");
         assert!(out.contains("#table("), "{out}");
+    }
+
+    #[test]
+    fn emits_target_neutral_structural_helpers() {
+        let out = convert_str(
+            "[toc]\n\n[[pagebreak]]\n\n---\n\n- [x] done\n- [ ] pending\n",
+            false,
+        );
+        assert!(out.contains("#md-toc()"), "{out}");
+        assert!(out.contains("#md-pagebreak()"), "{out}");
+        assert!(out.contains("#md-rule()"), "{out}");
+        assert!(out.contains("#md-task-list("), "{out}");
+        assert!(out.contains("checked: true"), "{out}");
+        assert!(out.contains("checked: false"), "{out}");
+    }
+
+    #[test]
+    fn preserves_all_heading_levels_for_semantic_html() {
+        let out = convert_str(
+            "# one\n## two\n### three\n#### four\n##### five\n###### six\n",
+            false,
+        );
+        for (level, title) in ["one", "two", "three", "four", "five", "six"]
+            .iter()
+            .enumerate()
+        {
+            assert!(
+                out.contains(&format!("{} {title}", "=".repeat(level + 1))),
+                "{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn escapes_image_metadata_and_accepts_fractional_dimensions() {
+        assert_eq!(
+            parse_dims("=0.5x99999.25"),
+            Some((Some("0.5".to_string()), Some("99999.25".to_string())))
+        );
+        assert_eq!(parse_dims("=20x"), Some((Some("20".to_string()), None)));
+        assert_eq!(parse_dims("=20xnope"), None);
+        let out = render_image(
+            "a\"b.svg",
+            "=12.5x20",
+            "Alt \"quoted\" \\ path",
+            Alignment::Right,
+        );
+        assert!(out.contains(r#""a\"b.svg""#), "{out}");
+        assert!(out.contains("width: 12.5pt, height: 20pt"), "{out}");
+        assert!(out.contains(r#"alt: "Alt \"quoted\" \\ path""#), "{out}");
+        assert!(out.contains(r#"caption: [Alt "quoted" \\ path]"#), "{out}");
+    }
+
+    #[test]
+    fn empty_and_malformed_custom_blocks_degrade_safely() {
+        let empty = convert_str(":::center\n:::\n\n::::row\n::::\n", false);
+        assert!(!empty.contains("#md-align"), "{empty}");
+        assert!(!empty.contains("#md-row"), "{empty}");
+
+        let malformed = convert_str(
+            ":::warning\nnot closed\n\n+++++ secret\nnot closed\n",
+            false,
+        );
+        assert!(malformed.contains("not closed"), "{malformed}");
     }
 }

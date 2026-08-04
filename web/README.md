@@ -4,7 +4,7 @@
 
 # md2pdf — web app
 
-**Markdown to PDF, perfect typesetting, fully in the browser.**
+**Markdown to responsive HTML or typeset PDF, fully in the browser.**
 
 A Markdown export tool built with [Svelte 5](https://svelte.dev/) +
 [SvelteKit](https://kit.svelte.dev) and [Typst](https://typst.app/). Everything
@@ -48,7 +48,7 @@ and shared fonts (`../fonts/`) into `static/` on every build.
 
 - [Svelte 5](https://svelte.dev/) + [SvelteKit](https://kit.svelte.dev)
   (`adapter-static`)
-- [Typst](https://typst.app/) via [typst.ts](https://github.com/Myriad-Dreamin/typst.ts)
+- [Typst](https://typst.app/) via [typst-wasm](https://github.com/typst-community/typst-wasm)
   (compiler + SVG renderer, in a Web Worker)
 - [CodeMirror 6](https://codemirror.net/) editor
 - The shared Rust/WASM Markdown engine (`../engine/`)

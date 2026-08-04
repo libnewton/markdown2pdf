@@ -1,5 +1,5 @@
 #!/bin/sh
-# md2pdf — host shim. Markdown -> PDF via the @local/md2pdf Typst package.
+# md2pdf — host shim. Markdown -> PDF or HTML via the @local/md2pdf Typst package.
 #
 # All Markdown processing lives in the Typst package. This shim only does host
 # I/O: Typst's compile sandbox cannot reach the network, so remote images are
@@ -9,10 +9,14 @@ set -e
 
 input="$1"
 if [ -z "$input" ] || [ ! -f "$input" ]; then
-  echo "usage: md2pdf <input.md> [output.pdf]" >&2
+  echo "usage: md2pdf <input.md> [output.pdf|output.html]" >&2
   exit 1
 fi
 output="${2:-${input%.*}.pdf}"
+case "$output" in
+  *.html|*.HTML) format=html ;;
+  *) format=pdf ;;
+esac
 
 # `readlink -f` is GNU-only, so walk the symlink chain by hand: the shim is
 # usually reached through a symlink on PATH, and the fonts sit next to the real
@@ -94,7 +98,12 @@ for it in items:
         print(f"md2pdf: WARN could not fetch {url}: {e}", file=sys.stderr)
 PY
 
-# Pass 2 — compile.
-typst compile --root "$docdir" --font-path "$fonts" --ignore-system-fonts \
-  "$main" "$output"
+# Pass 2 — compile. HTML is still an experimental Typst target.
+if [ "$format" = html ]; then
+  typst compile --features html --format html --root "$docdir" \
+    --font-path "$fonts" --ignore-system-fonts "$main" "$output"
+else
+  typst compile --format pdf --root "$docdir" --font-path "$fonts" \
+    --ignore-system-fonts "$main" "$output"
+fi
 echo "md2pdf: wrote $output"

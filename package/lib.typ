@@ -1,14 +1,15 @@
-// md2pdf — Markdown -> PDF, entirely inside Typst.
+// md2pdf — Markdown -> PDF or HTML, entirely inside Typst.
 //
 // `prepare()` feeds Markdown to the WASM engine (`engine.wasm`, the Rust/comrak
 // "custom md engine"); the caller (`main.typ`, in the document's directory)
 // does the final `eval`. All Markdown processing happens here; the host shim
 // only does file/network I/O.
 
-#import "styles/modern-tech.typ": article
-#import "admonitions.typ": admonition, spoiler, task-item
+#import "styles/modern-tech.typ": article as pdf-article, md-align as pdf-md-align, md-row as pdf-md-row, md-task-list as pdf-md-task-list, md-rule as pdf-md-rule, md-toc as pdf-md-toc, md-pagebreak as pdf-md-pagebreak, md-blank as pdf-md-blank, md-image as pdf-md-image
+#import "styles/modern-web.typ": article as web-article, md-align as web-md-align, md-row as web-md-row, md-task-list as web-md-task-list, md-rule as web-md-rule, md-toc as web-md-toc, md-pagebreak as web-md-pagebreak, md-blank as web-md-blank, md-image as web-md-image, admonition as web-admonition, spoiler as web-spoiler, task-item as web-task-item
+#import "admonitions.typ": admonition as pdf-admonition, spoiler as pdf-spoiler, task-item as pdf-task-item
 // mitex + mmdr are vendored into the package so it is fully self-contained
-// and offline — no @preview resolution needed (works in typst.ts too).
+// and offline — no @preview resolution needed (works in typst-wasm too).
 #import "vendor/mitex/lib.typ": mi, mitex
 #import "vendor/mmdr/lib.typ": mermaid
 
@@ -16,11 +17,61 @@
 
 // Helpers handed to the engine output via `eval` scope.
 #let _md-math(display, src) = if display { mitex(src) } else { mi(src) }
-#let _md-mermaid(code) = mermaid(code)
+#let _md-mermaid(code) = context if target() == "html" {
+  set image(alt: "Mermaid diagram")
+  mermaid(code)
+} else {
+  mermaid(code)
+}
+
+#let _article(..args) = context if target() == "html" {
+  web-article(..args)
+} else {
+  pdf-article(..args)
+}
+#let _admonition(..args) = context if target() == "html" {
+  web-admonition(..args)
+} else {
+  pdf-admonition(..args)
+}
+#let _spoiler(..args) = context if target() == "html" { web-spoiler(..args) } else { pdf-spoiler(..args) }
+#let _task-item(..args) = context if target() == "html" { web-task-item(..args) } else { pdf-task-item(..args) }
+#let _md-align(..args) = context if target() == "html" { web-md-align(..args) } else { pdf-md-align(..args) }
+#let _md-row(..args) = context if target() == "html" { web-md-row(..args) } else { pdf-md-row(..args) }
+#let _md-task-list(..args) = context if target() == "html" {
+  web-md-task-list(web-task-item, ..args)
+} else {
+  pdf-md-task-list(pdf-task-item, ..args)
+}
+#let _md-rule(..args) = context if target() == "html" { web-md-rule(..args) } else { pdf-md-rule(..args) }
+#let _md-toc(lang: "en", ..args) = context if target() == "html" {
+  web-md-toc(lang: lang, ..args)
+} else {
+  pdf-md-toc(..args)
+}
+#let _md-pagebreak(..args) = context if target() == "html" { web-md-pagebreak(..args) } else { pdf-md-pagebreak(..args) }
+#let _md-blank(..args) = context if target() == "html" { web-md-blank(..args) } else { pdf-md-blank(..args) }
+#let _md-image(asset, ..args) = context if target() == "html" {
+  web-md-image(asset, ..args)
+} else {
+  pdf-md-image(asset, ..args)
+}
+#let _md-bibliography(bib, style, title) = context if target() == "html" {
+  html.h2(title)
+  bibliography(bytes(bib), style: style, title: none)
+} else {
+  bibliography(bytes(bib), style: style, title: title)
+}
 
 // Emoji are rendered as bundled Twemoji SVGs (package-relative, so they work
 // in the CLI and — once the worker maps them into the VFS — in the browser).
 #let _twemoji(cp) = box(baseline: 0.15em, height: 1em, image("twemoji/" + cp + ".svg"))
+#let _twemoji-html(cp) = html.span(class: "twemoji", image(
+  "twemoji/" + cp + ".svg",
+  height: 1em,
+  alt: "",
+))
+#let _target-twemoji(cp) = context if target() == "html" { _twemoji-html(cp) } else { _twemoji(cp) }
 
 // True during the host shim's pass-1 `typst query` (remote-image discovery).
 #let _querying = sys.inputs.at("md2pdf-query", default: none) != none
@@ -220,7 +271,7 @@
         bytes(if from-h1 { "1" } else { "" }),
         bytes(if bib != "" { "1" } else { "" }),
       )) + if bib != "" { "\n\n#md-bibliography()" } else { "" },
-      template: article.with(
+      template: _article.with(
         title: title,
         authors: named.at("authors", default: _authors-of(fm)),
         date: _date-of(fm),
@@ -242,17 +293,21 @@
         .._cover-args(fm),
       ),
       scope: (
-        admonition: admonition.with(lang: doc-lang.at(0)),
-        spoiler: spoiler,
-        task-item: task-item,
+        admonition: _admonition.with(lang: doc-lang.at(0)),
+        spoiler: _spoiler,
+        task-item: _task-item,
+        md-align: _md-align,
+        md-row: _md-row,
+        md-task-list: _md-task-list,
+        md-rule: _md-rule,
+        md-toc: _md-toc.with(lang: doc-lang.at(0)),
+        md-pagebreak: _md-pagebreak,
+        md-blank: _md-blank,
+        md-image: _md-image.with(named.at("asset", default: image)),
         md-math: _md-math,
         md-mermaid: _md-mermaid,
-        twemoji: _twemoji,
-        md-bibliography: () => bibliography(
-          bytes(bib),
-          style: bibliography-style,
-          title: bibliography-title,
-        ),
+        twemoji: _target-twemoji,
+        md-bibliography: () => _md-bibliography(bib, bibliography-style, bibliography-title),
       ),
     )
   }

@@ -4,4 +4,4 @@ version = "0.1.0"
 entrypoint = "lib.typ"
 authors = ["md2pdf"]
 license = "MIT"
-description = "Markdown to PDF — a custom Markdown engine packaged for Typst"
+description = "Markdown to PDF or HTML — a custom Markdown engine packaged for Typst"

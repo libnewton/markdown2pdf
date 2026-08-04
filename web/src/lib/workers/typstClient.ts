@@ -6,7 +6,7 @@ type CompileRequest = {
 	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
 	pageNumbers?: boolean;
-	format?: 'pdf' | 'preview';
+	format?: 'pdf' | 'preview' | 'html';
 };
 
 type CompileResponse =
@@ -15,6 +15,13 @@ type CompileResponse =
 			id: string;
 			ok: true;
 			pdf: ArrayBuffer;
+			diagnostics: string[];
+	  }
+	| {
+			type: 'compile-result';
+			id: string;
+			ok: true;
+			html: string;
 			diagnostics: string[];
 	  }
 	| {
@@ -35,6 +42,7 @@ type CompileResponse =
 type CompileResult = {
 	pdf?: Uint8Array<ArrayBuffer>;
 	preview?: SvgDocument;
+	html?: string;
 	diagnostics: string[];
 };
 
@@ -68,6 +76,7 @@ export class TypstWorkerClient {
 			const result: CompileResult = { diagnostics: message.diagnostics };
 			if ('pdf' in message) result.pdf = new Uint8Array(message.pdf);
 			if ('preview' in message) result.preview = message.preview;
+			if ('html' in message) result.html = message.html;
 			pending.resolve(result);
 		});
 	}
@@ -115,18 +124,29 @@ export class TypstWorkerClient {
 		}));
 	}
 
+	compileHtml(
+		markdown: string,
+		images: Record<string, Uint8Array<ArrayBuffer>> = {},
+		pageNumbers = true
+	): Promise<{ html: string; diagnostics: string[] }> {
+		return this.#compile(markdown, images, pageNumbers, 'html').then((result) => ({
+			html: result.html!,
+			diagnostics: result.diagnostics
+		}));
+	}
+
 	#compile(
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>>,
 		pageNumbers: boolean,
-		format: 'pdf' | 'preview'
+		format: 'pdf' | 'preview' | 'html'
 	): Promise<CompileResult> {
 		const id =
 			typeof crypto !== 'undefined' && 'randomUUID' in crypto
 				? crypto.randomUUID()
 				: String(Date.now());
 		const request: CompileRequest = { type: 'compile', id, markdown, images, pageNumbers, format };
-		if (format === 'preview') this.#pendingPreviewId = id;
+		if (format !== 'pdf') this.#pendingPreviewId = id;
 
 		return new Promise((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });
