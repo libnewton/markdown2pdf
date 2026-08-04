@@ -1511,42 +1511,30 @@ fn hash_url(url: &str) -> String {
     format!("{h:08x}")
 }
 
-/// Scan raw Markdown for `![...](url)` image targets, in source order and
-/// deduplicated. Runs on the unprocessed source, so it also catches images
-/// inside admonitions and spoilers.
-fn scan_image_urls(src: &str) -> Vec<String> {
+/// Every image target in the document, in source order and deduplicated, with
+/// any `=WxH` size hint stripped. Descends into admonition and spoiler bodies.
+///
+/// Both hosts read this: the CLI prefetches the remote ones, the HTML renderer
+/// embeds the local ones. Parsed rather than string-scanned, so a URL that only
+/// appears as an example inside a code span is not fetched over the network.
+fn image_targets(src: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let bytes = src.as_bytes();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'!' && bytes[i + 1] == b'[' {
-            if let Some(rel_close) = src[i + 2..].find(']') {
-                let after = i + 2 + rel_close + 1;
-                if after < bytes.len() && bytes[after] == b'(' {
-                    let raw = src[after + 1..].trim_start();
-                    let raw = raw.strip_prefix('<').unwrap_or(raw);
-                    let url: String = raw
-                        .chars()
-                        .take_while(|&c| {
-                            !c.is_whitespace() && !matches!(c, ')' | '>' | '"' | '\'')
-                        })
-                        .collect();
-                    if !url.is_empty() && seen.insert(url.clone()) {
-                        found.push(url);
-                    }
-                }
+    walk_document(src, &mut |value| {
+        if let NodeValue::Image(link) = value {
+            let (path, _) = html::split_dims(&link.url, &link.title);
+            if !path.is_empty() && seen.insert(path.clone()) {
+                found.push(path);
             }
         }
-        i += 1;
-    }
+    });
     found
 }
 
 /// Remote image URLs paired with the `remote/<hash>` alias the host prefetches
 /// them to — Typst's sandbox cannot fetch them itself.
 fn collect_remote_images(src: &str) -> Vec<(String, String)> {
-    scan_image_urls(src)
+    image_targets(src)
         .into_iter()
         .filter(|u| is_remote(u))
         .map(|u| {

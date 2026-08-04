@@ -63,6 +63,52 @@ fn token_colours_meet_wcag_aa() {
     assert!(worst.is_empty(), "below 4.5:1 —\n  {}", worst.join("\n  "));
 }
 
+/// Every advertised language has to actually resolve to a table — a typo in a
+/// `lang_for` arm is otherwise invisible, since an unknown fence silently
+/// falls back to plain escaped text.
+#[test]
+fn every_advertised_language_highlights_something() {
+    let cases: &[(&str, &str)] = &[
+        ("php", "function f() { return 1; }"),
+        ("ruby", "def f; return 1; end"),
+        ("swift", "func f() -> Int { return 1 }"),
+        ("lua", "local function f() return 1 end"),
+        ("r", "f <- function(x) if (x) 1 else 2"),
+        ("dart", "class A { void f() {} }"),
+        ("scala", "object A { def f = 1 }"),
+        ("perl", "sub f { my $x = 1; return $x; }"),
+        ("powershell", "function f { param($x) return $x }"),
+        ("dockerfile", "FROM alpine\nRUN echo hi"),
+        ("makefile", "include config.mk\nall:\n\techo $(NAME)"),
+        ("graphql", "query Q { field }"),
+        ("protobuf", "message M { int32 a = 1; }"),
+        ("terraform", "resource \"a\" \"b\" { count = 1 }"),
+        ("nix", "let x = 1; in x"),
+        ("zig", "pub fn main() void {}"),
+        ("elixir", "defmodule M do def f, do: 1 end"),
+        ("haskell", "f :: Int -> Int\nf x = x"),
+        ("latex", "\\begin{document} % hi"),
+        ("julia", "function f(x) return x end"),
+    ];
+    for (lang, code) in cases {
+        let out = highlight::highlight(lang, code);
+        assert!(
+            out.contains("md2pdf-t-"),
+            "{lang}: nothing highlighted — is it wired into lang_for?\n{out}"
+        );
+    }
+}
+
+/// An image target written inside a code span is documentation, not a
+/// reference: fetching it would mean a rendered document reaching out to a URL
+/// its author only ever quoted.
+#[test]
+fn an_image_url_inside_a_code_span_is_not_a_reference() {
+    let md = "Write `![a](https://example.com/x.png)` to embed it.\n\n![real](y.png)\n";
+    assert_eq!(crate::image_targets(md), vec!["y.png".to_string()]);
+    assert!(crate::collect_remote_images(md).is_empty());
+}
+
 /// The TOML handed to the Typst templates has to carry every callout, so the
 /// PDF cannot fall back to a different label or colour than the HTML uses.
 #[test]

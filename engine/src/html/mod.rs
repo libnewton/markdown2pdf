@@ -38,24 +38,17 @@ const TOC_SLOT: &str = "\u{e010}md2pdf-toc\u{e011}";
 /// `read()`, which is fatal on a miss, so a path that only appears as an
 /// example inside a code span must not show up here.
 pub(crate) fn local_images(src: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    crate::walk_document(src, &mut |value| {
-        if let NodeValue::Image(link) = value {
-            let (path, _) = split_dims(&link.url, &link.title);
-            if !path.is_empty() && !is_remote(&path) && seen.insert(path.clone()) {
-                out.push(path);
-            }
-        }
-    });
-    out
+    crate::image_targets(src)
+        .into_iter()
+        .filter(|path| !is_remote(path))
+        .collect()
 }
 
 /// Split a HackMD `=WxH` size hint off an image target. It rides either in the
 /// title field (`![a](p "=200x120")`) or at the end of an angle-bracketed URL
 /// (`![a](<p =200x120>)`).
 type Dims = (Option<String>, Option<String>);
-fn split_dims(url: &str, title: &str) -> (String, Option<Dims>) {
+pub(crate) fn split_dims(url: &str, title: &str) -> (String, Option<Dims>) {
     let mut url = url.trim().to_string();
     let mut dims = parse_dims(title);
     if dims.is_none() {

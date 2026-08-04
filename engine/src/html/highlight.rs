@@ -76,6 +76,26 @@ fn lang_for(info: &str) -> Option<&'static Lang> {
         "css" | "scss" | "less" => &CSS,
         "typ" | "typst" => &TYPST,
         "diff" | "patch" => &DIFF,
+        "php" => &PHP,
+        "ruby" | "rb" => &RUBY,
+        "swift" => &SWIFT,
+        "lua" => &LUA,
+        "r" => &R,
+        "dart" => &DART,
+        "scala" => &SCALA,
+        "perl" | "pl" => &PERL,
+        "powershell" | "pwsh" | "ps1" => &POWERSHELL,
+        "dockerfile" | "docker" => &DOCKERFILE,
+        "makefile" | "make" | "mk" => &MAKE,
+        "graphql" | "gql" => &GRAPHQL,
+        "protobuf" | "proto" => &PROTOBUF,
+        "hcl" | "terraform" | "tf" => &HCL,
+        "nix" => &NIX,
+        "zig" => &ZIG,
+        "elixir" | "ex" | "exs" => &ELIXIR,
+        "haskell" | "hs" => &HASKELL,
+        "latex" | "tex" => &LATEX,
+        "julia" | "jl" => &JULIA,
         _ => return None,
     })
 }
@@ -206,6 +226,129 @@ lang!(TYPST, line: C_LINE, block: C_BLOCK, quotes: &['"'], meta: &["#"],
     types: []);
 
 lang!(DIFF, line: &[], block: &[], quotes: &[], meta: &[], keywords: [], types: []);
+
+lang!(PHP, line: &["//", "#"], block: C_BLOCK, quotes: QUOTES, meta: &["$"],
+    keywords: ["abstract" "as" "break" "callable" "case" "catch" "class" "clone" "const" "continue"
+        "declare" "default" "do" "echo" "else" "elseif" "enum" "extends" "final" "finally" "fn"
+        "for" "foreach" "function" "global" "if" "implements" "include" "instanceof" "interface"
+        "match" "namespace" "new" "print" "private" "protected" "public" "readonly" "require"
+        "return" "static" "switch" "throw" "trait" "try" "use" "var" "while" "yield"],
+    types: ["array" "bool" "false" "float" "int" "iterable" "mixed" "null" "object" "self" "string"
+        "true" "void"]);
+
+lang!(RUBY, line: HASH_LINE, block: &[("=begin", "=end")], quotes: QUOTES, meta: &["@", "$", ":"],
+    keywords: ["alias" "begin" "break" "case" "class" "def" "defined?" "do" "else" "elsif" "end"
+        "ensure" "for" "if" "in" "module" "next" "not" "or" "and" "redo" "rescue" "retry" "return"
+        "self" "super" "then" "unless" "until" "when" "while" "yield" "require" "require_relative"
+        "attr_accessor" "attr_reader" "attr_writer"],
+    types: ["Array" "false" "Float" "Hash" "Integer" "nil" "Proc" "Range" "String" "Symbol" "true"]);
+
+lang!(SWIFT, line: C_LINE, block: C_BLOCK, quotes: &['"'], meta: &["@"],
+    keywords: ["actor" "as" "associatedtype" "async" "await" "break" "case" "catch" "class"
+        "continue" "default" "defer" "deinit" "do" "else" "enum" "extension" "fallthrough" "for"
+        "func" "guard" "if" "import" "in" "init" "inout" "internal" "is" "let" "nonisolated" "open"
+        "operator" "private" "protocol" "public" "repeat" "return" "self" "some" "struct"
+        "subscript" "switch" "throw" "throws" "try" "typealias" "var" "where" "while"],
+    types: ["Any" "Array" "Bool" "Character" "Dictionary" "Double" "false" "Float" "Int" "nil"
+        "Optional" "Result" "Set" "String" "true" "UInt" "Void"]);
+
+lang!(LUA, line: &["--"], block: &[("--[[", "]]")], quotes: QUOTES, meta: &[],
+    keywords: ["and" "break" "do" "else" "elseif" "end" "for" "function" "goto" "if" "in" "local"
+        "not" "or" "repeat" "return" "then" "until" "while"],
+    types: ["false" "nil" "self" "true"]);
+
+lang!(R, line: HASH_LINE, block: &[], quotes: QUOTES, meta: &[],
+    keywords: ["break" "else" "for" "function" "if" "in" "next" "repeat" "return" "while"],
+    types: ["c" "character" "data.frame" "FALSE" "Inf" "integer" "list" "logical" "NA" "NaN"
+        "NULL" "numeric" "TRUE" "vector"]);
+
+lang!(DART, line: C_LINE, block: C_BLOCK, quotes: QUOTES, meta: &["@"],
+    keywords: ["abstract" "as" "assert" "async" "await" "break" "case" "catch" "class" "const"
+        "continue" "covariant" "default" "deferred" "do" "else" "enum" "export" "extends"
+        "extension" "external" "factory" "final" "finally" "for" "get" "if" "implements" "import"
+        "in" "is" "late" "library" "mixin" "new" "on" "operator" "part" "required" "rethrow"
+        "return" "sealed" "set" "show" "static" "super" "switch" "sync" "this" "throw" "try"
+        "typedef" "var" "while" "with" "yield"],
+    types: ["bool" "double" "dynamic" "false" "Future" "int" "List" "Map" "null" "num" "Object"
+        "Set" "Stream" "String" "true" "void"]);
+
+lang!(SCALA, line: C_LINE, block: C_BLOCK, quotes: &['"'], meta: &["@"],
+    keywords: ["abstract" "case" "catch" "class" "def" "do" "else" "enum" "extends" "final"
+        "finally" "for" "forSome" "given" "if" "implicit" "import" "lazy" "match" "new" "object"
+        "override" "package" "private" "protected" "return" "sealed" "super" "then" "this" "throw"
+        "trait" "try" "type" "using" "val" "var" "while" "with" "yield"],
+    types: ["Any" "AnyRef" "Boolean" "Byte" "Char" "Double" "false" "Float" "Int" "List" "Long"
+        "Map" "Nothing" "null" "Option" "Seq" "Set" "Short" "String" "true" "Unit"]);
+
+lang!(PERL, line: HASH_LINE, block: &[], quotes: QUOTES, meta: &["$", "@", "%"],
+    keywords: ["do" "else" "elsif" "eval" "for" "foreach" "if" "last" "local" "my" "next" "our"
+        "package" "redo" "require" "return" "sub" "unless" "until" "use" "wantarray" "while"],
+    types: ["defined" "delete" "exists" "keys" "ref" "scalar" "undef" "values"]);
+
+lang!(POWERSHELL, line: HASH_LINE, block: &[("<#", "#>")], quotes: QUOTES, meta: &["$", "-"],
+    keywords: ["begin" "break" "catch" "class" "continue" "data" "do" "dynamicparam" "else"
+        "elseif" "end" "enum" "exit" "filter" "finally" "for" "foreach" "function" "if" "in"
+        "param" "process" "return" "switch" "throw" "trap" "try" "until" "using" "while"],
+    types: ["$false" "$null" "$true" "bool" "hashtable" "int" "pscustomobject" "string"]);
+
+lang!(DOCKERFILE, line: HASH_LINE, block: &[], quotes: QUOTES, meta: &[],
+    keywords: ["ADD" "ARG" "CMD" "COPY" "ENTRYPOINT" "ENV" "EXPOSE" "FROM" "HEALTHCHECK" "LABEL"
+        "ONBUILD" "RUN" "SHELL" "STOPSIGNAL" "USER" "VOLUME" "WORKDIR"],
+    types: ["AS"]);
+
+lang!(MAKE, line: HASH_LINE, block: &[], quotes: QUOTES, meta: &["$"],
+    keywords: ["define" "else" "endef" "endif" "export" "ifdef" "ifeq" "ifndef" "ifneq" "include"
+        "override" "unexport" "vpath"],
+    types: [".PHONY" ".DEFAULT" ".SUFFIXES"]);
+
+lang!(GRAPHQL, line: HASH_LINE, block: &[], quotes: &['"'], meta: &["@", "$"],
+    keywords: ["directive" "enum" "extend" "fragment" "implements" "input" "interface" "mutation"
+        "on" "query" "scalar" "schema" "subscription" "type" "union"],
+    types: ["Boolean" "false" "Float" "ID" "Int" "null" "String" "true"]);
+
+lang!(PROTOBUF, line: C_LINE, block: C_BLOCK, quotes: QUOTES, meta: &[],
+    keywords: ["enum" "extend" "import" "message" "oneof" "option" "package" "public" "repeated"
+        "reserved" "returns" "rpc" "service" "stream" "syntax"],
+    types: ["bool" "bytes" "double" "false" "fixed32" "fixed64" "float" "int32" "int64" "map"
+        "sfixed32" "sfixed64" "sint32" "sint64" "string" "true" "uint32" "uint64"]);
+
+lang!(HCL, line: &["#", "//"], block: C_BLOCK, quotes: &['"'], meta: &["$"],
+    keywords: ["data" "for" "for_each" "if" "in" "locals" "module" "output" "provider" "resource"
+        "terraform" "variable"],
+    types: ["bool" "false" "list" "map" "null" "number" "object" "set" "string" "true" "tuple"]);
+
+lang!(NIX, line: HASH_LINE, block: C_BLOCK, quotes: &['"'], meta: &["$"],
+    keywords: ["assert" "else" "if" "in" "inherit" "let" "or" "rec" "then" "with"],
+    types: ["builtins" "false" "null" "true"]);
+
+lang!(ZIG, line: C_LINE, block: &[], quotes: &['"', '\''], meta: &["@"],
+    keywords: ["align" "and" "asm" "break" "catch" "comptime" "const" "continue" "defer" "else"
+        "enum" "errdefer" "error" "export" "extern" "fn" "for" "if" "inline" "or" "orelse" "pub"
+        "return" "struct" "switch" "test" "try" "union" "unreachable" "var" "while"],
+    types: ["anytype" "bool" "f32" "f64" "false" "i8" "i16" "i32" "i64" "isize" "null" "true"
+        "type" "u8" "u16" "u32" "u64" "undefined" "usize" "void"]);
+
+lang!(ELIXIR, line: HASH_LINE, block: &[], quotes: &['"', '\''], meta: &["@", ":"],
+    keywords: ["after" "case" "catch" "cond" "def" "defmacro" "defmodule" "defp" "defprotocol"
+        "defstruct" "do" "else" "end" "fn" "for" "if" "import" "in" "raise" "receive" "require"
+        "rescue" "try" "unless" "use" "when" "with"],
+    types: ["false" "nil" "true"]);
+
+lang!(HASKELL, line: &["--"], block: &[("{-", "-}")], quotes: QUOTES, meta: &[],
+    keywords: ["case" "class" "data" "deriving" "do" "else" "foreign" "if" "import" "in" "infix"
+        "infixl" "infixr" "instance" "let" "module" "newtype" "of" "then" "type" "where"],
+    types: ["Bool" "Char" "Double" "Either" "False" "Float" "Int" "Integer" "IO" "Maybe" "Nothing"
+        "Just" "String" "True"]);
+
+lang!(LATEX, line: &["%"], block: &[], quotes: &[], meta: &["\\"],
+    keywords: [], types: []);
+
+lang!(JULIA, line: HASH_LINE, block: &[("#=", "=#")], quotes: QUOTES, meta: &["@"],
+    keywords: ["abstract" "baremodule" "begin" "break" "catch" "const" "continue" "do" "else"
+        "elseif" "end" "export" "finally" "for" "function" "global" "if" "import" "let" "local"
+        "macro" "module" "mutable" "primitive" "quote" "return" "struct" "try" "using" "while"],
+    types: ["Array" "Bool" "Dict" "false" "Float64" "Int" "Int64" "missing" "nothing" "String"
+        "true" "Vector"]);
 
 /// Highlight `code`, returning HTML. Falls back to plain escaped text when the
 /// language is unknown.
