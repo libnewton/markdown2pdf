@@ -1,29 +1,21 @@
 // Shared callout / spoiler / task-item helpers.
 // Imported by every style template.
 
-#let _admonition-themes = (
-  "success": (accent: rgb("#16A34A"), bg: rgb("#F0FDF4"), label: (en: "SUCCESS", de: "Erfolg")),
-  "warning": (accent: rgb("#D97706"), bg: rgb("#FFFBEB"), label: (en: "WARNING", de: "Warnung")),
-  "tip":     (accent: rgb("#0EA5E9"), bg: rgb("#F0F9FF"), label: (en: "TIP", de: "Tipp")),
-  "info":    (accent: rgb("#2563EB"), bg: rgb("#EFF6FF"), label: (en: "INFO", de: "Info")),
-  "danger":  (accent: rgb("#DC2626"), bg: rgb("#FEF2F2"), label: (en: "DANGER", de: "Gefahr")),
-  "note":    (accent: rgb("#6B7280"), bg: rgb("#F9FAFB"), label: (en: "NOTE", de: "Hinweis")),
-  "caution": (accent: rgb("#B91C1C"), bg: rgb("#FEF2F2"), label: (en: "CAUTION", de: "Vorsicht")),
-  "important": (accent: rgb("#7E22CE"), bg: rgb("#FAF5FF"), label: (en: "IMPORTANT", de: "Wichtig")),
-)
+#import "tokens.typ": tokens
 
 #let admonition(kind: "info", title: "", lang: "en", body) = {
-  let theme = _admonition-themes.at(kind, default: _admonition-themes.at("info"))
+  let themes = tokens.admonition
+  let theme = themes.at(kind, default: themes.at("info"))
   let language = if lang == "de" { "de" } else { "en" }
-  let label = if title != "" { title } else { theme.at("label").at(language) }
+  let label = if title != "" { title } else { theme.at(language) }
   block(
-    fill: theme.at("bg"),
-    stroke: (left: 3pt + theme.at("accent")),
+    fill: rgb(theme.bg),
+    stroke: (left: 3pt + rgb(theme.accent)),
     inset: (left: 12pt, right: 12pt, top: 10pt, bottom: 10pt),
     radius: 6pt,
     width: 100%,
     {
-      text(weight: "bold", fill: theme.at("accent"), size: 0.9em, label)
+      text(weight: "bold", fill: rgb(theme.accent), size: 0.9em, label)
       v(0.7em, weak: true)
       body
     },
@@ -63,8 +55,8 @@
     box(
       width: 0.95em,
       height: 0.95em,
-      stroke: 1pt + rgb("#16A34A"),
-      fill: rgb("#16A34A"),
+      stroke: 1pt + rgb(tokens.base.ok),
+      fill: rgb(tokens.base.ok),
       radius: 2pt,
       align(center + horizon, text(white, size: 0.8em, weight: "bold", [✓])),
     )

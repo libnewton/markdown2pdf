@@ -12,7 +12,9 @@
 #import "vendor/mitex/lib.typ": mi, mitex
 #import "vendor/mmdr/lib.typ": mermaid, mermaid-svg
 
-#let _engine = plugin("engine.wasm")
+// One plugin instance for the whole package — `tokens.typ` owns it so the
+// palette is decoded once and the engine is loaded once.
+#import "tokens.typ": engine as _engine
 
 // Helpers handed to the engine output via `eval` scope.
 #let _md-math(display, src) = if display { mitex(src) } else { mi(src) }

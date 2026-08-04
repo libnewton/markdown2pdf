@@ -8,51 +8,25 @@
 //! reads the same in both outputs. Every colour is a variable with a dark
 //! counterpart; nothing else in the sheet hardcodes one.
 
-pub(crate) const STYLE: &str = r#"
+use std::sync::OnceLock;
+
+/// The stylesheet. The custom-property block is generated from `tokens.rs`, so
+/// the palette has exactly one definition — the same one the Typst templates
+/// read. Assembled once per plugin instance; a render never pays for it.
+pub(crate) fn style() -> &'static str {
+    static SHEET: OnceLock<String> = OnceLock::new();
+    SHEET.get_or_init(|| format!("{PRELUDE}{}{REST}", super::tokens::declarations()))
+}
+
+const PRELUDE: &str = r#"
 /* One token block. `light-dark()` picks a side from the element's
    `color-scheme`, so the OS preference and the explicit `data-theme` override
    share a single set of definitions instead of a light copy and a dark copy. */
 :root, :host { color-scheme: light dark; }
 :root, :host, .md2pdf {
-  --md-bg: light-dark(#ffffff, #14171c);
-  --md-fg: light-dark(#16191d, #dde2e9);
-  --md-heading: light-dark(#333333, #eef1f5);
-  --md-muted: light-dark(#6b7280, #9aa4b2);
-  --md-accent: light-dark(#0074de, #62b0ff);
-  --md-rule: light-dark(#e3e6ea, #2b313a);
-  --md-surface: light-dark(#f6f7f9, #1b1f26);
-  --md-surface-2: light-dark(#eef0f3, #232830);
-  --md-mark-bg: light-dark(#fef08a, #6b5a12);
-  --md-mark-fg: light-dark(#453c05, #fdf6d8);
-  --md-quote-bg: light-dark(#f8f9fa, #1a1e25);
-  --md-scrim: light-dark(rgba(16, 24, 40, .3), rgba(0, 0, 0, .55));
-  --md-shadow-color: light-dark(rgba(16, 24, 40, .12), rgba(0, 0, 0, .55));
-  --md-shadow: 0 1px 2px var(--md-shadow-color), 0 8px 24px var(--md-shadow-color);
-  --md-measure: 46rem;
-  --md-t-c: light-dark(#7b8494, #7f8a9c);
-  --md-t-s: light-dark(#0a7d55, #6dd3a4);
-  --md-t-n: light-dark(#b45309, #f0b464);
-  --md-t-k: light-dark(#9333ea, #c79bf5);
-  --md-t-t: light-dark(#0369a1, #6cc4f0);
-  --md-t-m: light-dark(#be185d, #f58bb4);
-  --md-ok: light-dark(#16a34a, #4ade80);
-  --md-adm-success: light-dark(#16a34a, #4ade80);
-  --md-adm-warning: light-dark(#d97706, #f5b544);
-  --md-adm-tip: light-dark(#0ea5e9, #56c6f5);
-  --md-adm-info: light-dark(#2563eb, #7aa6ff);
-  --md-adm-danger: light-dark(#dc2626, #ff8080);
-  --md-adm-note: light-dark(#6b7280, #a3adba);
-  --md-adm-caution: light-dark(#b91c1c, #ff8f8f);
-  --md-adm-important: light-dark(#7e22ce, #cd96f7);
-  --md-adm-success-bg: light-dark(#f0fdf4, #10241a);
-  --md-adm-warning-bg: light-dark(#fffbeb, #2a1f08);
-  --md-adm-tip-bg: light-dark(#f0f9ff, #0b2130);
-  --md-adm-info-bg: light-dark(#eff6ff, #111e35);
-  --md-adm-danger-bg: light-dark(#fef2f2, #2b1414);
-  --md-adm-note-bg: light-dark(#f9fafb, #1b1f26);
-  --md-adm-caution-bg: light-dark(#fef2f2, #2b1414);
-  --md-adm-important-bg: light-dark(#faf5ff, #21132f);
-}
+"#;
+
+const REST: &str = r#"}
 /* An explicit override may sit on the fragment root, the document root, or
    the shadow host the editor mounts it in — all three must win. */
 [data-theme="light"], :host([data-theme="light"]) { color-scheme: light; }

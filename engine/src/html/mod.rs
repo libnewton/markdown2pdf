@@ -13,6 +13,7 @@ mod assets;
 mod css;
 mod highlight;
 mod math;
+mod tokens;
 
 use crate::{
     build_options, hash_url, is_remote, leading_h1_index, match_emoji,
@@ -67,6 +68,11 @@ fn split_dims(url: &str, title: &str) -> (String, Option<Dims>) {
         }
     }
     (url, dims)
+}
+
+/// The shared design tokens, for `tokens()` in `lib.rs`.
+pub(crate) fn tokens_toml() -> String {
+    tokens::as_toml()
 }
 
 /// Asset key for one Mermaid diagram. Keyed by a hash of the source rather
@@ -129,7 +135,7 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
          <div class=\"md2pdf\" id=\"md2pdf-root\" lang=\"{lang}\">\
          {outline}<main class=\"md2pdf-doc\">{main}</main></div>\
          <script>{script}</script>",
-        style = css::STYLE,
+        style = css::style(),
         lang = esc_attr(lang),
         script = css::SCRIPT,
     );
@@ -499,7 +505,7 @@ fn admonition(doc: &mut Doc, f: &Frame<'_>, id: usize) -> String {
         _ => {
             let inner = render_source(&source, doc, false);
             let label = if title.is_empty() {
-                admonition_label(&kind, doc.german).to_string()
+                tokens::label(&kind, doc.german).to_string()
             } else {
                 title
             };
@@ -509,28 +515,6 @@ fn admonition(doc: &mut Doc, f: &Frame<'_>, id: usize) -> String {
                 esc_text(&label)
             )
         }
-    }
-}
-
-/// Default labels, matching `_admonition-themes` in `package/admonitions.typ`.
-fn admonition_label(kind: &str, german: bool) -> &'static str {
-    match (kind, german) {
-        ("success", false) => "SUCCESS",
-        ("success", true) => "Erfolg",
-        ("warning", false) => "WARNING",
-        ("warning", true) => "Warnung",
-        ("tip", false) => "TIP",
-        ("tip", true) => "Tipp",
-        ("danger", false) => "DANGER",
-        ("danger", true) => "Gefahr",
-        ("note", false) => "NOTE",
-        ("note", true) => "Hinweis",
-        ("caution", false) => "CAUTION",
-        ("caution", true) => "Vorsicht",
-        ("important", false) => "IMPORTANT",
-        ("important", true) => "Wichtig",
-        (_, false) => "INFO",
-        (_, true) => "Info",
     }
 }
 

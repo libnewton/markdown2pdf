@@ -5,6 +5,78 @@
 use super::*;
 use crate::convert_str;
 
+/// WCAG 2.1 relative luminance of a `#rrggbb` string.
+fn luminance(hex: &str) -> f64 {
+    let ch = |i: usize| {
+        let v = u8::from_str_radix(&hex[1 + i * 2..3 + i * 2], 16).expect("hex pair") as f64 / 255.0;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * ch(0) + 0.7152 * ch(1) + 0.0722 * ch(2)
+}
+
+fn contrast(a: &str, b: &str) -> f64 {
+    let (hi, lo) = {
+        let (x, y) = (luminance(a), luminance(b));
+        if x > y {
+            (x, y)
+        } else {
+            (y, x)
+        }
+    };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+fn base(name: &str) -> (&'static str, &'static str) {
+    tokens::BASE
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, l, d)| (*l, *d))
+        .unwrap_or_else(|| panic!("no --md-{name}"))
+}
+
+/// Every syntax-highlighting colour has to clear WCAG AA against the code
+/// background it is actually painted on, in *both* themes.
+///
+/// Worth having as a test rather than a review habit: the neighbouring branch
+/// shipped four token colours that failed this in both themes, because its
+/// checker only ever looked at the `:root` variables and never at the colours
+/// the highlighter emits.
+#[test]
+fn token_colours_meet_wcag_aa() {
+    let (surface_light, surface_dark) = base("surface");
+    let mut worst: Vec<String> = Vec::new();
+    for (name, light, dark) in tokens::BASE.iter().filter(|(n, _, _)| n.starts_with("t-")) {
+        for (theme, fg, bg) in [
+            ("light", light, surface_light),
+            ("dark", dark, surface_dark),
+        ] {
+            let ratio = contrast(fg, bg);
+            if ratio < 4.5 {
+                worst.push(format!("--md-{name} {theme}: {fg} on {bg} = {ratio:.2}:1"));
+            }
+        }
+    }
+    assert!(worst.is_empty(), "below 4.5:1 —\n  {}", worst.join("\n  "));
+}
+
+/// The TOML handed to the Typst templates has to carry every callout, so the
+/// PDF cannot fall back to a different label or colour than the HTML uses.
+#[test]
+fn every_callout_reaches_the_typst_templates() {
+    let toml = tokens::as_toml();
+    for a in tokens::ADMONITIONS {
+        assert!(toml.contains(&format!("[admonition.{}]", a.kind)), "{}", a.kind);
+        assert!(toml.contains(&format!("en = \"{}\"", a.en)), "{}", a.en);
+        assert!(toml.contains(&format!("de = \"{}\"", a.de)), "{}", a.de);
+        assert!(toml.contains(a.accent.0), "{}", a.accent.0);
+    }
+    assert!(toml.contains("[base]"));
+}
+
 /// Drop the inlined stylesheet and script, so assertions and `matches()`
 /// counts see only the document markup.
 fn strip_chrome(out: &str) -> String {

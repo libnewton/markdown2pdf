@@ -82,6 +82,14 @@ pub fn twemojis(markdown: &[u8]) -> Result<Vec<u8>, String> {
     Ok(collect_twemoji_codepoints(src).join("\n").into_bytes())
 }
 
+/// The shared design tokens as TOML: callout colours and labels, plus the base
+/// palette. The stylesheet bakes the same table in, so the Typst templates and
+/// the HTML output cannot drift apart.
+#[wasm_func]
+pub fn tokens() -> Result<Vec<u8>, String> {
+    Ok(html::tokens_toml().into_bytes())
+}
+
 /// List the local (non-remote) image paths the document references, one per
 /// line — the HTML output embeds them, so the host has to supply the bytes.
 #[wasm_func]
