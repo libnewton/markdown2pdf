@@ -5,7 +5,7 @@ last_reviewed: 2026-05-16
 product_name: md2pdf
 scope: engineering
 stack: sveltekit_adapter_static_prerender
-tags: [sveltekit, adapter-static, prerender, typst, wasm, worker, typst-ts-renderer, svelte5]
+tags: [sveltekit, adapter-static, prerender, typst, wasm, worker, typst-ts-renderer, svelte5, html]
 ---
 
 # md2pdf — Engineering
@@ -125,8 +125,13 @@ Implementation: `src/lib/pipeline/markdownToTypst.ts`
 
 Message protocol:
 
-- request: `{ type: 'compile', id, mainTypst, images, format? }` (`format` = `'pdf' | 'vector'`)
-- response: `{ type: 'compile-result', id, ok, pdf? | vector?, diagnostics, error? }`
+- request: `{ type: 'compile', id, markdown, images, pageNumbers, format }`
+  (`format` = `'pdf' | 'preview'`), or
+  `{ type: 'html', id, markdown, images, standalone }`
+- response: `{ type: 'compile-result', id, ok, pdf? | preview? | html?, diagnostics, error? }`
+
+`html` requests bypass `compileQueue` — they run the engine directly and never
+wait on, or block, a Typst compile.
 
 Notes:
 
@@ -217,7 +222,69 @@ Implementation: `src/lib/mermaid/render.ts` + Mermaid pre-pass in `PdfEditor.sve
 
 ---
 
-## 10. Known gaps
+## 10. HTML target
+
+### 10.1 Why the engine renders it, not Typst
+
+Typst's own HTML export (`--format html`) works in the `typst` binary but not
+in the browser: `typst-ts-web-compiler`'s `get_artifact` only knows vector and
+PDF, and `TypstWorld.compileHtml()` returns diagnostics without ever handing
+back the HTML string (checked in 0.6.1-rc5, 0.7.0 and 0.8.0-rc3). HTML export
+also rejects `grid`/`rect`/`place`/`block`, so every template in
+`package/styles` would need an HTML twin regardless.
+
+So the engine renders HTML itself, from the same comrak parse as the Typst
+markup. One implementation, identical bytes on both front-ends — and the
+browser skips the Typst compile entirely, which is why the view can update on
+a flat 120 ms debounce instead of the adaptive 450–2500 ms compile one.
+
+### 10.2 The two engine calls
+
+```
+html_images(md)        -> local image paths, one per line
+remotes(md)            -> url<TAB>alias, one per line   (already existed)
+twemojis(md)           -> codepoints, one per line      (already existed)
+html_mermaid(md)       -> key<TAB>escaped-source, one per line
+
+render_html(md, options, manifest, assets) -> the document
+```
+
+The host resolves every key it can, concatenates the bytes and describes the
+slices in `manifest` (`key<TAB>byte-length` lines). `options` is a `key=value`
+block; `standalone=1` wraps the fragment in a full document. The engine
+base64s each asset into a `data:` URI, so the output needs no sidecar files.
+
+- Browser: `web/src/lib/workers/typst.worker.ts` — `renderHtml()`, outside the
+  compile queue. `loadPlugin()` instantiates `engine.wasm` (and, lazily,
+  `typst_mmdr.wasm` for diagrams) with a hand-written `wasm-minimal-protocol`
+  host. `web/src/lib/workers/assetBundle.ts` holds the pure wire-format code.
+- CLI: `package/lib.typ` — `prepare-html()`, published as
+  `#metadata(...) <md2pdf-html>` and pulled out with `typst query`, so no
+  `--features html` and no experimental Typst flag is involved.
+
+### 10.3 Styling
+
+`engine/src/html/css.rs` is the whole stylesheet, inlined into every document.
+Tokens are declared once with `light-dark()`; `color-scheme` decides the side,
+so the OS preference and an explicit `data-theme` share one set of values.
+`data-theme` is honoured on the fragment root, the document root or the shadow
+host — the editor sets it on the host, the export never sets it at all.
+
+The preview mounts the fragment in a shadow root
+(`web/src/lib/components/HtmlPreview.svelte`) so the document's CSS and the
+app's CSS cannot reach each other. The only script in the export is the
+copy-to-clipboard handler for code blocks.
+
+### 10.4 What HTML does not do
+
+Cover page, DIN 5008 letter mode, running header/footer and page numbers are
+page concepts and are skipped. `[[pagebreak]]` becomes a divider. Citations
+render as an IEEE-shaped list built in Rust rather than through Typst's CSL, so
+they will not match the PDF exactly.
+
+---
+
+## 11. Known gaps
 
 - Preflight / one-click fixes for shaky AI markdown: not implemented.
 - Asset manager UI: images stored in IndexedDB but no visible list/delete UI.

@@ -1,8 +1,15 @@
 # Repository Guidelines
 
-md2pdf is a Markdown → PDF tool. **All Markdown processing lives in a Rust/WASM
-engine inside a Typst package** — both front-ends (the web app and the CLI)
-feed raw Markdown to that one engine.
+md2pdf is a Markdown → PDF *and* HTML tool. **All Markdown processing lives in
+a Rust/WASM engine inside a Typst package** — both front-ends (the web app and
+the CLI) feed raw Markdown to that one engine.
+
+The engine has two renderers over one comrak parse: `engine/src/lib.rs` emits
+Typst markup for the PDF, and `engine/src/html/` emits HTML. The HTML target
+never runs Typst — the browser calls `engine.wasm` directly, and the CLI reads
+the result out of a `typst query`. Whatever the engine cannot do itself (read
+image bytes, run the Mermaid plugin) each host resolves and hands back as one
+blob plus a `key<TAB>byte-length` manifest.
 
 ## Repository layout
 
@@ -18,6 +25,8 @@ This is a monorepo:
     and `fonts/` → `static/fonts/`.
 - `engine/`: Rust crate (`comrak`-based) — builds `engine.wasm`, the Markdown
   engine. It is a Typst WASM plugin.
+  - `engine/src/html/`: the HTML renderer — stylesheet, outline, LaTeX→MathML
+    (`math-core`), syntax highlighting, `data:` URI embedding.
 - `package/`: the `md2pdf` Typst package — `lib.typ`, `styles/modern-tech.typ`,
   `admonitions.typ`, vendored `mitex`/`mmdr`, bundled Twemoji SVGs, and the
   built `engine.wasm`.
@@ -33,7 +42,9 @@ Rerun `./build.sh` after changing anything in `engine/`.
 ## Build, test, dev commands
 
 - Engine + package: `./build.sh` (needs Rust + `wasm32-unknown-unknown`).
-- CLI: `./bin/md2pdf tests/sample.md` (needs the `typst` binary).
+- Engine tests: `cd engine && cargo test`.
+- CLI: `./bin/md2pdf tests/sample.md` (needs the `typst` binary);
+  `./bin/md2pdf --html tests/sample.md` for the HTML target.
 - Web app — run inside `web/`:
   - Install: `npm install`
   - Dev server: `npm run dev`
@@ -47,7 +58,9 @@ Rerun `./build.sh` after changing anything in `engine/`.
 - Rust (`engine/`): standard `rustfmt`.
 - **Templates own styling.** The engine emits content-only Typst markup; never
   hardcode `set`/`show` rules in the engine. Typesetting lives in
-  `package/styles/*.typ` and `package/admonitions.typ`.
+  `package/styles/*.typ` and `package/admonitions.typ`. The HTML target is the
+  exception and owns its own stylesheet (`engine/src/html/css.rs`), because
+  Typst is not involved in it at all — keep the two palettes in step by hand.
 - **Browser boundary**: page code must guard browser APIs with
   `$app/environment`'s `browser` or `onMount()`. Typst/WASM init belongs in the
   Web Worker.
@@ -78,3 +91,6 @@ md2pdf ships as a **static-deployed, fully client-side pipeline**:
   also the only thing the optional CORS-proxy setting affects.
 - One Markdown codebase: the Rust/WASM engine. Do not reintroduce
   Markdown parsing in TypeScript.
+- **Both renderers or neither.** A new syntax feature has to land in the Typst
+  renderer *and* the HTML one; `every_construct_renders_in_both_outputs` in
+  `engine/src/html/tests.rs` fails otherwise.

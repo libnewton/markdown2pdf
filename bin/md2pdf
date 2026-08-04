@@ -1,18 +1,39 @@
 #!/bin/sh
-# md2pdf — host shim. Markdown -> PDF via the @local/md2pdf Typst package.
+# md2pdf — host shim. Markdown -> PDF or HTML via the @local/md2pdf package.
 #
 # All Markdown processing lives in the Typst package. This shim only does host
 # I/O: Typst's compile sandbox cannot reach the network, so remote images are
 # discovered (pass 1: `typst query`), prefetched, then the document is
-# compiled (pass 2). The shim contains no Markdown logic.
+# rendered (pass 2). The shim contains no Markdown logic.
 set -e
 
-input="$1"
-if [ -z "$input" ] || [ ! -f "$input" ]; then
-  echo "usage: md2pdf <input.md> [output.pdf]" >&2
+usage() {
+  echo "usage: md2pdf [--html|--pdf] <input.md> [output]" >&2
   exit 1
+}
+
+format=""
+input=""
+output=""
+for arg in "$@"; do
+  case "$arg" in
+    --html) format=html ;;
+    --pdf) format=pdf ;;
+    -h|--help) usage ;;
+    -*) echo "md2pdf: unknown option $arg" >&2; usage ;;
+    *) if [ -z "$input" ]; then input="$arg"; else output="$arg"; fi ;;
+  esac
+done
+[ -n "$input" ] && [ -f "$input" ] || usage
+
+# Without an explicit flag the output extension picks the format.
+if [ -z "$format" ]; then
+  case "$output" in
+    *.html|*.htm) format=html ;;
+    *) format=pdf ;;
+  esac
 fi
-output="${2:-${input%.*}.pdf}"
+[ -n "$output" ] || output="${input%.*}.$format"
 
 # `readlink -f` is GNU-only, so walk the symlink chain by hand: the shim is
 # usually reached through a symlink on PATH, and the fonts sit next to the real
@@ -50,11 +71,18 @@ trap 'rm -f "$main" "$manifest" "$link"' EXIT
 # generated body resolve against the document root (not the package). `asset`
 # is the same trick for images the template itself places (header/footer, cover
 # logo): the image() call has to live in this file to resolve correctly.
+# `read-asset` is the same trick as `asset`, for the HTML target: the engine
+# embeds every image as a data: URI, and only a read() written in this file
+# resolves against the document root.
 cat > "$main" <<EOF
-#import "@local/md2pdf:0.1.0": prepare
-#let _d = prepare(read("$docname"), asset: (p, ..a) => image(p, ..a))
+#import "@local/md2pdf:0.1.0": prepare, prepare-html
+#let _src = read("$docname")
+#let _html = sys.inputs.at("md2pdf-target", default: "") == "html"
+#let _d = prepare(_src, asset: (p, ..a) => image(p, ..a))
 #metadata(_d.remotes) <md2pdf-remote-images>
-#if not _d.skip {
+#if _html [
+  #metadata(prepare-html(_src, read-asset: p => read(p, encoding: none))) <md2pdf-html>
+] else if not _d.skip {
   show: _d.template
   eval(_d.body, mode: "markup", scope: _d.scope)
 }
@@ -94,7 +122,19 @@ for it in items:
         print(f"md2pdf: WARN could not fetch {url}: {e}", file=sys.stderr)
 PY
 
-# Pass 2 — compile.
-typst compile --root "$docdir" --font-path "$fonts" --ignore-system-fonts \
-  "$main" "$output"
+# Pass 2 — render. HTML comes back as a Typst metadata value rather than a
+# compiled artifact, so the same engine call serves the CLI and the browser.
+if [ "$format" = html ]; then
+  html="$cache/html-$$.json"
+  trap 'rm -f "$main" "$manifest" "$link" "$html"' EXIT
+  # `md2pdf-query=1` short-circuits prepare(), so the PDF body is never built.
+  typst query --root "$docdir" --font-path "$fonts" --ignore-system-fonts \
+    --input md2pdf-query=1 --input md2pdf-target=html --one --field value \
+    "$main" '<md2pdf-html>' > "$html"
+  python3 -c 'import json,sys
+sys.stdout.write(json.load(open(sys.argv[1])))' "$html" > "$output"
+else
+  typst compile --root "$docdir" --font-path "$fonts" --ignore-system-fonts \
+    "$main" "$output"
+fi
 echo "md2pdf: wrote $output"

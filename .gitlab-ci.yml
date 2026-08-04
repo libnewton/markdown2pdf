@@ -3,6 +3,7 @@
 # output (web/build) is renamed to public/ so GitLab Pages picks it up.
 
 stages:
+  - test
   - build
 
 # Cache node_modules across runs to keep builds fast.
@@ -15,6 +16,27 @@ stages:
     - web/.npm/
     - web/node_modules/
   policy: pull-push
+
+# The engine holds both renderers (Typst markup and HTML) plus their parity
+# guard, so its unit tests are the ones that matter most for regressions.
+engine:
+  stage: test
+  image: rust:1-alpine
+  script:
+    - apk add --no-cache musl-dev
+    - cd engine
+    - cargo test
+
+web:
+  stage: test
+  image: node:20-alpine
+  cache:
+    <<: *node_cache
+  script:
+    - cd web
+    - npm ci --cache .npm --prefer-offline
+    - npm run check
+    - npm test
 
 pages:
   stage: build

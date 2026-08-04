@@ -10,7 +10,7 @@
 // mitex + mmdr are vendored into the package so it is fully self-contained
 // and offline — no @preview resolution needed (works in typst.ts too).
 #import "vendor/mitex/lib.typ": mi, mitex
-#import "vendor/mmdr/lib.typ": mermaid
+#import "vendor/mmdr/lib.typ": mermaid, mermaid-svg
 
 #let _engine = plugin("engine.wasm")
 
@@ -164,6 +164,65 @@
       let p = l.split("\t")
       (url: p.at(0), alias: p.at(1, default: ""))
     })
+}
+
+// ---------------------------------------------------------------------------
+// HTML output
+// ---------------------------------------------------------------------------
+//
+// The engine renders HTML itself — styling, outline, math and highlighting all
+// live in Rust, so the CLI and the browser emit the same bytes. Typst's only
+// job here is the I/O the engine cannot do: read the referenced assets and run
+// the Mermaid plugin. Everything is handed back as one blob plus a
+// `key<TAB>byte-length` manifest.
+
+#let _lines(raw) = {
+  str(raw).split("\n").filter(l => l.trim() != "")
+}
+
+#let _mermaid-assets(md) = {
+  _lines(_engine.html_mermaid(bytes(md))).map(l => {
+    let p = l.split("\t")
+    let code = p.at(1, default: "").replace("\\n", "\n").replace("\\\\", "\\")
+    (key: p.at(0), data: bytes(mermaid-svg(code)))
+  })
+}
+
+// Collect every asset the document needs, skipping the ones we cannot load so
+// one missing file degrades to a placeholder instead of failing the build.
+#let _html-assets(md, read-asset) = {
+  let items = ()
+  for path in _lines(_engine.html_images(bytes(md))) {
+    items.push((key: path, data: read-asset(path)))
+  }
+  for remote in _remotes(md) {
+    items.push((key: remote.alias, data: read-asset(remote.alias)))
+  }
+  for cp in _lines(_engine.twemojis(bytes(md))) {
+    items.push((key: "twemoji/" + cp + ".svg", data: read("twemoji/" + cp + ".svg", encoding: none)))
+  }
+  items += _mermaid-assets(md)
+  items = items.filter(it => it.data != none)
+  (
+    manifest: items.fold("", (acc, it) => acc + it.key + "\t" + str(it.data.len()) + "\n"),
+    blob: items.fold(bytes(()), (acc, it) => acc + it.data),
+  )
+}
+
+// Render Markdown to a self-contained HTML document.
+//
+// `read-asset` must be a closure defined in the calling file — `read()` inside
+// a package resolves against the package root, not the document root, exactly
+// like `asset` in `prepare()`. It should return `none` for a path it cannot
+// read, so a missing image does not fail the whole document.
+#let prepare-html(markdown, read-asset: p => none, standalone: true) = {
+  let assets = _html-assets(markdown, read-asset)
+  str(_engine.render_html(
+    bytes(markdown),
+    bytes("standalone=" + if standalone { "1" } else { "0" }),
+    bytes(assets.manifest),
+    assets.blob,
+  ))
 }
 
 // Prepare a Markdown string for rendering.

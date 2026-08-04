@@ -11,11 +11,17 @@ import typstCompilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/pkg/typst
 import typstRendererWasmUrl from '@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm?url';
 import { SUPERSEDED } from './compileProtocol';
 import { splitSvgDocument, type SvgDocument } from '$lib/typst/svg-split';
+import { buildAssetBundle, parseKeyedSources, type Asset } from './assetBundle';
 
 // Markdown processing lives entirely in the `md2pdf` Typst package — the
 // Rust/WASM engine runs inside the compile. This worker only feeds raw
 // Markdown + images to Typst, and pre-fetches the Twemoji SVGs the engine
 // asks for (Typst's sandbox cannot fetch them itself).
+//
+// The HTML target is different: the engine renders it on its own, so that path
+// calls engine.wasm directly and never touches the Typst compiler. It is fast
+// enough (single-digit milliseconds) to run on every keystroke, which is why it
+// also bypasses the compile queue.
 
 type CompileRequest = {
 	type: 'compile';
@@ -26,9 +32,18 @@ type CompileRequest = {
 	format?: 'pdf' | 'preview';
 };
 
+type HtmlRequest = {
+	type: 'html';
+	id: string;
+	markdown: string;
+	images?: Record<string, Uint8Array<ArrayBuffer>>;
+	standalone?: boolean;
+};
+
 type CompileResponse =
 	| { type: 'compile-result'; id: string; ok: true; pdf: ArrayBuffer; diagnostics: string[] }
 	| { type: 'compile-result'; id: string; ok: true; preview: SvgDocument; diagnostics: string[] }
+	| { type: 'compile-result'; id: string; ok: true; html: string; diagnostics: string[] }
 	| { type: 'compile-result'; id: string; ok: false; error: string; diagnostics: string[] };
 
 type CancelRequest = { type: 'cancel'; id: string };
@@ -55,16 +70,20 @@ const CORE_FONTS: string[] = [
 // can pre-fetch them into the VFS before the compile.
 // --------------------------------------------------------------------------
 
-let enginePromise: Promise<(fn: string, arg: Uint8Array) => Uint8Array> | null = null;
+/** Calls one exported function of a `wasm-minimal-protocol` Typst plugin. */
+type Plugin = (fn: string, ...args: Uint8Array[]) => Uint8Array;
 
-function getEngine(): Promise<(fn: string, arg: Uint8Array) => Uint8Array> {
-	if (enginePromise) return enginePromise;
-	enginePromise = (async () => {
-		const bytes = await fetch('/md2pdf/engine.wasm').then((r) => r.arrayBuffer());
+const plugins = new Map<string, Promise<Plugin>>();
+
+/** Instantiate a Typst WASM plugin outside Typst, implementing its host ABI. */
+function loadPlugin(url: string): Promise<Plugin> {
+	let cached = plugins.get(url);
+	if (cached) return cached;
+	cached = (async () => {
+		const bytes = await fetch(url).then((r) => r.arrayBuffer());
 		let pendingArgs: Uint8Array[] = [];
 		let result: Uint8Array | null = null;
 		let instance: WebAssembly.Instance;
-		// The wasm-minimal-protocol host side.
 		const env = {
 			wasm_minimal_protocol_write_args_to_buffer(ptr: number) {
 				const mem = new Uint8Array((instance.exports.memory as WebAssembly.Memory).buffer);
@@ -83,18 +102,28 @@ function getEngine(): Promise<(fn: string, arg: Uint8Array) => Uint8Array> {
 			}
 		};
 		instance = (await WebAssembly.instantiate(bytes, { typst_env: env })).instance;
-		return (fn: string, arg: Uint8Array): Uint8Array => {
-			pendingArgs = [arg];
+		return (fn: string, ...args: Uint8Array[]): Uint8Array => {
+			pendingArgs = args;
 			result = null;
-			const ret = (instance.exports[fn] as (n: number) => number)(arg.length);
+			const exported = instance.exports[fn] as (...lengths: number[]) => number;
+			const ret = exported(...args.map((a) => a.length));
 			if (ret !== 0) {
 				throw new Error('engine error: ' + new TextDecoder().decode(result ?? new Uint8Array()));
 			}
 			return result ?? new Uint8Array();
 		};
 	})();
-	return enginePromise;
+	plugins.set(url, cached);
+	return cached;
 }
+
+const getEngine = () => loadPlugin('/md2pdf/engine.wasm');
+/** Mermaid is 3.9 MB, so it only loads once a document actually has a diagram. */
+const getMermaid = () => loadPlugin('/md2pdf/vendor/mmdr/typst_mmdr.wasm');
+
+const encode = (s: string) => new TextEncoder().encode(s);
+const decode = (b: Uint8Array) => new TextDecoder().decode(b);
+const lines = (b: Uint8Array) => decode(b).split('\n').filter((l) => l !== '');
 
 // --------------------------------------------------------------------------
 // Compiler setup
@@ -160,29 +189,111 @@ async function renderPreview(artifact: Uint8Array): Promise<SvgDocument> {
 	return splitSvgDocument(svg);
 }
 
-// Twemoji codepoints already fetched + mapped into the compiler VFS. Kept
-// across recompiles so the live-preview loop doesn't re-fetch the same SVGs
-// on every keystroke.
+// Twemoji SVGs already fetched, by codepoint. Kept across recompiles so the
+// live-preview loop doesn't re-fetch the same glyphs on every keystroke; the
+// HTML target embeds the same bytes as data: URIs.
+const twemojiCache = new Map<string, Uint8Array>();
+
+async function fetchTwemoji(codepoints: string[]): Promise<void> {
+	await Promise.all(
+		codepoints
+			.filter((cp) => !twemojiCache.has(cp))
+			.map(async (cp) => {
+				try {
+					const resp = await fetch('/md2pdf/twemoji/' + cp + '.svg');
+					if (!resp.ok) return;
+					twemojiCache.set(cp, new Uint8Array(await resp.arrayBuffer()));
+				} catch {
+					// A missing glyph just renders as nothing — don't fail the render.
+				}
+			})
+	);
+}
+
+// Codepoints already written into the compiler VFS (a superset check would
+// re-map identical bytes and cost Typst its incremental caches).
 const mappedTwemoji = new Set<string>();
 
 /** Fetch the Twemoji SVGs the document needs into the compiler VFS. */
 async function loadTwemoji(compiler: TypstCompiler, markdown: string): Promise<void> {
 	const engine = await getEngine();
-	const list = new TextDecoder()
-		.decode(engine('twemojis', new TextEncoder().encode(markdown)))
-		.split('\n')
-		.filter((cp) => cp !== '' && !mappedTwemoji.has(cp));
-	await Promise.all(
-		list.map(async (cp) => {
+	const list = lines(engine('twemojis', encode(markdown)));
+	await fetchTwemoji(list);
+	for (const cp of list) {
+		const bytes = twemojiCache.get(cp);
+		if (!bytes || mappedTwemoji.has(cp)) continue;
+		compiler.mapShadow('/md2pdf/twemoji/' + cp + '.svg', bytes);
+		mappedTwemoji.add(cp);
+	}
+}
+
+// --------------------------------------------------------------------------
+// HTML target — engine only, no Typst compile
+// --------------------------------------------------------------------------
+
+// Image bytes seen so far. Requests carry only what changed, mirroring how the
+// compiler VFS accumulates, so the store has to remember the rest.
+const imageStore = new Map<string, Uint8Array>();
+// Rendered Mermaid diagrams, keyed the way the engine asks for them.
+const mermaidCache = new Map<string, Uint8Array>();
+
+async function renderMermaid(markdown: string): Promise<Asset[]> {
+	const engine = await getEngine();
+	const wanted = parseKeyedSources(decode(engine('html_mermaid', encode(markdown))));
+	const missing = wanted.filter((d) => !mermaidCache.has(d.key));
+	if (missing.length > 0) {
+		const mermaid = await getMermaid();
+		for (const { key, source } of missing) {
 			try {
-				const resp = await fetch('/md2pdf/twemoji/' + cp + '.svg');
-				if (!resp.ok) return;
-				compiler.mapShadow('/md2pdf/twemoji/' + cp + '.svg', new Uint8Array(await resp.arrayBuffer()));
-				mappedTwemoji.add(cp);
+				mermaidCache.set(key, mermaid('render', encode(source), encode('modern'), encode(''), encode('')));
 			} catch {
-				// A missing glyph just renders as nothing — don't fail the compile.
+				// A diagram that won't render falls back to its source in the output.
 			}
-		})
+		}
+	}
+	return wanted.flatMap((d) => {
+		const svg = mermaidCache.get(d.key);
+		return svg ? [[d.key, svg] as Asset] : [];
+	});
+}
+
+/**
+ * Render the document to HTML. Everything the engine cannot reach itself —
+ * image bytes, Twemoji art, Mermaid diagrams — is resolved here and handed
+ * over as one blob plus a `key<TAB>byte-length` manifest, exactly as the
+ * Typst package does for the CLI.
+ */
+async function renderHtml(markdown: string, standalone: boolean): Promise<string> {
+	const engine = await getEngine();
+	const md = encode(markdown);
+
+	const assets: Asset[] = [];
+	for (const path of lines(engine('html_images', md))) {
+		const bytes = imageStore.get(path);
+		if (bytes) assets.push([path, bytes]);
+	}
+	for (const line of lines(engine('remotes', md))) {
+		const alias = line.slice(line.indexOf('\t') + 1);
+		const bytes = imageStore.get(alias);
+		if (bytes) assets.push([alias, bytes]);
+	}
+	const codepoints = lines(engine('twemojis', md));
+	await fetchTwemoji(codepoints);
+	for (const cp of codepoints) {
+		const bytes = twemojiCache.get(cp);
+		if (bytes) assets.push(['twemoji/' + cp + '.svg', bytes]);
+	}
+	assets.push(...(await renderMermaid(markdown)));
+
+	const { manifest, blob } = buildAssetBundle(assets);
+	return decode(
+		engine(
+			'render_html',
+			md,
+			encode(`standalone=${standalone ? 1 : 0}`),
+			encode(manifest),
+			blob
+		)
 	);
 }
 
@@ -297,9 +408,33 @@ async function drain(): Promise<void> {
 	}
 }
 
-ctx.onmessage = (event: MessageEvent<CompileRequest | CancelRequest>) => {
+function rememberImages(images?: Record<string, Uint8Array<ArrayBuffer>>): void {
+	for (const [path, data] of Object.entries(images ?? {})) {
+		imageStore.set(path, data);
+	}
+}
+
+ctx.onmessage = (event: MessageEvent<CompileRequest | HtmlRequest | CancelRequest>) => {
 	const message = event.data;
 	if (!message) return;
+
+	// HTML needs no Typst compile, so it skips the queue entirely and stays
+	// responsive while a PDF or preview compile is still running.
+	if (message.type === 'html') {
+		rememberImages(message.images);
+		renderHtml(message.markdown, message.standalone ?? false)
+			.then((html) =>
+				ctx.postMessage({
+					type: 'compile-result',
+					id: message.id,
+					ok: true,
+					html,
+					diagnostics: []
+				} satisfies CompileResponse)
+			)
+			.catch((error) => reply(message.id, error instanceof Error ? error.message : String(error)));
+		return;
+	}
 
 	if (message.type === 'cancel') {
 		const i = queue.findIndex((q) => q.id === message.id);
@@ -311,6 +446,7 @@ ctx.onmessage = (event: MessageEvent<CompileRequest | CancelRequest>) => {
 	}
 
 	if (message.type !== 'compile') return;
+	rememberImages(message.images);
 
 	if (message.format === 'preview') {
 		const i = queue.findIndex((q) => q.format === 'preview');

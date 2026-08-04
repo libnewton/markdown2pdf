@@ -4,8 +4,8 @@
 
 # md2pdf
 
-**Markdown → PDF with perfect typesetting — all Markdown processing lives
-inside Typst.**
+**Markdown → PDF or HTML with perfect typesetting — all Markdown processing
+lives in one engine.**
 
 The Markdown engine is a Rust/[`comrak`](https://github.com/kivikakk/comrak)
 parser compiled to a WebAssembly [Typst](https://typst.app/) plugin and shipped
@@ -14,9 +14,16 @@ command-line tool — feed raw Markdown to the *same* engine, so output is
 identical.
 
 ```
-Markdown ─▶ engine.wasm (Rust/comrak) ─▶ Typst markup ─▶ Typst compile ─▶ PDF
-           └──── inside the Typst package ────┘          └── typst / typst.ts ──┘
+                        ┌─ Typst markup ─▶ Typst compile ─▶ PDF
+Markdown ─▶ engine.wasm ─┤                 └── typst / typst.ts ──┘
+                        └─ HTML ─────────▶ one self-contained .html file
 ```
+
+The engine has two renderers over one parse. PDF goes through Typst for
+typesetting; HTML comes straight out of the engine, styled, self-contained
+(images and diagrams embedded as `data:` URIs) and responsive, in light and
+dark. Page-only features — cover page, DIN letter mode, running header/footer,
+page numbers — have no HTML counterpart and are skipped there.
 
 ## Repository layout
 
@@ -39,8 +46,13 @@ rerun `./build.sh` after changing anything in `engine/`.
 cd web
 npm install
 npm run dev          # local dev server
+npm test             # unit tests
 npm run build        # static build → web/build/
 ```
+
+The preview pane has two tabs: **Pages** is the paged SVG preview of the PDF,
+**Document** is the pageless HTML view. The HTML view needs no Typst compile,
+so it updates as you type.
 
 The `web/vite.config.ts` plugins copy `package/` and `fonts/` into
 `web/static/` at build time — the app is fully offline, no CDN calls.
@@ -52,8 +64,11 @@ Requires the `typst` binary (v0.13+) and, to rebuild the engine, Rust with the
 the `rust-wasm` package on Arch).
 
 ```sh
-./build.sh                       # build engine.wasm + install @local/md2pdf
-./bin/md2pdf tests/sample.md     # → tests/sample.pdf
+./build.sh                            # build engine.wasm + install @local/md2pdf
+./bin/md2pdf tests/sample.md          # → tests/sample.pdf
+./bin/md2pdf tests/sample.md out.html # → HTML (the extension picks the format)
+./bin/md2pdf --html tests/sample.md   # → tests/sample.html
+cd engine && cargo test               # engine unit tests
 ```
 
 ## Markdown coverage
@@ -71,6 +86,10 @@ cover page (`cover-*`); opt-in inline BibTeX citations (`bibliography: inline`,
 `[@key]`, blue citation numerals, and `bibliography-style`, default `ieee`);
 DIN 5008 letter mode (`letter-*` fields);
 `[toc]` → `#outline()`.
+
+Everything above renders in both targets. `tests/html-edge.md` is the
+adversarial fixture for the HTML renderer (injection attempts, broken input,
+structural extremes).
 
 `tests/extended.md` is the feature demo — it exercises every syntax above and
 documents every frontmatter key, header/footer placeholder and cover option.

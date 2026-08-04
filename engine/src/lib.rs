@@ -5,6 +5,8 @@
 //! `==mark==`) is handled by a pre-parse pass and post-parse text scanning.
 //! This module is the Rust port of the former `src/pipeline/*` TypeScript.
 
+mod html;
+
 use comrak::nodes::{AstNode, ListType, NodeValue, TableAlignment};
 use comrak::{parse_document, Arena, Options};
 use std::collections::{HashMap, HashSet};
@@ -80,6 +82,47 @@ pub fn twemojis(markdown: &[u8]) -> Result<Vec<u8>, String> {
     Ok(collect_twemoji_codepoints(src).join("\n").into_bytes())
 }
 
+/// List the local (non-remote) image paths the document references, one per
+/// line — the HTML output embeds them, so the host has to supply the bytes.
+#[wasm_func]
+pub fn html_images(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    Ok(html::local_images(src).join("\n").into_bytes())
+}
+
+/// List the Mermaid diagram sources, one `key<TAB>source` pair per line with
+/// newlines in the source escaped as `\n`. The host renders each to SVG and
+/// returns it under `key`.
+#[wasm_func]
+pub fn html_mermaid(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    let mut out = String::new();
+    for code in collect_mermaid_sources(src) {
+        out.push_str(&html::mermaid_key(&code));
+        out.push('\t');
+        out.push_str(&code.replace('\\', "\\\\").replace('\n', "\\n"));
+        out.push('\n');
+    }
+    Ok(out.into_bytes())
+}
+
+/// Render Markdown to HTML.
+///
+/// `options` is a `key=value` line block (`standalone=1` wraps the fragment in
+/// a full document). `manifest` is `key<TAB>byte-length` lines describing how
+/// to slice `assets`, the concatenated bytes of every image, Twemoji SVG and
+/// rendered Mermaid diagram the host resolved for us.
+#[wasm_func]
+pub fn render_html(
+    markdown: &[u8],
+    options: &[u8],
+    manifest: &[u8],
+    assets: &[u8],
+) -> Result<Vec<u8>, String> {
+    let utf8 = |b| std::str::from_utf8(b).map_err(|e: std::str::Utf8Error| e.to_string());
+    Ok(html::render(utf8(markdown)?, utf8(options)?, utf8(manifest)?, assets).into_bytes())
+}
+
 /// Full Markdown -> Typst markup pipeline. Recursive: admonition and spoiler
 /// bodies are re-run through it so nested custom syntax works.
 #[cfg(test)]
@@ -111,6 +154,7 @@ fn convert_str_aligned(
         spoilers: pre.spoilers,
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
+        rendering_notes: std::cell::RefCell::new(HashSet::new()),
         alignment,
         citations,
     };
@@ -757,6 +801,9 @@ struct Ctx<'a> {
     table_widths: Vec<Vec<usize>>,
     /// Width id set by a `tablewidths` placeholder, consumed by the next table.
     pending_widths: std::cell::Cell<Option<usize>>,
+    /// Footnotes currently being rendered. A note that references itself would
+    /// otherwise recurse until the plugin's stack is exhausted.
+    rendering_notes: std::cell::RefCell<HashSet<String>>,
     alignment: Option<Alignment>,
     citations: bool,
 }
@@ -1101,18 +1148,22 @@ impl<'a> Ctx<'a> {
     }
 
     fn render_footnote(&self, name: &str) -> String {
-        match self.footnotes.get(name) {
-            None => String::new(),
-            Some(def) => {
-                let content = def
-                    .children()
-                    .map(|c| self.render_block(c, 0))
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                format!("#footnote[{}]", content.trim())
-            }
+        let Some(def) = self.footnotes.get(name) else {
+            return String::new();
+        };
+        if !self.rendering_notes.borrow_mut().insert(name.to_string()) {
+            // Already inside this note: drop the back-reference rather than
+            // recurse into it forever.
+            return String::new();
         }
+        let content = def
+            .children()
+            .map(|c| self.render_block(c, 0))
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.rendering_notes.borrow_mut().remove(name);
+        format!("#footnote[{}]", content.trim())
     }
 
     fn visual_alignment(&self) -> Alignment {
@@ -1134,6 +1185,7 @@ fn render_row(source: &str, alignment: Option<Alignment>, citations: bool) -> St
         spoilers: pre.spoilers,
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
+        rendering_notes: std::cell::RefCell::new(HashSet::new()),
         alignment,
         citations,
     };
@@ -1451,11 +1503,12 @@ fn hash_url(url: &str) -> String {
     format!("{h:08x}")
 }
 
-/// Scan raw Markdown for `![...](http(s)://...)` image URLs. Runs on the
-/// unprocessed source, so it also catches images inside admonitions/spoilers.
-fn collect_remote_images(src: &str) -> Vec<(String, String)> {
-    let mut found: Vec<(String, String)> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+/// Scan raw Markdown for `![...](url)` image targets, in source order and
+/// deduplicated. Runs on the unprocessed source, so it also catches images
+/// inside admonitions and spoilers.
+fn scan_image_urls(src: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     let bytes = src.as_bytes();
     let mut i = 0;
     while i + 1 < bytes.len() {
@@ -1465,18 +1518,14 @@ fn collect_remote_images(src: &str) -> Vec<(String, String)> {
                 if after < bytes.len() && bytes[after] == b'(' {
                     let raw = src[after + 1..].trim_start();
                     let raw = raw.strip_prefix('<').unwrap_or(raw);
-                    if is_remote(raw) {
-                        let url: String = raw
-                            .chars()
-                            .take_while(|&c| {
-                                !c.is_whitespace()
-                                    && !matches!(c, ')' | '>' | '"' | '\'')
-                            })
-                            .collect();
-                        if seen.insert(url.clone()) {
-                            let alias = format!("remote/{}", hash_url(&url));
-                            found.push((url, alias));
-                        }
+                    let url: String = raw
+                        .chars()
+                        .take_while(|&c| {
+                            !c.is_whitespace() && !matches!(c, ')' | '>' | '"' | '\'')
+                        })
+                        .collect();
+                    if !url.is_empty() && seen.insert(url.clone()) {
+                        found.push(url);
                     }
                 }
             }
@@ -1484,6 +1533,70 @@ fn collect_remote_images(src: &str) -> Vec<(String, String)> {
         i += 1;
     }
     found
+}
+
+/// Remote image URLs paired with the `remote/<hash>` alias the host prefetches
+/// them to — Typst's sandbox cannot fetch them itself.
+fn collect_remote_images(src: &str) -> Vec<(String, String)> {
+    scan_image_urls(src)
+        .into_iter()
+        .filter(|u| is_remote(u))
+        .map(|u| {
+            let alias = format!("remote/{}", hash_url(&u));
+            (u, alias)
+        })
+        .collect()
+}
+
+/// Visit every node of the document in source order, descending into the
+/// admonition, spoiler and row bodies that were lifted out before parsing.
+///
+/// Parsing rather than string-scanning is what keeps an example fence inside a
+/// wider fence, or an image path inside a code span, from being mistaken for
+/// the real thing.
+fn walk_document(src: &str, visit: &mut impl FnMut(&NodeValue)) {
+    let pre = preprocess(src);
+    let arena = Arena::new();
+    let root = parse_document(&arena, &pre.markdown, &build_options());
+    let mut stack: Vec<&AstNode> = vec![root];
+    let mut nested: Vec<String> = Vec::new();
+    while let Some(node) = stack.pop() {
+        let value = &node.data.borrow().value;
+        if let NodeValue::HtmlBlock(hb) = value {
+            if let Some(id) = parse_placeholder(&hb.literal, "admonition") {
+                if let Some(a) = pre.admonitions.get(id) {
+                    nested.push(a.source.clone());
+                }
+            } else if let Some(id) = parse_placeholder(&hb.literal, "spoiler") {
+                if let Some(s) = pre.spoilers.get(id) {
+                    nested.push(s.source.clone());
+                }
+            }
+        }
+        visit(value);
+        let kids: Vec<&AstNode> = node.children().collect();
+        stack.extend(kids.into_iter().rev());
+    }
+    for source in nested {
+        walk_document(&source, visit);
+    }
+}
+
+/// Every ```` ```mermaid ```` fence in the document, deduplicated.
+fn collect_mermaid_sources(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    walk_document(src, &mut |value| {
+        if let NodeValue::CodeBlock(cb) = value {
+            if cb.info.trim().eq_ignore_ascii_case("mermaid") {
+                let code = cb.literal.strip_suffix('\n').unwrap_or(&cb.literal).to_string();
+                if seen.insert(code.clone()) {
+                    out.push(code);
+                }
+            }
+        }
+    });
+    out
 }
 
 // ==========================================================================
@@ -1575,6 +1688,12 @@ fn indent_lines(text: &str, indent: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_self_referencing_footnote_does_not_recurse_forever() {
+        let out = convert_str("a[^n]\n\n[^n]: see[^n]", false);
+        assert!(out.contains("#footnote[see]"), "{out}");
+    }
 
     fn widths(md: &str) -> Vec<Vec<usize>> {
         preprocess_table_widths(md).1

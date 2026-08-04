@@ -13,10 +13,12 @@
   import { writable, type Readable } from 'svelte/store'
 
   import StatusHint from '$lib/components/StatusHint.svelte'
+  import HtmlPreview from '$lib/components/HtmlPreview.svelte'
   import EditorPane from '$lib/components/EditorPane.svelte'
   import DocumentMenu from '$lib/components/DocumentMenu.svelte'
   import { PDF_TEMPLATES } from '$lib/templates/pdf-templates'
   import {
+    deriveNameFromContent,
     documentStore,
     isBrokenTemplateDocument,
     isLegacyImplicitBlankDocument,
@@ -209,6 +211,17 @@
   let svgPageCount = $state(0)
   let svgScale = $state(1)
 
+  // Pageless HTML view. The engine renders it without a Typst compile, so it
+  // updates on its own short debounce instead of the adaptive compile one.
+  type PreviewMode = 'pages' | 'document'
+  let previewMode = $state<PreviewMode>('pages')
+  let htmlDoc = $state('')
+  let htmlTheme = $state<'auto' | 'light' | 'dark'>('auto')
+  let htmlTimer: number | null = null
+  const HTML_DEBOUNCE_MS = 120
+  const THEME_CYCLE = { auto: 'light', light: 'dark', dark: 'auto' } as const
+  const THEME_LABEL = { auto: 'Auto', light: 'Light', dark: 'Dark' } as const
+
   // Auto-compile
   let compileSeq = 0
   let hasEverCompiled = false
@@ -365,6 +378,40 @@
     // Compile what is on screen, including keystrokes still buffered.
     editorPane?.flushPendingEdit()
     void compile(markdown)
+    void renderHtml(markdown)
+  }
+
+  // The HTML view costs a few milliseconds, so it tracks typing closely rather
+  // than waiting for the Typst compile. Only runs while its tab is showing.
+  $effect(() => {
+    if (!browser) return
+    if (!client) return
+    if (isLoading) return
+    if (previewMode !== 'document') return
+    if (hasEverCompiled && !settingsStore.liveUpdate) return
+
+    const md = markdown
+    if (htmlTimer) window.clearTimeout(htmlTimer)
+    htmlTimer = window.setTimeout(() => void renderHtml(md), HTML_DEBOUNCE_MS)
+
+    return () => {
+      if (htmlTimer) window.clearTimeout(htmlTimer)
+    }
+  })
+
+  let htmlSeq = 0
+
+  async function renderHtml(md: string) {
+    if (!client) return
+    const seq = ++htmlSeq
+    try {
+      const html = await client.renderHtml(md, imagesToSend(documentImages(md)))
+      if (seq === htmlSeq) htmlDoc = html
+    } catch (error) {
+      if (seq !== htmlSeq) return
+      status = 'error'
+      errorMessage = error instanceof Error ? error.message : String(error)
+    }
   }
 
   // Auto-fit on mobile tab switch
@@ -484,18 +531,19 @@
     const startedAt = performance.now()
 
     try {
-      const localImages = collectReferencedImageAssets(md)
       // Remote images are not awaited: compile with what is cached, then
       // recompile if a fetch brings in something new.
-      const { images: remoteImages, missing } = cachedRemoteImages(md)
-      const images: ImageMap = { ...localImages, ...remoteImages }
+      const { missing } = cachedRemoteImages(md)
+      const images = documentImages(md)
 
       lastCompiledMarkdown = md
       lastCompiledImages = images
 
       if (missing.length > 0) {
         void prefetchRemoteImages(missing, settingsStore.corsProxy).then((gotNew) => {
-          if (gotNew && lastCompiledMarkdown === md) void compile(md)
+          if (!gotNew || lastCompiledMarkdown !== md) return
+          void compile(md)
+          if (previewMode === 'document') void renderHtml(md)
         })
       }
 
@@ -511,6 +559,11 @@
       status = 'error'
       errorMessage = error instanceof Error ? error.message : String(error)
     }
+  }
+
+  /** Every image byte-array the document references, local and remote. */
+  function documentImages(md: string): ImageMap {
+    return { ...collectReferencedImageAssets(md), ...cachedRemoteImages(md).images }
   }
 
   // The worker keeps every image it has been handed, so a recompile only
@@ -542,6 +595,19 @@
     } else {
       window.open(url, '_blank')
     }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  async function downloadHtml() {
+    editorPane?.flushPendingEdit()
+    if (!client) return
+    const md = markdown
+    const html = await client.renderHtml(md, imagesToSend(documentImages(md)), true)
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = (deriveNameFromContent(md) || 'document').replace(/[/\\?%*:|"<>]/g, '-') + '.html'
+    link.click()
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
@@ -948,7 +1014,9 @@
             <span class="live-dot" aria-hidden="true"></span>
             {settingsStore.liveUpdate ? 'Live' : 'Paused'}
           </button>
-          <span class="page-info">{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span>
+          {#if previewMode === 'pages'}
+            <span class="page-info">{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span>
+          {/if}
           {#if status === 'error'}
             <div class="error-badge">
               <span>⚠️ Failed</span>
@@ -956,6 +1024,25 @@
           {/if}
         </div>
         <div class="preview-toolbar-right">
+          <div class="view-switch" role="group" aria-label="Preview mode">
+            <button
+              class:active={previewMode === 'pages'}
+              aria-pressed={previewMode === 'pages'}
+              onclick={() => (previewMode = 'pages')}
+            >
+              Pages
+            </button>
+            <button
+              class:active={previewMode === 'document'}
+              aria-pressed={previewMode === 'document'}
+              onclick={() => {
+                previewMode = 'document'
+                if (!htmlDoc) void renderHtml(markdown)
+              }}
+            >
+              Document
+            </button>
+          </div>
           {#if !settingsStore.liveUpdate}
             <button
               class="btn-icon-sm"
@@ -967,19 +1054,32 @@
               Update
             </button>
           {/if}
-          <div class="zoom">
-            <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
-            <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
-            <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
-            <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
-          </div>
-          <button
-            class="btn btn-primary btn-sm"
-            onclick={downloadPdf}
-            disabled={!previewDoc || status === 'compiling'}
-          >
-            {status === 'compiling' ? t('generating') : t('export')}
-          </button>
+          {#if previewMode === 'pages'}
+            <div class="zoom">
+              <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
+              <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
+              <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
+              <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
+            </div>
+            <button
+              class="btn btn-primary btn-sm"
+              onclick={downloadPdf}
+              disabled={!previewDoc || status === 'compiling'}
+            >
+              {status === 'compiling' ? t('generating') : t('export')}
+            </button>
+          {:else}
+            <button
+              class="btn-icon-sm theme-toggle"
+              onclick={() => (htmlTheme = THEME_CYCLE[htmlTheme])}
+              title="Preview theme: {THEME_LABEL[htmlTheme]}"
+            >
+              {THEME_LABEL[htmlTheme]}
+            </button>
+            <button class="btn btn-primary btn-sm" onclick={downloadHtml} disabled={!htmlDoc}>
+              Export HTML
+            </button>
+          {/if}
         </div>
       </div>
       <div class="preview-container" bind:this={previewContainerEl}>
@@ -988,10 +1088,16 @@
         {/if}
         <div
           class="svg-preview-container"
+          class:hidden={previewMode !== 'pages'}
           style="--svg-scale: {svgScale}"
           bind:this={svgContainerEl}
         ></div>
-        {#if status === 'compiling' && !previewDoc}
+        {#if previewMode === 'document'}
+          <div class="html-preview-container">
+            <HtmlPreview html={htmlDoc} theme={htmlTheme} />
+          </div>
+        {/if}
+        {#if previewMode === 'pages' && status === 'compiling' && !previewDoc}
           <div class="preview-placeholder">
             <div class="loading-spinner"></div>
           </div>
@@ -1215,6 +1321,38 @@
     font-size: 0.8125rem;
   }
 
+  /* Paged PDF preview vs. pageless HTML document view. */
+  .view-switch {
+    display: flex;
+    background: var(--color-gray-100);
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .view-switch button {
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    color: var(--color-gray-500);
+    background: transparent;
+    border: 0;
+    border-radius: calc(var(--radius-sm) - 1px);
+    cursor: pointer;
+  }
+
+  .view-switch button.active {
+    background: var(--color-white, #fff);
+    color: var(--color-gray-900, #111);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  }
+
+  .theme-toggle {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    min-width: 3.6rem;
+  }
+
   .zoom {
     display: flex;
     align-items: center;
@@ -1330,6 +1468,20 @@
     overflow: auto;
     padding: var(--space-lg);
     background: var(--preview-bg);
+  }
+
+  /* Kept mounted while the document view is showing, so switching back does
+     not have to re-mount and re-measure every page. */
+  .svg-preview-container.hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .html-preview-container {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
   }
 
   /* One box per page. It keeps the page's footprint whether or not the page
