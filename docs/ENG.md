@@ -259,8 +259,17 @@ base64s each asset into a `data:` URI, so the output needs no sidecar files.
   `typst_mmdr.wasm` for diagrams) with a hand-written `wasm-minimal-protocol`
   host. `web/src/lib/workers/assetBundle.ts` holds the pure wire-format code.
 - CLI: `package/lib.typ` — `prepare-html()`, published as
-  `#metadata(...) <md2pdf-html>` and pulled out with `typst query`, so no
+  `#metadata(...) <md2pdf-html>` and pulled out with `typst eval`, so no
   `--features html` and no experimental Typst flag is involved.
+
+`bin/md2pdf.py` is the host side: stdlib-only Python 3.9+, portable to Windows.
+It writes a `main.typ` next to the document (so `read()`/`image()` resolve
+against the document root), runs `typst eval` to discover remote image URLs,
+fetches them into a per-run temp directory, exposes that as `<docdir>/remote`
+(symlink, falling back to a copied directory where symlinks need privileges),
+then renders. Nothing is cached between runs: the alias the engine emits is a
+32-bit hash of the URL, so a shared cache would let any document read another's
+downloads by naming `remote/<hash>` directly.
 
 ### 10.3 Styling
 
