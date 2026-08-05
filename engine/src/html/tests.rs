@@ -1183,6 +1183,24 @@ fn source_lines_are_absent_unless_asked_for() {
     assert!(editable("# a\n\ntext").contains("data-md-line"));
 }
 
+/// The engine is UTF-8 end to end; this pins the places that index by byte.
+#[test]
+fn non_latin_scripts_survive_the_renderers() {
+    let md = include_str!("../../../tests/unicode.md");
+    let out = html(md);
+    let typst = convert_str(md, false);
+    for sample in ["你好，世界", "こんにちは", "안녕하세요", "مرحبا"] {
+        assert!(out.contains(sample), "HTML lost {sample}");
+        assert!(typst.contains(sample), "Typst lost {sample}");
+    }
+    // A slug is built from `char::is_alphanumeric`, so a CJK heading gets a
+    // real anchor rather than collapsing to `section-N`.
+    assert!(out.contains("id=\"你好世界\""), "{out}");
+    assert!(out.contains("id=\"ünï-cödé\""), "{out}");
+    // Highlighting a fence full of wide characters must not lose or split one.
+    assert!(out.contains("挨拶"), "{out}");
+}
+
 /// `math-core`'s MathML is inserted unescaped — the one place left where the
 /// renderer trusts markup it did not write. `\text{…}` takes arbitrary content
 /// and every MathML element accepts `href`, so this is where that trust is
@@ -1271,6 +1289,7 @@ const FIXTURES: &[(&str, &str)] = &[
     ("emoji.md", include_str!("../../../tests/emoji.md")),
     ("cover.md", include_str!("../../../tests/cover.md")),
     ("frontmatter.md", include_str!("../../../tests/frontmatter.md")),
+    ("unicode.md", include_str!("../../../tests/unicode.md")),
 ];
 
 /// Content does not silently vanish.

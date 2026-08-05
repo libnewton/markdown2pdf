@@ -98,13 +98,19 @@
   )
   set document(title: title, author: authors, date: none)
 
-  // 2) Font stack: high-quality Latin sans-serif fonts for text/numbers
+  // 2) Font stack: a Latin sans for text and numbers, then a CJK face for the
+  // characters it has no glyphs for. Typst falls through per character, so the
+  // CJK face only ever paints what the Latin one cannot.
   let body-size = 10.5pt
   set text(
     font: (
       "IBM Plex Sans",
       "Roboto",
       "Libertinus Sans",
+      "Noto Sans SC",
+      "Noto Sans KR",
+      "Noto Sans CJK SC",
+      "Source Han Sans SC",
     ),
     size: body-size,
     // Drives hyphenation, smart quotes, and Typst's localised titles — a

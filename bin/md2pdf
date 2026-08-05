@@ -96,24 +96,28 @@ def find_typst():
     return exe
 
 
-def typst_base(docdir, fonts):
-    return [
-        "--root",
-        str(docdir),
-        "--font-path",
-        str(fonts),
-        "--ignore-system-fonts",
-    ]
+def typst_base(docdir, fonts, system_fonts=True):
+    """Typst's shared flags.
+
+    System fonts are consulted by default so a document in Chinese, Japanese
+    or Korean can use a face the machine already has — `fonts/` carries Latin
+    only, and a CJK face is ~8 MB per weight. `--no-system-fonts` restores the
+    hermetic behaviour when byte-identical output across machines matters more.
+    """
+    flags = ["--root", str(docdir), "--font-path", str(fonts)]
+    if not system_fonts:
+        flags.append("--ignore-system-fonts")
+    return flags
 
 
-def typst_eval(exe, expression, main, docdir, fonts, inputs):
+def typst_eval(exe, expression, main, docdir, fonts, inputs, system_fonts=True):
     """Evaluate an expression in the document's context and parse the result.
 
     Replaces the `typst query --field value` of the old shell shim, which Typst
     0.15 deprecates.
     """
     cmd = [exe, "eval", expression, "--in", str(main), "--format", "json"]
-    cmd += typst_base(docdir, fonts)
+    cmd += typst_base(docdir, fonts, system_fonts)
     for key, value in inputs.items():
         cmd += ["--input", "%s=%s" % (key, value)]
     done = subprocess.run(cmd, capture_output=True, text=True)
@@ -280,6 +284,10 @@ def parse_args(argv):
         "--allow-private-hosts", action="store_true",
         help="permit remote images on private or link-local addresses",
     )
+    p.add_argument(
+        "--no-system-fonts", dest="system_fonts", action="store_false",
+        help="use only the bundled fonts, for output that cannot vary by machine",
+    )
     args = p.parse_args(argv)
 
     if not args.input.is_file():
@@ -316,7 +324,7 @@ def main(argv=None):
         remotes, err = typst_eval(
             exe,
             "query(<md2pdf-remote-images>).first().value",
-            main_typ, docdir, fonts, {"md2pdf-query": "1"},
+            main_typ, docdir, fonts, {"md2pdf-query": "1"}, args.system_fonts,
         )
         if err:
             remotes = []
@@ -333,7 +341,7 @@ def main(argv=None):
                 exe,
                 "query(<md2pdf-html>).first().value",
                 main_typ, docdir, fonts,
-                {"md2pdf-query": "1", "md2pdf-target": "html"},
+                {"md2pdf-query": "1", "md2pdf-target": "html"}, args.system_fonts,
             )
             if err or not isinstance(html, str):
                 die("HTML render failed:\n%s" % (err or "unexpected result"))
@@ -341,7 +349,7 @@ def main(argv=None):
             with open(args.output, "w", encoding="utf-8", newline="") as out:
                 out.write(html)
         else:
-            cmd = [exe, "compile"] + typst_base(docdir, fonts)
+            cmd = [exe, "compile"] + typst_base(docdir, fonts, args.system_fonts)
             cmd += [str(main_typ), str(args.output)]
             if subprocess.run(cmd).returncode != 0:
                 raise SystemExit(1)

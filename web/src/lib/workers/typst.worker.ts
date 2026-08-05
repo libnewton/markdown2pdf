@@ -2,6 +2,7 @@
 
 import {
 	createTypstCompiler,
+	createTypstFontBuilder,
 	createTypstRenderer,
 	loadFonts,
 	type TypstCompiler,
@@ -137,6 +138,62 @@ async function registerPackage(compiler: TypstCompiler): Promise<void> {
 			}
 		})
 	);
+}
+
+// A face covering one of these scripts is ~8 MB per weight, so it is fetched
+// only once a document actually uses that script — and chosen by script, so a
+// Chinese document does not also pull the Korean one. Noto Sans SC covers the
+// ideographs and both kana; Hangul is a separate face.
+const SCRIPT_FONTS: { pattern: RegExp; fonts: string[] }[] = [
+	{
+		pattern: /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/,
+		fonts: ['/fonts/NotoSansKR-Regular.otf', '/fonts/NotoSansKR-Bold.otf']
+	},
+	{
+		pattern: /[\u3000-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/,
+		fonts: ['/fonts/NotoSansSC-Regular.otf', '/fonts/NotoSansSC-Bold.otf']
+	}
+];
+
+const loadedFonts = new Set<string>();
+// Serialised: two compiles can want a new script at once, and the font set is
+// replaced wholesale rather than appended to.
+let fontWork: Promise<void> = Promise.resolve();
+
+/**
+ * Make sure the compiler has a face for every script in the document.
+ *
+ * `loadFonts` only applies at init, so the set is rebuilt through a font
+ * builder and handed over whole — which is why the core faces are re-read here
+ * rather than only the new one.
+ */
+function ensureScriptFonts(compiler: TypstCompiler, markdown: string): Promise<void> {
+	const wanted = SCRIPT_FONTS.filter(({ pattern }) => pattern.test(markdown))
+		.flatMap(({ fonts }) => fonts)
+		.filter((url) => !loadedFonts.has(url));
+	if (wanted.length === 0) return fontWork;
+
+	fontWork = fontWork.then(async () => {
+		const load = async (url: string) => {
+			const resp = await fetch(url);
+			return resp.ok ? new Uint8Array(await resp.arrayBuffer()) : null;
+		};
+		const extra = (await Promise.all(wanted.map(load))).filter((b) => b !== null);
+		// A build with no network leaves these out. The script then renders as
+		// tofu, exactly as before, rather than the compile failing.
+		if (extra.length === 0) return;
+		const already = [...loadedFonts];
+		wanted.forEach((url) => loadedFonts.add(url));
+
+		const previous = (await Promise.all(already.map(load))).filter((b) => b !== null);
+		const core = (await Promise.all(CORE_FONTS.map(load))).filter((b) => b !== null);
+
+		const builder = createTypstFontBuilder();
+		await builder.init({ getModule: () => typstCompilerWasmUrl });
+		for (const bytes of [...core, ...previous, ...extra]) await builder.addFontData(bytes);
+		await builder.build(async (resolver) => compiler.setFonts(resolver));
+	});
+	return fontWork;
 }
 
 function getCompiler(): Promise<TypstCompiler> {
@@ -373,6 +430,7 @@ async function compileTypst(
 	format: 'pdf' | 'preview' = 'pdf'
 ): Promise<{ result: Uint8Array; diagnostics: string[] }> {
 	const compiler = await getCompiler();
+	await ensureScriptFonts(compiler, markdown);
 
 	if (markdown !== mappedMarkdown) {
 		await loadTwemoji(compiler, markdown);

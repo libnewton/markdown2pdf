@@ -113,6 +113,27 @@ drawer without touching an explicit `[toc]`.
 `<br>` is the only raw HTML tag either renderer honours — it is the one way to
 break a line inside a table cell. Everything else is shown as text.
 
+## Non-Latin scripts
+
+Both renderers are UTF-8 end to end, and heading slugs are built from Unicode
+alphanumerics, so `# 你好` gets a real anchor. Type is the only place a script
+can go missing, and the two front-ends solve it differently:
+
+- **HTML** — nothing to solve. The sheet asks for the system UI stack, and the
+  reader's own system supplies the face.
+- **Web app, paged preview and PDF export** — Typst only sees the faces we hand
+  it, and `fonts/` is Latin. The app therefore detects CJK, kana and Hangul in
+  the source and fetches Noto Sans SC or KR (~8 MB per weight, from
+  `web/static/fonts/`, populated at build time) once per session, only for
+  documents that contain those scripts.
+- **CLI** — installed system fonts are used, so whatever the machine has for
+  CJK is picked up. `--no-system-fonts` restores the hermetic behaviour for
+  reproducible builds, at the cost of tofu where the bundled fonts have no
+  glyph.
+
+`tests/unicode.md` is the fixture: Chinese, Japanese, Korean, Arabic RTL,
+combining marks, wide characters inside a code fence, and CJK headings.
+
 Everything above renders in both targets. `tests/html-edge.md` is the
 adversarial fixture for the HTML renderer (injection attempts, broken input,
 structural extremes).
