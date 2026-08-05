@@ -52,7 +52,8 @@
     close()
   }
 
-  async function newBlank() {
+  /** Also reachable from Ctrl/Cmd+Alt+N and from `/new` in the editor. */
+  export async function newBlank() {
     await saveCurrentIfNeeded()
     const doc = await documentStore.createDocument(mode, '', undefined, 'blank')
     onDocumentLoad(doc)

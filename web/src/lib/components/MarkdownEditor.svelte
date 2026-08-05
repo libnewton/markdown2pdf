@@ -1,18 +1,27 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { EditorView, basicSetup } from 'codemirror'
-  import { EditorState } from '@codemirror/state'
+  import { keymap } from '@codemirror/view'
+  import { EditorState, EditorSelection } from '@codemirror/state'
   import { markdown as langMarkdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
+  import { linkAround, slashCommand, toggleWrap } from '$lib/editor/commands'
 
   interface Props {
     markdown: string
     placeholder?: string
     readOnly?: boolean
+    /** `/new` cannot be a snippet — it has to reach the document store. */
+    onNewDocument?: () => void
   }
 
-  let { markdown = $bindable(), placeholder = '', readOnly = false }: Props = $props()
+  let {
+    markdown = $bindable(),
+    placeholder = '',
+    readOnly = false,
+    onNewDocument,
+  }: Props = $props()
 
   let editorView = $state<EditorView | null>(null)
   let editorContainerEl = $state<HTMLDivElement | null>(null)
@@ -57,6 +66,47 @@
     return true
   }
 
+  /** Replace the selection, then place the caret where the helper asked. */
+  function replaceSelection(
+    view: EditorView,
+    make: (selected: string) => { text: string; from: number; to: number },
+  ): boolean {
+    const range = view.state.selection.main
+    const { text, from, to } = make(view.state.sliceDoc(range.from, range.to))
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert: text },
+      selection: EditorSelection.range(range.from + from, range.from + to),
+    })
+    return true
+  }
+
+  const editorCommands = [
+    { key: 'Mod-b', run: (v: EditorView) => replaceSelection(v, (s) => toggleWrap(s, '**')) },
+    { key: 'Mod-i', run: (v: EditorView) => replaceSelection(v, (s) => toggleWrap(s, '_')) },
+    { key: 'Mod-k', run: (v: EditorView) => replaceSelection(v, linkAround) },
+    {
+      // `/name` alone on a line, expanded on Enter. Deliberately not a
+      // completion popup: the list is short and typing it out is the fast
+      // path once you know it.
+      key: 'Enter',
+      run: (view: EditorView) => {
+        const line = view.state.doc.lineAt(view.state.selection.main.head)
+        const command = slashCommand(line.text)
+        if (!command) return false
+        if (command.name === 'new') {
+          onNewDocument?.()
+          view.dispatch({ changes: { from: line.from, to: line.to, insert: '' } })
+          return true
+        }
+        view.dispatch({
+          changes: { from: line.from, to: line.to, insert: command.snippet },
+          selection: { anchor: line.from + command.caret },
+        })
+        return true
+      },
+    },
+  ]
+
   onMount(() => {
     if (!editorContainerEl) return
     lastEmittedDoc = markdown
@@ -64,6 +114,8 @@
     const startState = EditorState.create({
       doc: markdown,
       extensions: [
+        // Before basicSetup, so these win over its defaults.
+        keymap.of(editorCommands),
         basicSetup,
         langMarkdown({ codeLanguages: languages }),
         oneDark,

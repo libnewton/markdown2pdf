@@ -98,6 +98,12 @@
 		return !!target;
 	}
 
+	/** Open or close the outline drawer. It is a pure-CSS checkbox. */
+	export function toggleOutline() {
+		const toggle = root?.getElementById('md2pdf-toc-state');
+		if (toggle instanceof HTMLInputElement) toggle.checked = !toggle.checked;
+	}
+
 	async function copyCode(button: HTMLElement) {
 		const code = button.parentElement?.querySelector('code');
 		if (!code || !navigator.clipboard) return;

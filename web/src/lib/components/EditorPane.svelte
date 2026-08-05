@@ -13,6 +13,7 @@
     errorMessage?: string | null
     readOnly?: boolean
     onImageSaved?: (path: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string) => void
+    onNewDocument?: () => void
   }
 
   let {
@@ -21,6 +22,7 @@
     errorMessage = null,
     readOnly = false,
     onImageSaved,
+    onNewDocument,
   }: Props = $props()
 
   let markdownEditor = $state<MarkdownEditor | null>(null)
@@ -69,7 +71,7 @@
   }
 </script>
 
-<MarkdownEditor bind:this={markdownEditor} bind:markdown {placeholder} {readOnly} />
+<MarkdownEditor bind:this={markdownEditor} bind:markdown {placeholder} {readOnly} {onNewDocument} />
 {#if errorMessage}
   <div class="error-bar">{errorMessage}</div>
 {/if}

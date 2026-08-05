@@ -16,6 +16,7 @@
 
   import StatusHint from '$lib/components/StatusHint.svelte'
   import HtmlPreview from '$lib/components/HtmlPreview.svelte'
+  import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte'
   import EditorPane from '$lib/components/EditorPane.svelte'
   import DocumentMenu from '$lib/components/DocumentMenu.svelte'
   import { PDF_TEMPLATES } from '$lib/templates/pdf-templates'
@@ -177,6 +178,19 @@
   }
 
   let htmlPreview = $state<HtmlPreview | null>(null)
+  let documentMenu = $state<DocumentMenu | null>(null)
+  let isShortcutsOpen = $state(false)
+
+  /** Whether a key event came from somewhere text is being entered. */
+  function isTyping(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null
+    if (!el?.tagName) return false
+    return (
+      el.isContentEditable ||
+      ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ||
+      !!el.closest?.('.cm-editor')
+    )
+  }
 
   /**
    * Follow an outline jump in the URL. Inside a shadow root the browser cannot
@@ -311,15 +325,76 @@
     }
     window.addEventListener('click', handleClickOutside)
 
-    // Ctrl/Cmd+Enter triggers an immediate compile. Use capture phase +
-    // stopImmediatePropagation so CodeMirror's editor keymap never sees it
-    // and never inserts a newline.
+    // Capture phase + stopImmediatePropagation, so CodeMirror's own keymap
+    // never sees a shortcut we have claimed and cannot, say, insert a newline
+    // for Ctrl+Enter as well as compiling.
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      const mod = e.ctrlKey || e.metaKey
+      const claim = () => {
         e.preventDefault()
         e.stopImmediatePropagation()
         e.stopPropagation()
-        compileNow()
+      }
+
+      if (e.key === 'Escape') {
+        if (!isShortcutsOpen && !isAboutOpen && !isExportOpen) return
+        claim()
+        isShortcutsOpen = false
+        isAboutOpen = false
+        isExportOpen = false
+        return
+      }
+      // `?` where you are not typing — the usual way to ask for this list.
+      if (!mod && e.key === '?' && !isTyping(e.target)) {
+        claim()
+        isShortcutsOpen = !isShortcutsOpen
+        return
+      }
+      if (!mod) return
+
+      switch (e.key.toLowerCase()) {
+        case 'enter':
+          claim()
+          compileNow()
+          return
+        case 'n':
+          // Cmd/Ctrl+N belongs to the browser, so this one takes Alt too.
+          if (!e.altKey || readOnly) return
+          claim()
+          void documentMenu?.newBlank()
+          return
+        case 's':
+          // Swallowed rather than handled: there is nothing to save, and the
+          // browser's "save page as" is not what anyone means by it here.
+          claim()
+          return
+        case 'e':
+          claim()
+          isExportOpen = !isExportOpen
+          return
+        case 'p':
+          claim()
+          void downloadPdf()
+          return
+        case '1':
+        case '2':
+        case '3':
+          claim()
+          setViewMode(VIEW_MODES[Number(e.key) - 1])
+          return
+        case '\\':
+          claim()
+          if (viewMode !== 'view') previewMode = previewMode === 'pages' ? 'document' : 'pages'
+          return
+        case 'o':
+          claim()
+          previewMode = 'document'
+          htmlPreview?.toggleOutline()
+          return
+        case '/':
+          claim()
+          isShortcutsOpen = !isShortcutsOpen
+          return
       }
     }
     window.addEventListener('keydown', handleKey, true)
@@ -873,6 +948,7 @@
         <span class="doc-title">Reference</span>
       {:else}
         <DocumentMenu
+          bind:this={documentMenu}
           mode="pdf"
           currentContent={markdown}
           {documentAssets}
@@ -1009,6 +1085,18 @@
 
       <button
         class="tool-btn tool-btn-icon"
+        onclick={() => (isShortcutsOpen = true)}
+        title="Keyboard shortcuts (?)"
+        aria-label="Keyboard shortcuts"
+      >
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <rect x="0.75" y="3.25" width="14.5" height="9.5" rx="1.75" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M4 6h.01M6.5 6h.01M9 6h.01M11.5 6h.01M4.5 9.5h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <button
+        class="tool-btn tool-btn-icon"
         onclick={() => (isAboutOpen = true)}
         title="About md2pdf"
         aria-label="About md2pdf"
@@ -1037,6 +1125,7 @@
         {errorMessage}
         {readOnly}
         onImageSaved={handleImageSaved}
+        onNewDocument={() => void documentMenu?.newBlank()}
       />
     </section>
 
@@ -1154,6 +1243,10 @@
     </section>
   </main>
 
+
+  {#if isShortcutsOpen}
+    <ShortcutOverlay onClose={() => (isShortcutsOpen = false)} />
+  {/if}
 
   {#if isAboutOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
