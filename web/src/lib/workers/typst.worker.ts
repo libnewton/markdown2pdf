@@ -11,7 +11,7 @@ import typstCompilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/pkg/typst
 import typstRendererWasmUrl from '@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm?url';
 import { SUPERSEDED } from './compileProtocol';
 import { splitSvgDocument, type SvgDocument } from '$lib/typst/svg-split';
-import { buildAssetBundle, parseKeyedSources, type Asset } from './assetBundle';
+import { buildAssetBundle, unescapeSource, type Asset } from './assetBundle';
 
 // Markdown processing lives entirely in the `md2pdf` Typst package — the
 // Rust/WASM engine runs inside the compile. This worker only feeds raw
@@ -241,9 +241,8 @@ const imageStore = new Map<string, Uint8Array>();
 // Rendered Mermaid diagrams, keyed the way the engine asks for them.
 const mermaidCache = new Map<string, Uint8Array>();
 
-async function renderMermaid(markdown: string): Promise<Asset[]> {
-	const engine = await getEngine();
-	const wanted = parseKeyedSources(decode(engine('html_mermaid', encode(markdown))));
+async function renderMermaid(rows: string[][]): Promise<Asset[]> {
+	const wanted = rows.map(([key, escaped]) => ({ key, source: unescapeSource(escaped ?? '') }));
 	const missing = wanted.filter((d) => !mermaidCache.has(d.key));
 	if (missing.length > 0) {
 		const mermaid = await getMermaid();
@@ -284,32 +283,48 @@ function loadFont(key: string): Promise<Uint8Array> {
  * and handed over as one blob plus a `key<TAB>byte-length` manifest, exactly as
  * the Typst package does for the CLI.
  */
-async function renderHtml(markdown: string, standalone: boolean): Promise<string> {
+// The most recent preview render asked for. Anything older is discarded on
+// the way through rather than rendered for a pane that has already moved on.
+let latestHtmlId = '';
+
+async function renderHtml(markdown: string, standalone: boolean, id = ''): Promise<string> {
+	const superseded = () => !standalone && id !== '' && id !== latestHtmlId;
 	const engine = await getEngine();
 	const md = encode(markdown);
 
+	// One parse for the whole list. Asking for images, remotes, emoji, fonts
+	// and diagrams separately meant re-parsing the document five times before
+	// the render itself parsed it a sixth.
+	const wanted: Record<string, string[][]> = {};
+	for (const line of lines(engine('html_assets', md))) {
+		const [kind, ...rest] = line.split('\t');
+		(wanted[kind] ??= []).push(rest);
+	}
+
 	const assets: Asset[] = [];
 	if (standalone) {
-		for (const key of lines(engine('html_fonts', md)).filter(safePath)) {
-			assets.push([key, await loadFont(key)]);
+		for (const [key] of wanted.font ?? []) {
+			if (safePath(key)) assets.push([key, await loadFont(key)]);
 		}
 	}
-	for (const path of lines(engine('html_images', md))) {
+	for (const [path] of wanted.image ?? []) {
 		const bytes = imageStore.get(path);
 		if (bytes) assets.push([path, bytes]);
 	}
-	for (const line of lines(engine('remotes', md))) {
-		const alias = line.slice(line.indexOf('\t') + 1);
+	for (const [, alias] of wanted.remote ?? []) {
 		const bytes = imageStore.get(alias);
 		if (bytes) assets.push([alias, bytes]);
 	}
-	const codepoints = lines(engine('twemojis', md));
+	const codepoints = (wanted.emoji ?? []).map(([cp]) => cp);
 	await fetchTwemoji(codepoints);
+	if (superseded()) throw new Error(SUPERSEDED);
 	for (const cp of codepoints) {
 		const bytes = twemojiCache.get(cp);
 		if (bytes) assets.push(['twemoji/' + cp + '.svg', bytes]);
 	}
-	assets.push(...(await renderMermaid(markdown)));
+	// Diagrams are the expensive part: a cold one loads a 3.9 MB plugin.
+	assets.push(...(await renderMermaid(wanted.mermaid ?? [])));
+	if (superseded()) throw new Error(SUPERSEDED);
 
 	const { manifest, blob } = buildAssetBundle(assets);
 	return decode(
@@ -443,7 +458,11 @@ ctx.onmessage = (event: MessageEvent<CompileRequest | HtmlRequest | CancelReques
 	// responsive while a PDF or preview compile is still running.
 	if (message.type === 'html') {
 		rememberImages(message.images);
-		renderHtml(message.markdown, message.standalone ?? false)
+		// A download is asked for once and must always be answered. A preview
+		// render is one of a stream, so the newest wins and the rest can stop
+		// as soon as they notice — before paying for diagrams and fonts.
+		if (!message.standalone) latestHtmlId = message.id;
+		renderHtml(message.markdown, message.standalone ?? false, message.id)
 			.then((html) =>
 				ctx.postMessage({
 					type: 'compile-result',

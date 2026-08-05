@@ -22,21 +22,11 @@ export function buildAssetBundle(assets: readonly Asset[]): {
 }
 
 /**
- * Split `key<TAB>escaped-source` lines, undoing the newline escaping the engine
- * applies so a multi-line Mermaid diagram survives a line-oriented list.
+ * Undo the engine's `\\` and `\n` escaping, which is what lets a multi-line
+ * Mermaid diagram travel inside a line-oriented list. One left-to-right pass,
+ * so an escaped backslash cannot combine with the `n` after it.
  */
-export function parseKeyedSources(raw: string): Array<{ key: string; source: string }> {
-	return raw
-		.split('\n')
-		.filter((line) => line !== '')
-		.map((line) => {
-			const tab = line.indexOf('\t');
-			return { key: line.slice(0, tab), source: unescape(line.slice(tab + 1)) };
-		});
-}
-
-/** Undo the engine's `\\` and `\n` escaping in one left-to-right pass. */
-function unescape(text: string): string {
+export function unescapeSource(text: string): string {
 	return text.replace(/\\(.)/g, (whole, next: string) =>
 		next === 'n' ? '\n' : next === '\\' ? '\\' : whole
 	);

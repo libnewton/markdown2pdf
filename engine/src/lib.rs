@@ -126,6 +126,47 @@ pub fn html_mermaid(markdown: &[u8]) -> Result<Vec<u8>, String> {
     Ok(out.into_bytes())
 }
 
+/// Everything an HTML render needs the host to fetch, from one parse.
+///
+/// One `kind<TAB>value…` line per asset, where `kind` is `image`, `remote`
+/// (`url<TAB>alias`), `emoji`, `font` or `mermaid` (`key<TAB>escaped-source`).
+/// The individual `html_images` / `remotes` / `twemojis` / `html_fonts` /
+/// `html_mermaid` calls each re-parse the document; asking for all five at
+/// once is the difference between five parses per keystroke and one.
+#[wasm_func]
+pub fn html_assets(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    let mut out = String::new();
+    for path in html::local_images(src) {
+        out.push_str("image\t");
+        out.push_str(&path);
+        out.push('\n');
+    }
+    for (url, alias) in collect_remote_images(src) {
+        out.push_str("remote\t");
+        out.push_str(&url);
+        out.push('\t');
+        out.push_str(&alias);
+        out.push('\n');
+    }
+    for cp in collect_twemoji_codepoints(src) {
+        out.push_str("emoji\t");
+        out.push_str(&cp);
+        out.push('\n');
+    }
+    if has_math(src) {
+        out.push_str("font\tfonts/math.woff2\nfont\tfonts/math-alpha.woff2\n");
+    }
+    for code in collect_mermaid_sources(src) {
+        out.push_str("mermaid\t");
+        out.push_str(&html::mermaid_key(&code));
+        out.push('\t');
+        out.push_str(&code.replace('\\', "\\\\").replace('\n', "\\n"));
+        out.push('\n');
+    }
+    Ok(out.into_bytes())
+}
+
 /// Render Markdown to HTML.
 ///
 /// `options` is a `key=value` line block (`standalone=1` wraps the fragment in

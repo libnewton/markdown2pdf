@@ -73,21 +73,14 @@
   // we can only call it in the browser. SSR/prerender gets a fallback store
   // that is always false; the `{#if $needRefresh}` template branch stays
   // dormant until a real registration happens client-side.
+  let swUpdateTimer: ReturnType<typeof setInterval> | null = null
   const swOptions: RegisterSWOptions = {
     onRegistered(swr) {
-      console.log('SW registered: ', swr)
-      if (swr) {
-        setInterval(
-          () => {
-            console.log('Checking for SW update...')
-            swr.update()
-          },
-          60 * 60 * 1000,
-        )
-      }
+      if (!swr) return
+      swUpdateTimer = setInterval(() => void swr.update(), 60 * 60 * 1000)
     },
     onRegisterError(error) {
-      console.log('SW registration error', error)
+      console.error('service worker registration failed', error)
     },
   }
   let needRefresh: Readable<boolean> = writable(false)
@@ -219,8 +212,9 @@
   let hasEverCompiled = false
 
   // Cached last compiled Markdown + images for PDF export (same as preview)
-  let lastCompiledMarkdown = ''
-  let lastCompiledImages: ImageMap = {}
+  // What the paged preview last compiled, so a remote image arriving late can
+  // tell whether the document has moved on since.
+  let compiledMarkdown = ''
   let autoPreviewTimer: number | null = null
   // The auto-compile debounce follows the last compile's duration, so a slow
   // document is not re-queued faster than it can be rendered.
@@ -327,6 +321,7 @@
       window.removeEventListener('pagehide', handleHide)
       window.removeEventListener('keydown', handleKey, true)
       if (resizeTimer) clearTimeout(resizeTimer)
+      if (swUpdateTimer) clearInterval(swUpdateTimer)
     }
   })
 
@@ -343,19 +338,22 @@
     documentStore.autoSave(documentStore.currentDocId, markdown, changed ? assets : undefined)
   })
 
-  // Auto-compile effect (debounce 450ms). Gated by the live-update setting:
-  // first compile always runs so the user sees something; later ones obey the toggle.
-  // Important: subscribe to `markdown` ONLY when we'll actually use it. When live
-  // is paused (after the first compile), reading markdown would make every
-  // keystroke re-run this effect for nothing.
+  // Auto-compile effect. Only while the paged preview is actually on screen:
+  // a Typst compile is the most expensive thing the app does, and on the Web
+  // tab — or in `?view`, which is always the Web tab — its result is never
+  // looked at. Export compiles on demand instead of relying on this.
+  // Important: subscribe to `markdown` ONLY when we'll actually use it, so a
+  // keystroke behind a hidden pane does not re-run this effect for nothing.
   $effect(() => {
     if (!browser) return
     if (!client) return
     if (isLoading) return
-
-    if (hasEverCompiled && !liveUpdate) return
+    if (!showPreview || previewMode !== 'pages') return
 
     const md = markdown
+    // Switching back to Pages with nothing changed since: the pages on screen
+    // are already the answer.
+    if (previewDoc && md === compiledMarkdown) return
 
     if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
 
@@ -372,8 +370,8 @@
   function compileNow() {
     // Compile what is on screen, including keystrokes still buffered.
     editorPane?.flushPendingEdit()
-    void compile(markdown)
-    void renderHtml(markdown)
+    if (previewMode === 'pages') void compile(markdown)
+    else void renderHtml(markdown)
   }
 
   // The HTML view costs a few milliseconds, so it tracks typing closely rather
@@ -401,22 +399,26 @@
     const seq = ++htmlSeq
     try {
       const html = await client.renderHtml(md, imagesToSend(documentImages(md)))
-      if (seq === htmlSeq) htmlDoc = html
+      // Both guards matter: `seq` catches a render this component superseded,
+      // `md === markdown` catches one that finished against text the document
+      // has since moved past — which is how a checkbox click during the
+      // debounce window got repainted in its old state.
+      if (seq === htmlSeq && md === markdown) htmlDoc = html
     } catch (error) {
+      // A render the worker dropped in favour of a newer one is not an error.
+      if (error instanceof Error && error.message === SUPERSEDED) return
       if (seq !== htmlSeq) return
       status = 'error'
       errorMessage = error instanceof Error ? error.message : String(error)
     }
   }
 
-  // Auto-fit on mobile tab switch
+  // Auto-fit on mobile tab switch, once the pane has been laid out.
   $effect(() => {
     if (!browser) return
-    if (activeMobileTab === 'preview') {
-      setTimeout(() => {
-        fitWidth()
-      }, 50)
-    }
+    if (activeMobileTab !== 'preview') return
+    const timer = window.setTimeout(fitWidth, 50)
+    return () => window.clearTimeout(timer)
   })
 
   // Only the pages near the viewport become DOM; the rest stay as markup
@@ -513,9 +515,8 @@
   // engine). The host only resolves images Typst cannot fetch itself.
   async function compile(md: string) {
     if (!client) return
-    // Only mark "compiled" once real content exists — otherwise a first
-    // compile that races ahead of the document load would, while live
-    // update is paused, leave the preview blank until a manual Update.
+    // Only mark "compiled" once real content exists, so the adaptive delay
+    // below is not calibrated against an empty first pass.
     if (md.trim() !== '') hasEverCompiled = true
 
     const seq = ++compileSeq
@@ -531,12 +532,11 @@
       const { missing } = cachedRemoteImages(md)
       const images = documentImages(md)
 
-      lastCompiledMarkdown = md
-      lastCompiledImages = images
+      compiledMarkdown = md
 
       if (missing.length > 0) {
         void prefetchRemoteImages(missing).then((gotNew) => {
-          if (!gotNew || lastCompiledMarkdown !== md) return
+          if (!gotNew || compiledMarkdown !== md) return
           void compile(md)
           if (previewMode === 'document') void renderHtml(md)
         })
@@ -577,12 +577,15 @@
 
   async function downloadPdf() {
     editorPane?.flushPendingEdit()
-    if (!client || !lastCompiledMarkdown) return
+    if (!client) return
+    // Compiled from what is on screen rather than from whatever the preview
+    // last rendered — the paged preview may never have run at all.
+    const md = markdown
     // Open the tab synchronously so it counts as user-initiated and isn't
     // blocked by popup blockers after the async compile.
     const newTab = window.open('', '_blank')
     // @ts-ignore
-    const { pdf } = await client.compilePdf(lastCompiledMarkdown, lastCompiledImages)
+    const { pdf } = await client.compilePdf(md, imagesToSend(documentImages(md)))
     const blob = new Blob([pdf], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     if (newTab) {

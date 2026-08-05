@@ -182,33 +182,32 @@
   str(raw).split("\n").filter(l => l.trim() != "")
 }
 
-#let _mermaid-assets(md) = {
-  _lines(_engine.html_mermaid(bytes(md))).map(l => {
-    let p = l.split("\t")
-    let code = p.at(1, default: "").replace("\\n", "\n").replace("\\\\", "\\")
-    (key: p.at(0), data: bytes(mermaid-svg(code)))
-  })
-}
-
 // Collect every asset the document needs, skipping the ones we cannot load so
 // one missing file degrades to a placeholder instead of failing the build.
+//
+// `html_assets` answers for images, remotes, emoji, fonts and diagrams from a
+// single parse; asking each question separately parsed the document five times.
 #let _html-assets(md, read-asset) = {
   let items = ()
-  for path in _lines(_engine.html_images(bytes(md))) {
-    items.push((key: path, data: read-asset(path)))
+  for line in _lines(_engine.html_assets(bytes(md))) {
+    let p = line.split("\t")
+    let kind = p.at(0)
+    if kind == "image" {
+      items.push((key: p.at(1), data: read-asset(p.at(1))))
+    } else if kind == "remote" {
+      items.push((key: p.at(2), data: read-asset(p.at(2))))
+    } else if kind == "emoji" {
+      let name = "twemoji/" + p.at(1) + ".svg"
+      items.push((key: name, data: read(name, encoding: none)))
+    } else if kind == "font" {
+      // Only a document with math asks for these, and the alphanumerics face
+      // only once a formula reaches into that block.
+      items.push((key: p.at(1), data: read(p.at(1), encoding: none)))
+    } else if kind == "mermaid" {
+      let code = p.at(2, default: "").replace("\\n", "\n").replace("\\\\", "\\")
+      items.push((key: p.at(1), data: bytes(mermaid-svg(code))))
+    }
   }
-  for remote in _remotes(md) {
-    items.push((key: remote.alias, data: read-asset(remote.alias)))
-  }
-  for cp in _lines(_engine.twemojis(bytes(md))) {
-    items.push((key: "twemoji/" + cp + ".svg", data: read("twemoji/" + cp + ".svg", encoding: none)))
-  }
-  // Only a document with math asks for these, and the second one only counts
-  // once a formula reaches into the math alphanumerics.
-  for font in _lines(_engine.html_fonts(bytes(md))) {
-    items.push((key: font, data: read(font, encoding: none)))
-  }
-  items += _mermaid-assets(md)
   items = items.filter(it => it.data != none)
   (
     manifest: items.fold("", (acc, it) => acc + it.key + "\t" + str(it.data.len()) + "\n"),

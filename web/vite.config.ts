@@ -91,6 +91,14 @@ export default defineConfig({
 		sveltekit(),
 		SvelteKitPWA({
 			registerType: 'autoUpdate',
+			workbox: {
+				// The twemoji mirror is ~3700 files and 17 MB, fetched one glyph
+				// at a time only by documents that use emoji. Precaching it would
+				// mean downloading all of it to install the app.
+				globIgnores: ['**/md2pdf/twemoji/**'],
+				// engine.wasm and the Typst compiler are past the 2 MB default.
+				maximumFileSizeToCacheInBytes: 8 * 1024 * 1024
+			},
 			manifest: {
 				name: 'md2pdf',
 				short_name: 'md2pdf',

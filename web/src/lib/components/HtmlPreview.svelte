@@ -18,10 +18,40 @@
 			// re-render below.
 			root.addEventListener('click', onClick);
 		}
-		// Re-parsing the whole fragment costs a millisecond or two and keeps the
-		// diffing honest; scroll position is on the pane, not inside the root.
-		root.innerHTML = html;
+		mount(root, html);
 	});
+
+	// The fragment opens with a <style> holding the whole document stylesheet
+	// and, when there is math, a base64 font. That block is the same on every
+	// render, so re-parsing it per keystroke is pure cost — the body after it
+	// is the only part that actually changes.
+	let styleEl: HTMLStyleElement | null = null;
+	let mountedStyle = '';
+
+	function mount(target: ShadowRoot, fragment: string) {
+		const end = fragment.indexOf('</style>');
+		if (!fragment.startsWith('<style>') || end === -1) {
+			target.innerHTML = fragment;
+			styleEl = null;
+			return;
+		}
+		const css = fragment.slice('<style>'.length, end);
+		const body = fragment.slice(end + '</style>'.length);
+
+		if (!styleEl || !styleEl.isConnected) {
+			target.innerHTML = '';
+			styleEl = document.createElement('style');
+			target.append(styleEl);
+			mountedStyle = '';
+		}
+		if (css !== mountedStyle) {
+			styleEl.textContent = css;
+			mountedStyle = css;
+		}
+		// Everything after the stylesheet, replaced in one parse.
+		while (styleEl.nextSibling) styleEl.nextSibling.remove();
+		styleEl.insertAdjacentHTML('afterend', body);
+	}
 
 	// The download carries a script for these two behaviours. A fragment does
 	// not, and the preview does not want one: making it run would mean lifting

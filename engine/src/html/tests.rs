@@ -1091,6 +1091,35 @@ fn a_heading_cannot_claim_a_reserved_id() {
     assert!(out.contains("id=\"x\""), "a repeated prefix must not survive:\n{out}");
 }
 
+/// The batched asset list has to say exactly what the five single-purpose
+/// calls say, or a host that switches to it starts losing images.
+#[test]
+fn the_batched_asset_list_matches_the_individual_calls() {
+    let md = include_str!("../../../tests/extended.md");
+    let lines = |b: Vec<u8>| {
+        String::from_utf8(b)
+            .unwrap()
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let batched = lines(crate::html_assets(md.as_bytes()).unwrap());
+    let of = |kind: &str| {
+        batched
+            .iter()
+            .filter_map(|l| l.strip_prefix(&format!("{kind}\t")).map(str::to_string))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(of("image"), lines(crate::html_images(md.as_bytes()).unwrap()));
+    assert_eq!(of("remote"), lines(crate::remotes(md.as_bytes()).unwrap()));
+    assert_eq!(of("emoji"), lines(crate::twemojis(md.as_bytes()).unwrap()));
+    assert_eq!(of("font"), lines(crate::html_fonts(md.as_bytes()).unwrap()));
+    assert_eq!(of("mermaid"), lines(crate::html_mermaid(md.as_bytes()).unwrap()));
+    assert!(!of("mermaid").is_empty(), "the demo has diagrams");
+}
+
 /// Every fixture in `tests/`, so a new one is covered by adding it here once.
 const FIXTURES: &[(&str, &str)] = &[
     ("html-edge.md", include_str!("../../../tests/html-edge.md")),

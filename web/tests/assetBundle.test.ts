@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAssetBundle, parseKeyedSources } from '../src/lib/workers/assetBundle';
+import { buildAssetBundle, unescapeSource } from '../src/lib/workers/assetBundle';
 
 const bytes = (s: string) => new TextEncoder().encode(s);
 const text = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -32,26 +32,23 @@ describe('buildAssetBundle', () => {
 	});
 });
 
-describe('parseKeyedSources', () => {
-	it('splits key and source and restores newlines', () => {
-		expect(parseKeyedSources('mermaid/abc.svg\tgraph LR\\nA-->B\n')).toEqual([
-			{ key: 'mermaid/abc.svg', source: 'graph LR\nA-->B' }
-		]);
+describe('unescapeSource', () => {
+	it('restores newlines', () => {
+		expect(unescapeSource('graph LR\\nA-->B')).toBe('graph LR\nA-->B');
 	});
 
 	it('restores literal backslashes without eating the next escape', () => {
 		// Wire `a\\nb` came from a source holding a backslash followed by `n`.
-		expect(parseKeyedSources('k\ta\\\\nb\n')[0].source).toBe('a\\nb');
+		expect(unescapeSource('a\\\\nb')).toBe('a\\nb');
 		// Wire `a\\\n b` came from a backslash followed by a real newline.
-		expect(parseKeyedSources('k\ta\\\\\\nb\n')[0].source).toBe('a\\\nb');
+		expect(unescapeSource('a\\\\\\nb')).toBe('a\\\nb');
 	});
 
 	it('leaves an unknown escape alone', () => {
-		expect(parseKeyedSources('k\ta\\tb\n')[0].source).toBe('a\\tb');
+		expect(unescapeSource('a\\tb')).toBe('a\\tb');
 	});
 
-	it('ignores blank lines', () => {
-		expect(parseKeyedSources('\n')).toEqual([]);
-		expect(parseKeyedSources('')).toEqual([]);
+	it('handles an empty source', () => {
+		expect(unescapeSource('')).toBe('');
 	});
 });
