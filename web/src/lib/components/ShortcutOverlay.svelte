@@ -69,7 +69,7 @@
           </dl>
         </section>
       {/each}
-      <section>
+      <section class="slash">
         <h4>Slash commands</h4>
         <p class="hint">Type on an empty line, then Enter.</p>
         <dl>
@@ -92,11 +92,16 @@
     width: min(40rem, calc(100vw - 2rem));
   }
 
+  /* `min-height: 0` first: the dialog is a column flexbox, and a flex item
+     will not shrink below its content without it, so the dialog would grow
+     past its own max-height instead of this scrolling. */
   .grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
     gap: var(--space-lg) var(--space-xl);
     margin: var(--space-md) 0 var(--space-lg);
+    min-height: 0;
+    overflow-y: auto;
   }
 
   h4 {
@@ -127,6 +132,18 @@
     margin: 0;
     font-size: 0.8125rem;
     color: var(--color-gray-700);
+  }
+
+  /* The odd section out. Left in the flow it takes one column and leaves the
+     other empty, so it spans instead and pairs its own entries up. */
+  @media (min-width: 34rem) {
+    .slash {
+      grid-column: 1 / -1;
+    }
+    .slash dl {
+      grid-template-columns: repeat(2, auto 1fr);
+      column-gap: var(--space-xl);
+    }
   }
 
   kbd {

@@ -107,6 +107,19 @@ test('the shortcut overlay opens on ? and closes on Escape', async ({ page }) =>
 	await page.locator('.preview-pane').click();
 	await page.keyboard.press('?');
 	await expect(page.locator('.shortcuts')).toBeVisible();
+
+	// `toBeVisible` alone passed while the overlay rendered as an unstyled
+	// block at the bottom of the page: its styles lived in another component's
+	// scoped block and never reached it. So assert it is actually a modal.
+	const backdrop = page.locator('.modal-backdrop');
+	await expect(backdrop).toHaveCSS('position', 'fixed');
+
+	const viewport = page.viewportSize()!;
+	const box = (await page.locator('.shortcuts').boundingBox())!;
+	expect(box.height).toBeLessThanOrEqual(viewport.height);
+	expect(box.y).toBeGreaterThanOrEqual(0);
+	expect(Math.abs(box.x + box.width / 2 - viewport.width / 2)).toBeLessThan(4);
+
 	await page.keyboard.press('Escape');
 	await expect(page.locator('.shortcuts')).toBeHidden();
 });

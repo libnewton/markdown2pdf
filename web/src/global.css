@@ -167,6 +167,56 @@ a {
 	border-radius: var(--radius-sm);
 }
 
+/* The dialog vocabulary. Global rather than scoped to whichever component
+   happens to own a dialog: Svelte rewrites a scoped selector to match only
+   that component's own elements, so a second component reusing the class
+   names silently gets no styling at all and renders as a bare block. */
+.modal-backdrop {
+	position: fixed;
+	inset: 0;
+	background: light-dark(rgba(15, 23, 42, 0.45), rgba(0, 0, 0, 0.66));
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 2000;
+}
+
+.modal-dialog {
+	background: var(--color-white);
+	border: 1px solid var(--color-gray-200);
+	border-radius: var(--radius-md);
+	padding: var(--space-lg) var(--space-lg) var(--space-md);
+	width: min(420px, calc(100vw - var(--space-xl)));
+	/* A dialog never outgrows the screen; whatever inside it is long takes
+	   the overflow instead. */
+	max-height: calc(100dvh - 2 * var(--space-xl));
+	box-shadow: var(--shadow-md);
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.modal-title {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--color-gray-900);
+}
+
+.modal-help {
+	margin: 0;
+	font-size: 0.8125rem;
+	color: var(--color-gray-600);
+	line-height: 1.45;
+}
+
+.modal-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--space-sm);
+	margin-top: var(--space-xs);
+}
+
 :focus-visible {
 	outline: 2px solid var(--color-gray-900);
 	outline-offset: 2px;
