@@ -3,8 +3,8 @@
   import { page } from '$app/state'
   import { replaceState } from '$app/navigation'
   import { onMount } from 'svelte'
-  import { buildHeadElement, buildPageElement } from '$lib/typst/svg-utils'
-  import type { SvgDocument, SvgPage } from '$lib/typst/svg-split'
+  import { pageSlots } from '$lib/preview/page-slots'
+  import type { SvgDocument } from '$lib/typst/svg-split'
   import { getSharedTypstWorkerClient, TypstWorkerClient } from '$lib/workers/typstClient'
   import { getMarkdownImportFile, getImageDropFile } from '$lib/utils/image-utils'
   import { PAGEBREAK_TOKEN } from '$lib/pagebreak'
@@ -539,91 +539,21 @@
     return () => window.clearTimeout(timer)
   })
 
-  // Only the pages near the viewport become DOM; the rest stay as markup
-  // behind correctly-sized placeholders and mount on scroll. That keeps the
-  // per-compile cost proportional to what is on screen, not to the document
-  // length — a 40-page document is otherwise ~240k nodes to rebuild.
-  let pageSlots: HTMLDivElement[] = []
-  let pageMarkup: SvgPage[] = []
-  const visibleSlots = new Set<number>()
-  let headEl: SVGSVGElement | null = null
-  let pageObserver: IntersectionObserver | null = null
-
-  function mountPage(index: number) {
-    const slot = pageSlots[index]
-    const page = pageMarkup[index]
-    if (!slot || !page) return
-    slot.replaceChildren(buildPageElement(page))
-  }
-
-  function ensureObserver(container: HTMLDivElement): IntersectionObserver {
-    if (pageObserver) return pageObserver
-    pageObserver = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const index = Number((entry.target as HTMLElement).dataset.page)
-          if (entry.isIntersecting) {
-            visibleSlots.add(index)
-            if (!entry.target.firstChild) mountPage(index)
-          } else {
-            visibleSlots.delete(index)
-            entry.target.replaceChildren()
-          }
-        }
-      },
-      // Mount a screenful ahead so scrolling finds pages already rendered.
-      { root: container, rootMargin: '100% 0px' },
-    )
-    return pageObserver
-  }
-
-  function syncSlots(container: HTMLDivElement, pages: SvgPage[]) {
-    const observer = ensureObserver(container)
-
-    while (pageSlots.length > pages.length) {
-      const slot = pageSlots.pop()!
-      observer.unobserve(slot)
-      visibleSlots.delete(pageSlots.length)
-      slot.remove()
-    }
-
-    for (let i = 0; i < pages.length; i++) {
-      let slot = pageSlots[i]
-      if (!slot) {
-        slot = document.createElement('div')
-        slot.className = 'page-slot'
-        slot.dataset.page = String(i)
-        container.appendChild(slot)
-        pageSlots[i] = slot
-        observer.observe(slot)
-      }
-      // The placeholder keeps the page's footprint, so scroll position and
-      // document height do not jump while pages are unmounted.
-      slot.style.aspectRatio = `${pages[i].width} / ${pages[i].height}`
-    }
-  }
+  let slots: ReturnType<typeof pageSlots> | null = null
 
   $effect(() => {
-    if (!browser) return
-    const doc = previewDoc
-    const container = svgContainerEl
-    if (!doc || !container) return
-
-    pageMarkup = doc.pages
-    svgPageCount = doc.pages.length
-
-    const nextHead = buildHeadElement(doc.head)
-    if (headEl?.parentNode === container) {
-      container.replaceChild(nextHead, headEl)
-    } else {
-      container.replaceChildren(nextHead)
-      pageSlots = []
-      visibleSlots.clear()
+    if (!browser || !svgContainerEl) return
+    slots = pageSlots(svgContainerEl)
+    return () => {
+      slots?.destroy()
+      slots = null
     }
-    headEl = nextHead
+  })
 
-    syncSlots(container, doc.pages)
-    for (const index of visibleSlots) mountPage(index)
+  $effect(() => {
+    if (!previewDoc || !slots) return
+    svgPageCount = previewDoc.pages.length
+    slots.show(previewDoc)
   })
 
   // All Markdown processing happens inside the Typst compile (the md2pdf
