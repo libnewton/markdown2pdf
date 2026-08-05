@@ -309,8 +309,8 @@ script cannot find its own root. A `<script>` that arrives via `innerHTML` is
 inert, so `HtmlPreview` re-executes it once at document level.
 
 The outline drawer opens with a checkbox and needs no script at all;
-`toc: false` in the frontmatter drops the button and drawer entirely, without
-touching an explicit `[toc]` in the body.
+`hide-toc-button: true` in the frontmatter drops the button and drawer
+entirely, without touching an explicit `[toc]` in the body.
 
 ### 10.4 What HTML does not do
 

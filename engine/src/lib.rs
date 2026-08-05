@@ -1146,10 +1146,9 @@ impl<'a> Ctx<'a> {
             NodeValue::Code(c) => render_inline_code(&c.literal),
             NodeValue::Math(m) => render_math(m.display_math, &m.literal, self.visual_alignment()),
             NodeValue::HtmlInline(h) => match h.trim().to_ascii_lowercase().as_str() {
-                "<u>" => "#underline[".to_string(),
-                "</u>" => "]".to_string(),
                 // Table cells hold inline content only, so `<br>` is the one
-                // way to get a second line into one.
+                // way to get a second line into one. It is also the only raw
+                // tag either renderer honours; everything else is text.
                 "<br>" | "<br/>" | "<br />" => "#linebreak()".to_string(),
                 _ => esc_text(&h),
             },

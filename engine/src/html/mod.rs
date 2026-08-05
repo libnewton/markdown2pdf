@@ -118,7 +118,11 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     main.push_str(&doc.footnote_section());
     main.push_str(&bibliography(&bib_src, &doc));
 
-    let outline = toc(&doc.headings, doc.german);
+    let outline = if fm.flag("hide-toc-button") {
+        String::new()
+    } else {
+        toc(&doc.headings, doc.german)
+    };
     let main = main.replace(TOC_SLOT, &inline_toc(&doc.headings));
 
     let lang = fm.first("lang").unwrap_or(if doc.german { "de" } else { "en" });
@@ -768,8 +772,6 @@ fn inline<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
         NodeValue::Code(c) => format!("<code>{}</code>", esc_text(&c.literal)),
         NodeValue::Math(m) => doc.math.render(m.display_math, &m.literal),
         NodeValue::HtmlInline(h) => match h.trim().to_ascii_lowercase().as_str() {
-            "<u>" => "<u>".to_string(),
-            "</u>" => "</u>".to_string(),
             "<br>" | "<br/>" | "<br />" => "<br>".to_string(),
             _ => esc_text(&h),
         },
@@ -1001,6 +1003,13 @@ impl Frontmatter {
 
     fn list(&self, key: &str) -> Vec<String> {
         self.0.get(key).cloned().unwrap_or_default()
+    }
+
+    /// A yes/no frontmatter key. YAML's own spelling of true, minus the
+    /// ambiguous ones — a bare `hide-toc-button:` is not a request to hide it.
+    fn flag(&self, key: &str) -> bool {
+        self.first(key)
+            .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "yes" | "on" | "1"))
     }
 }
 

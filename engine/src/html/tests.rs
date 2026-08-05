@@ -877,10 +877,39 @@ fn raw_html_blocks_are_shown_not_executed() {
     assert!(out.contains("&lt;div onclick=\"x\"&gt;raw&lt;/div&gt;"), "{out}");
 }
 
+/// `<br>` is the whole raw-HTML allowance. It earns its place because a table
+/// cell holds inline content only, so there is no Markdown way to get a second
+/// line into one; `__underline__` already covers what `<u>` was for.
 #[test]
-fn the_narrow_inline_html_passthrough_still_works() {
-    let out = body("a <u>b</u> c<br>d");
-    assert!(out.contains("a <u>b</u> c<br>d"), "{out}");
+fn br_is_the_only_inline_tag_that_passes_through() {
+    assert!(body("a<br>b<br/>c<br />d").contains("a<br>b<br>c<br>d"));
+    let u = body("a <u>b</u> c");
+    assert!(u.contains("a &lt;u&gt;b&lt;/u&gt; c"), "{u}");
+    // Near-misses are text too, not a second spelling of the tag.
+    for shape in ["<u foo=bar>x</u>", "< u>x</ u>", "<u/>x", "<break>x"] {
+        let out = body(shape);
+        assert!(out.contains("&lt;"), "{shape} was not escaped:\n{out}");
+    }
+    assert!(body("__still underlined__").contains("<u>still underlined</u>"));
+}
+
+#[test]
+fn hide_toc_button_drops_the_drawer_but_not_an_inline_toc() {
+    let plain = html("## a\n\n## b");
+    assert!(plain.contains("md2pdf-toc-btn"), "{plain}");
+
+    let hidden = html("---\nhide-toc-button: true\n---\n\n## a\n\n## b");
+    assert!(!hidden.contains("md2pdf-toc-btn"), "{hidden}");
+    assert!(!hidden.contains("md2pdf-toc-state"), "{hidden}");
+    // An explicit `[toc]` is a different thing and is left alone.
+    let both = html("---\nhide-toc-button: yes\n---\n\n[toc]\n\n## a\n\n## b");
+    assert!(!both.contains("md2pdf-toc-btn"), "{both}");
+    assert!(both.contains("md2pdf-toc-inline"), "{both}");
+    // Anything that is not an affirmative leaves the button alone.
+    for value in ["false", "no", "", "maybe"] {
+        let out = html(&format!("---\nhide-toc-button: {value}\n---\n\n## a\n\n## b"));
+        assert!(out.contains("md2pdf-toc-btn"), "{value:?} hid the button:\n{out}");
+    }
 }
 
 #[test]

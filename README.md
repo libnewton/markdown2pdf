@@ -97,7 +97,7 @@ requests never carry credentials.
 
 Core CommonMark + GFM (tables incl. `+` column-width markers, task lists,
 strikethrough, footnotes, autolinks); `==highlight==`, super/subscript,
-underline; language-aware admonitions (`:::info` …, including `caution` and
+`__underline__`; language-aware admonitions (`:::info` …, including `caution` and
 `important`), spoilers (`+++++`), `:::row/center`
 layout; math via `mitex`; Mermaid via `mmdr`; HackMD `=WxH` image sizing;
 remote images; Twemoji emoji (unicode and `:shortcodes:`); YAML frontmatter
@@ -107,7 +107,11 @@ remote images; Twemoji emoji (unicode and `:shortcodes:`); YAML frontmatter
 cover page (`cover-*`); opt-in inline BibTeX citations (`bibliography: inline`,
 `[@key]`, blue citation numerals, and `bibliography-style`, default `ieee`);
 DIN 5008 letter mode (`letter-*` fields);
-`[toc]` → `#outline()`.
+`[toc]` → `#outline()`; `hide-toc-button: true` to drop the HTML outline
+drawer without touching an explicit `[toc]`.
+
+`<br>` is the only raw HTML tag either renderer honours — it is the one way to
+break a line inside a table cell. Everything else is shown as text.
 
 Everything above renders in both targets. `tests/html-edge.md` is the
 adversarial fixture for the HTML renderer (injection attempts, broken input,

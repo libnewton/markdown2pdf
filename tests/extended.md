@@ -21,7 +21,7 @@ bibliography-style: ieee
 
 md2pdf turns Markdown into a typeset PDF, 100% in your browser. This document is both a showcase and a reference: the first half demonstrates every syntax the renderer supports, the second half lists every option you can set.
 
-==This sentence is highlighted== to draw the eye. **Bold**, _italic_, **_both at once_**, ~~strikethrough~~, `inline code`, __underline__ (the HTML <u>u tag</u> works too), super^script^ and sub~script~ all work inline. A backslash escapes any character: \*not italic\*. Footnotes too[^demo].
+==This sentence is highlighted== to draw the eye. **Bold**, _italic_, **_both at once_**, ~~strikethrough~~, `inline code`, __underline__, super^script^ and sub~script~ all work inline. A backslash escapes any character: \*not italic\*. Footnotes too[^demo].
 
 [^demo]: Footnotes render as numbered notes at the foot of the page.
 
@@ -311,6 +311,7 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | `authors` or `author`                        | one name or a list                            | none                |
 | `date`                                       | text or a YAML date                           | none                |
 | `lang`                                       | `en`, `de`, `de-AT`, …                        | `en`                |
+| `hide-toc-button`                            | `true` to drop the HTML outline drawer        | `false`             |
 | `pageNumbers` or `page-numbers`              | `true`, `false`, `"1"`, `"1/1"`, or a template | `true`              |
 | `header-left` `header-center` `header-right` | text or an image                              | empty               |
 | `header-height`                              | positive `pt`, `mm`, `cm`, or `in` length     | automatic           |
