@@ -10,7 +10,6 @@
     theme,
     onnavigate,
     ontasktoggle,
-    onscrolled,
   }: {
     html?: string
     theme: 'light' | 'dark'
@@ -18,8 +17,6 @@
     onnavigate?: (id: string) => void
     /** A checkbox the reader ticked, by the source line that wrote it. */
     ontasktoggle?: (line: number, checked: boolean) => void
-    /** The pane was scrolled, so the editor can follow. */
-    onscrolled?: () => void
   } = $props()
 
   let host = $state<HTMLDivElement | null>(null)
@@ -122,42 +119,6 @@
     if (toggle instanceof HTMLInputElement) toggle.checked = !toggle.checked
   }
 
-  /** Every block that knows its source line, in document order. */
-  function anchors(): { line: number; el: HTMLElement }[] {
-    return [...(root?.querySelectorAll<HTMLElement>('[data-md-line]') ?? [])]
-      .filter((el) => el.tagName !== 'INPUT')
-      .map((el) => ({ line: Number(el.dataset.mdLine), el }))
-  }
-
-  /** Bring the block covering `line` to the top of the pane. */
-  export function scrollToLine(line: number) {
-    const all = anchors()
-    // The last block at or before the line — the one it is inside.
-    let best: HTMLElement | undefined
-    for (const a of all) {
-      if (a.line > line) break
-      best = a.el
-    }
-    ;(best ?? all[0]?.el)?.scrollIntoView({ block: 'start' })
-  }
-
-  /** The source line of the topmost block currently on screen. */
-  export function lineAtTop(): number | null {
-    const pane = host?.parentElement
-    if (!pane) return null
-    const top = pane.getBoundingClientRect().top
-    let best: number | null = null
-    for (const { line, el } of anchors()) {
-      // A little tolerance, so the block straddling the edge counts as
-      // the one you are looking at.
-      if (el.getBoundingClientRect().bottom >= top + 4) {
-        best = line
-        break
-      }
-    }
-    return best
-  }
-
   function onChange(e: Event) {
     const box = e.composedPath()[0]
     if (!(box instanceof HTMLInputElement) || !box.dataset.mdLine) return
@@ -174,15 +135,6 @@
       button.textContent = was
     }, 1200)
   }
-
-  // The scroller is the pane around the host, not the shadow root.
-  $effect(() => {
-    const pane = host?.parentElement
-    if (!pane || !onscrolled) return
-    const notify = () => onscrolled()
-    pane.addEventListener('scroll', notify, { passive: true })
-    return () => pane.removeEventListener('scroll', notify)
-  })
 
   // `data-theme` on the host wins over `prefers-color-scheme` inside it.
   $effect(() => {

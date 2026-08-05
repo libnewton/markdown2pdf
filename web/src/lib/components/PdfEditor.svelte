@@ -195,23 +195,6 @@
     replaceState(url.href, page.state)
   }
 
-  // Scroll sync, for the Web preview only — the paged preview is a Typst
-  // render with nothing tying a page back to a line.
-  //
-  // Each side drives the other, so a flag suppresses the echo. It clears on
-  // the next frame rather than after a timeout, because that is exactly how
-  // long the scroll it caused takes to arrive.
-  let syncing = false
-
-  function sync(move: () => void) {
-    if (syncing || previewMode !== 'document' || !showEditor || !showPreview) return
-    syncing = true
-    move()
-    requestAnimationFrame(() => {
-      syncing = false
-    })
-  }
-
   // A `#heading` the page was opened with, applied once the document it names
   // has actually been rendered.
   let pendingHash = ''
@@ -1173,11 +1156,6 @@
         {readOnly}
         onImageSaved={handleImageSaved}
         onNewDocument={() => void documentMenu?.newBlank()}
-        onScrolled={() =>
-          sync(() => {
-            const line = editorPane?.topLine()
-            if (line) htmlPreview?.scrollToLine(line)
-          })}
       />
     </section>
 
@@ -1307,11 +1285,6 @@
               theme={settingsStore.theme}
               onnavigate={setHash}
               ontasktoggle={(line, checked) => editorPane?.setTaskMarker(line, checked)}
-              onscrolled={() =>
-                sync(() => {
-                  const line = htmlPreview?.lineAtTop()
-                  if (line) editorPane?.scrollToLine(line)
-                })}
             />
           </div>
         {/if}
@@ -1937,45 +1910,6 @@
   .menu-item:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: light-dark(rgba(15, 23, 42, 0.45), rgba(0, 0, 0, 0.66));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-  }
-  .modal-dialog {
-    background: var(--color-white);
-    border: 1px solid var(--color-gray-200);
-    border-radius: var(--radius-md);
-    padding: var(--space-lg) var(--space-lg) var(--space-md);
-    width: min(420px, calc(100vw - var(--space-xl)));
-    box-shadow: var(--shadow-md);
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  .modal-title {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--color-gray-900);
-  }
-  .modal-help {
-    margin: 0;
-    font-size: 0.8125rem;
-    color: var(--color-gray-600);
-    line-height: 1.45;
-  }
-  .modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--space-sm);
-    margin-top: var(--space-xs);
   }
 
   .mobile-tabs {

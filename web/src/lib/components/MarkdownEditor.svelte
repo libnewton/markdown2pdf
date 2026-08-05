@@ -16,8 +16,6 @@
     readOnly?: boolean
     /** `/new` cannot be a snippet — it has to reach the document store. */
     onNewDocument?: () => void
-    /** The editor was scrolled, so the preview can follow. */
-    onScrolled?: () => void
   }
 
   let {
@@ -25,7 +23,6 @@
     placeholder = '',
     readOnly = false,
     onNewDocument,
-    onScrolled,
   }: Props = $props()
 
   let editorView = $state<EditorView | null>(null)
@@ -104,24 +101,6 @@
     // not pull the caret into a pane you may not be looking at.
     flushPendingEdit()
     return true
-  }
-
-  /** The 1-based source line at the top of the visible area. */
-  export function topLine(): number | null {
-    if (!editorView) return null
-    const top = editorView.scrollDOM.getBoundingClientRect().top
-    const pos = editorView.posAtCoords({ x: 0, y: top + 1 }, false)
-    return editorView.state.doc.lineAt(pos).number
-  }
-
-  /** Put `line` at the top of the visible area. */
-  export function scrollToLine(line: number) {
-    if (!editorView) return
-    const clamped = Math.min(Math.max(line, 1), editorView.state.doc.lines)
-    const { from } = editorView.state.doc.line(clamped)
-    editorView.dispatch({
-      effects: EditorView.scrollIntoView(from, { y: 'start' }),
-    })
   }
 
   /** Replace the selection, then place the caret where the helper asked. */
@@ -214,12 +193,8 @@
       parent: editorContainerEl,
     })
 
-    const notify = () => onScrolled?.()
-    editorView.scrollDOM.addEventListener('scroll', notify, { passive: true })
-
     return () => {
       if (emitTimer !== null) clearTimeout(emitTimer)
-      editorView?.scrollDOM.removeEventListener('scroll', notify)
       editorView?.destroy()
     }
   })

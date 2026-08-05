@@ -80,8 +80,10 @@ honest about it:
 - Pages, the PDF and the export keep inert checkboxes. A printed checkbox is
   not clickable, and pretending otherwise would be the lie.
 
-The same line origins drive editor↔preview scroll sync, which is the other
-reason threading them through the passes was worth the churn.
+Editor↔preview scroll sync was built on the same line origins and then
+removed: following the reader's scroll in the other pane fought them more
+often than it helped. The origins stay because the checkbox write needs them,
+and because a better attempt at sync would not have to rebuild them.
 
 ## Trust boundaries
 

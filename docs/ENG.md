@@ -115,8 +115,13 @@ invented — and `render_source` rebases its own origins into original-document
 coordinates once, up front.
 
 This is what makes `data-md-line` mean "the line the author wrote" rather than
-"the line after preprocessing", and it is what task checkboxes and scroll sync
-both stand on. **The Typst renderer ignores these fields entirely.**
+"the line after preprocessing", and it is what the task-checkbox write stands
+on. **The Typst renderer ignores these fields entirely.**
+
+The engine still tags every top-level block, not only task items. That fed
+editor↔preview scroll sync, which has been removed; the attribute costs a few
+bytes in the preview, never appears in a download, and keeps the door open if
+sync is attempted again.
 
 ## The worker
 

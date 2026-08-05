@@ -14,7 +14,6 @@
     readOnly?: boolean
     onImageSaved?: (path: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string) => void
     onNewDocument?: () => void
-    onScrolled?: () => void
   }
 
   let {
@@ -24,7 +23,6 @@
     readOnly = false,
     onImageSaved,
     onNewDocument,
-    onScrolled,
   }: Props = $props()
 
   let markdownEditor = $state<MarkdownEditor | null>(null)
@@ -40,14 +38,6 @@
 
   export function setTaskMarker(line: number, checked: boolean): boolean {
     return markdownEditor?.setTaskMarker(line, checked) ?? false
-  }
-
-  export function topLine(): number | null {
-    return markdownEditor?.topLine() ?? null
-  }
-
-  export function scrollToLine(line: number): void {
-    markdownEditor?.scrollToLine(line)
   }
 
   export function insertMarkdownSnippet(snippet: string): void {
@@ -85,14 +75,7 @@
   }
 </script>
 
-<MarkdownEditor
-  bind:this={markdownEditor}
-  bind:markdown
-  {placeholder}
-  {readOnly}
-  {onNewDocument}
-  {onScrolled}
-/>
+<MarkdownEditor bind:this={markdownEditor} bind:markdown {placeholder} {readOnly} {onNewDocument} />
 {#if errorMessage}
   <div class="error-bar">{errorMessage}</div>
 {/if}
