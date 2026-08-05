@@ -90,7 +90,11 @@
 
     suppressEditorUpdate = true
     editorView.dispatch({
-      changes: { from: l.from + marker.at, to: l.from + marker.at + 1, insert: checked ? 'x' : ' ' },
+      changes: {
+        from: l.from + marker.at,
+        to: l.from + marker.at + 1,
+        insert: checked ? 'x' : ' ',
+      },
       // One toggle, one undo step: without this two quick ticks merge.
       annotations: isolateHistory.of('full'),
     })
@@ -247,7 +251,7 @@
     flex: 1;
     height: 100%;
     overflow: hidden;
-    background-color: #282c34;
+    background-color: var(--editor-bg);
     /* Isolate CodeMirror's internal layout from the rest of the page so
        typing doesn't invalidate layout/paint on the preview pane. */
     contain: strict;

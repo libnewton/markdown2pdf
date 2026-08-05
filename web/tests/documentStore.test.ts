@@ -58,7 +58,6 @@ describe('documentStore persistence guards', () => {
 	it('does not overwrite a restored template document before transition finishes', async () => {
 		const firstLoad = await loadStoreWithMock();
 		const original = await firstLoad.storeModule.documentStore.createDocument(
-			'pdf',
 			'# Template content',
 			undefined,
 			'template',
@@ -105,7 +104,6 @@ describe('documentStore persistence guards', () => {
 	it('allows autosave again after transition finishes', async () => {
 		const { documentsMock, storeModule } = await loadStoreWithMock();
 		const doc = await storeModule.documentStore.createDocument(
-			'pdf',
 			'# Slide Title',
 			undefined,
 			'template',
@@ -122,11 +120,13 @@ describe('documentStore persistence guards', () => {
 
 	it('keeps assets a superseded autosave was about to write', async () => {
 		const { documentsMock, storeModule } = await loadStoreWithMock();
-		const doc = await storeModule.documentStore.createDocument('pdf', '', undefined, 'blank');
+		const doc = await storeModule.documentStore.createDocument('', undefined, 'blank');
 		storeModule.documentStore.finishDocumentTransition();
 
 		vi.useFakeTimers();
-		const assets = { 'images/cover.png': { bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png' } };
+		const assets = {
+			'images/cover.png': { bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png' },
+		};
 		storeModule.documentStore.autoSave(doc.id, '# With image', assets);
 		// A keystroke before the debounce elapses — it carries no assets.
 		storeModule.documentStore.autoSave(doc.id, '# With image!');
@@ -139,7 +139,6 @@ describe('documentStore persistence guards', () => {
 	it('flushes pending saves before creating another document', async () => {
 		const { documentsMock, storeModule } = await loadStoreWithMock();
 		const first = await storeModule.documentStore.createDocument(
-			'pdf',
 			'# First Doc',
 			undefined,
 			'template',
@@ -151,7 +150,6 @@ describe('documentStore persistence guards', () => {
 		storeModule.documentStore.autoSave(first.id, '# First Doc Updated');
 
 		const second = await storeModule.documentStore.createDocument(
-			'pdf',
 			'# Second Doc',
 			undefined,
 			'template',

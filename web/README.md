@@ -42,6 +42,8 @@ npm run dev          # dev server
 npm run build        # static build → build/
 npm run check        # type-check
 npm test             # unit tests
+npm run test:e2e     # browser tests (Playwright)
+npm run format       # prettier
 ```
 
 The `vite.config.ts` plugins copy the `md2pdf` Typst package (`../package/`)

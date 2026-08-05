@@ -23,6 +23,6 @@ export function taskMarker(lineText: string): TaskMarker | null {
 	if (!match) return null;
 	return {
 		at: match[0].length - 2,
-		checked: match[1] !== ' '
+		checked: match[1] !== ' ',
 	};
 }

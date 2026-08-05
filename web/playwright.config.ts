@@ -17,13 +17,13 @@ export default defineConfig({
 		baseURL: 'http://localhost:4173',
 		...devices['Desktop Chrome'],
 		launchOptions: {
-			executablePath: process.env.PLAYWRIGHT_CHROMIUM ?? undefined
-		}
+			executablePath: process.env.PLAYWRIGHT_CHROMIUM ?? undefined,
+		},
 	},
 	webServer: {
 		command: 'npm run dev -- --port 4173',
 		url: 'http://localhost:4173',
 		reuseExistingServer: !process.env.CI,
-		timeout: 120_000
-	}
+		timeout: 120_000,
+	},
 });

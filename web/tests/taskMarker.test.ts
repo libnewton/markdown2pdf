@@ -39,7 +39,7 @@ describe('taskMarker', () => {
 			'- plain item',
 			'',
 			'[ ] bare',
-			'--- [ ] rule'
+			'--- [ ] rule',
 		]) {
 			expect(taskMarker(line), line).toBeNull();
 		}

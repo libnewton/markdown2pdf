@@ -3,22 +3,16 @@
   import type { SavedDocument, SavedDocumentAsset } from '$lib/storage/documents'
 
   let {
-    mode,
     currentContent,
     documentAssets,
     onDocumentLoad,
   }: {
-    mode: 'pdf'
     currentContent: string
     documentAssets?: Record<string, SavedDocumentAsset>
     onDocumentLoad: (doc: SavedDocument) => void
   } = $props()
 
   let isOpen = $state(false)
-
-  const currentModeDocs = $derived(
-    documentStore.recentDocuments.filter((d) => d.mode === mode),
-  )
 
   const currentDoc = $derived(
     documentStore.recentDocuments.find((d) => d.id === documentStore.currentDocId),
@@ -55,7 +49,7 @@
   /** Also reachable from Ctrl/Cmd+Alt+N and from `/new` in the editor. */
   export async function newBlank() {
     await saveCurrentIfNeeded()
-    const doc = await documentStore.createDocument(mode, '', undefined, 'blank')
+    const doc = await documentStore.createDocument('', undefined, 'blank')
     onDocumentLoad(doc)
     close()
   }
@@ -71,7 +65,7 @@
     await documentStore.deleteDocument(doc.id)
     // Deleting what is on screen has to leave something on screen.
     if (wasCurrent) {
-      const remaining = currentModeDocs.filter((d) => d.id !== doc.id)
+      const remaining = documentStore.recentDocuments.filter((d) => d.id !== doc.id)
       if (remaining.length > 0) {
         await openDocument(remaining[0])
       } else {
@@ -85,9 +79,7 @@
     if (isOpen) close()
   }
 
-  const statusText = $derived(
-    documentStore.saveStatus === 'saving' ? 'Saving...' : '',
-  )
+  const statusText = $derived(documentStore.saveStatus === 'saving' ? 'Saving...' : '')
 </script>
 
 <svelte:window onclick={handleWindowClick} />
@@ -106,16 +98,22 @@
       <span class="doc-status">{statusText}</span>
     {/if}
     <svg class="chevron" class:open={isOpen} width="12" height="12" viewBox="0 0 12 12">
-      <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+      <path
+        d="M3 4.5L6 7.5L9 4.5"
+        stroke="currentColor"
+        stroke-width="1.5"
+        fill="none"
+        stroke-linecap="round"
+      />
     </svg>
   </button>
 
   {#if isOpen}
     <div class="doc-popover">
-      {#if currentModeDocs.length > 0}
+      {#if documentStore.recentDocuments.length > 0}
         <div class="doc-section-label">Local Documents</div>
         <div class="doc-list">
-          {#each currentModeDocs.slice(0, 10) as doc}
+          {#each documentStore.recentDocuments.slice(0, 10) as doc}
             <div
               class="doc-item"
               class:active={doc.id === documentStore.currentDocId}
@@ -128,20 +126,16 @@
             >
               <span class="doc-item-name">{doc.name}</span>
               <span class="doc-item-time">{relativeTime(doc.updatedAt)}</span>
-              <button
-                class="doc-item-delete"
-                onclick={(e) => handleDelete(e, doc)}
-                title="Delete"
-              >&times;</button>
+              <button class="doc-item-delete" onclick={(e) => handleDelete(e, doc)} title="Delete"
+                >&times;</button
+              >
             </div>
           {/each}
         </div>
         <div class="doc-divider"></div>
       {/if}
 
-      <button class="doc-item doc-new" onclick={newBlank}>
-        + New blank document
-      </button>
+      <button class="doc-item doc-new" onclick={newBlank}> + New blank document </button>
     </div>
   {/if}
 </div>

@@ -15,7 +15,7 @@ describe('page SVG scrubbing', () => {
 	it('drops event-handler attributes wherever they sit', () => {
 		const el = page(
 			'<g onload="alert(1)"><rect onclick="alert(1)" fill="red"/>' +
-				'<text ONMOUSEOVER="alert(1)">x</text></g>'
+				'<text ONMOUSEOVER="alert(1)">x</text></g>',
 		);
 		expect(el.outerHTML).not.toMatch(/on[a-z]+=/i);
 		// Everything that was not executable survives untouched.
@@ -28,7 +28,7 @@ describe('page SVG scrubbing', () => {
 			'<a href="javascript:alert(1)">a</a>' +
 				'<a xlink:href="  JavaScript:alert(1)">b</a>' +
 				'<a href="https://example.com/ok">c</a>' +
-				'<use href="#glyph-1"/>'
+				'<use href="#glyph-1"/>',
 		);
 		expect(el.outerHTML.toLowerCase()).not.toContain('javascript:');
 		expect(el.outerHTML).toContain('https://example.com/ok');
@@ -39,7 +39,7 @@ describe('page SVG scrubbing', () => {
 		const el = page(
 			'<script>alert(1)</script>' +
 				'<foreignObject><div onclick="alert(1)">PAYLOAD</div></foreignObject>' +
-				'<g id="keep"/>'
+				'<g id="keep"/>',
 		);
 		expect(el.querySelector('script')).toBeNull();
 		expect(el.querySelector('foreignObject')).toBeNull();

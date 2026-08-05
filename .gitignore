@@ -40,4 +40,5 @@ __pycache__/
 
 # Playwright
 web/test-results
+test-results
 web/playwright-report

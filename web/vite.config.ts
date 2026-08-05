@@ -9,7 +9,7 @@ import {
 	readdirSync,
 	readFileSync,
 	rmSync,
-	writeFileSync
+	writeFileSync,
 } from 'node:fs';
 // @ts-ignore
 import { dirname, join } from 'node:path';
@@ -61,9 +61,9 @@ function copyMd2pdfPackage(): Plugin {
 			walk(src, '');
 			writeFileSync(join(dest, 'manifest.json'), JSON.stringify(manifest));
 			this.info(
-				`copied md2pdf package (${manifest.length} core + ${svgCount} twemoji) → static/md2pdf`
+				`copied md2pdf package (${manifest.length} core + ${svgCount} twemoji) → static/md2pdf`,
 			);
-		}
+		},
 	};
 }
 
@@ -79,7 +79,7 @@ const CJK_FONTS: Record<string, string> = {
 	'NotoSansKR-Regular.otf':
 		'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf',
 	'NotoSansKR-Bold.otf':
-		'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/KR/NotoSansKR-Bold.otf'
+		'https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/KR/NotoSansKR-Bold.otf',
 };
 
 // Copy the fonts md2pdf needs at runtime from the repo's shared `fonts/` dir
@@ -124,7 +124,7 @@ function bundleFonts(): Plugin {
 				}
 			}
 			this.info(`copied ${count} font(s) → static/fonts`);
-		}
+		},
 	};
 }
 
@@ -143,7 +143,7 @@ export default defineConfig({
 				// documents that need them.
 				globIgnores: ['**/md2pdf/twemoji/**', '**/fonts/NotoSans[SK][CR]-*'],
 				// engine.wasm and the Typst compiler are past the 2 MB default.
-				maximumFileSizeToCacheInBytes: 8 * 1024 * 1024
+				maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
 			},
 			manifest: {
 				name: 'md2pdf',
@@ -154,34 +154,34 @@ export default defineConfig({
 					{
 						src: 'favicon-16x16.png',
 						sizes: '16x16',
-						type: 'image/png'
+						type: 'image/png',
 					},
 					{
 						src: 'favicon-32x32.png',
 						sizes: '32x32',
-						type: 'image/png'
+						type: 'image/png',
 					},
 					{
 						src: 'logo.png',
 						sizes: '183x100',
-						type: 'image/png'
+						type: 'image/png',
 					},
 					{
 						src: 'apple-touch-icon.png',
 						sizes: '180x180',
-						type: 'image/png'
+						type: 'image/png',
 					},
 					{
 						src: 'square.png',
 						sizes: '240x240',
 						type: 'image/png',
-						purpose: 'any maskable'
-					}
-				]
-			}
-		})
+						purpose: 'any maskable',
+					},
+				],
+			},
+		}),
 	],
 	worker: {
-		format: 'es'
-	}
+		format: 'es',
+	},
 });

@@ -100,7 +100,7 @@ export class TypstWorkerClient {
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>> = {},
 		standalone = false,
-		editable = false
+		editable = false,
 	): Promise<{ html: string; diagnostics: string[] }> {
 		const id = this.#nextId();
 		const request: HtmlRequest = { type: 'html', id, markdown, images, standalone, editable };
@@ -123,22 +123,22 @@ export class TypstWorkerClient {
 
 	compilePdf(
 		markdown: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {}
+		images: Record<string, Uint8Array<ArrayBuffer>> = {},
 	): Promise<{ pdf: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
 		return this.#compile(markdown, images, 'pdf').then((r) => ({
 			pdf: r.pdf!,
-			diagnostics: r.diagnostics
+			diagnostics: r.diagnostics,
 		}));
 	}
 
 	/** Compile and render the preview: page markup, ready to display. */
 	compilePreview(
 		markdown: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {}
+		images: Record<string, Uint8Array<ArrayBuffer>> = {},
 	): Promise<{ preview: SvgDocument; diagnostics: string[] }> {
 		return this.#compile(markdown, images, 'preview').then((r) => ({
 			preview: r.preview!,
-			diagnostics: r.diagnostics
+			diagnostics: r.diagnostics,
 		}));
 	}
 
@@ -151,7 +151,7 @@ export class TypstWorkerClient {
 	#compile(
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>>,
-		format: 'pdf' | 'preview'
+		format: 'pdf' | 'preview',
 	): Promise<CompileResult> {
 		const id = this.#nextId();
 		const request: CompileRequest = { type: 'compile', id, markdown, images, format };

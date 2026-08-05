@@ -18,13 +18,15 @@ test('a Chinese document renders in both previews', async ({ page }) => {
 	await page.getByRole('button', { name: 'Web', exact: true }).click();
 	await expect
 		.poll(() =>
-			page.evaluate(() => document.querySelector('.html-preview')?.shadowRoot?.textContent ?? '')
+			page.evaluate(() => document.querySelector('.html-preview')?.shadowRoot?.textContent ?? ''),
 		)
 		.toContain('你好，世界');
 
 	// The paged preview is the one that needed the font.
 	await page.getByRole('button', { name: 'Pages', exact: true }).click();
-	await expect.poll(() => page.locator('.page-slot').count(), { timeout: 80_000 }).toBeGreaterThan(0);
+	await expect
+		.poll(() => page.locator('.page-slot').count(), { timeout: 80_000 })
+		.toBeGreaterThan(0);
 	await expect(page.locator('.error-badge')).toHaveCount(0);
 
 	// Typst emits the glyphs it actually set, so their presence in the SVG is

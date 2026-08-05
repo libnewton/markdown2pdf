@@ -5,7 +5,7 @@ import {
 	deleteDocument as deleteDocFromDB,
 	type SavedDocument,
 	type SavedDocumentAsset,
-	type DocumentCreationSource
+	type DocumentCreationSource,
 } from '$lib/storage/documents';
 
 export type SaveStatus = 'saved' | 'saving';
@@ -28,7 +28,11 @@ let isTransitioningDocument = $state(false);
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let hasLoadedSessionCurrent = false;
-let pendingSave: { id: string; content: string; assets?: Record<string, SavedDocumentAsset> } | null = null;
+let pendingSave: {
+	id: string;
+	content: string;
+	assets?: Record<string, SavedDocumentAsset>;
+} | null = null;
 
 export function deriveNameFromContent(content: string): string {
 	// We only need the title / H1 / first body line, all of which live near
@@ -50,11 +54,7 @@ export function deriveNameFromContent(content: string): string {
 }
 
 export function isLegacyImplicitBlankDocument(doc: SavedDocument): boolean {
-	return (
-		doc.creationSource === undefined &&
-		doc.content.trim() === '' &&
-		doc.name === ''
-	);
+	return doc.creationSource === undefined && doc.content.trim() === '' && doc.name === '';
 }
 
 export function isBrokenTemplateDocument(doc: SavedDocument): boolean {
@@ -152,22 +152,20 @@ export const documentStore = {
 	},
 
 	async createDocument(
-		mode: 'pdf',
 		content: string = '',
 		assets?: Record<string, SavedDocumentAsset>,
-		creationSource?: DocumentCreationSource
+		creationSource?: DocumentCreationSource,
 	): Promise<SavedDocument> {
 		await this.flushPendingSave();
 		const now = Date.now();
 		const doc: SavedDocument = {
 			id: crypto.randomUUID(),
 			name: deriveNameFromContent(content) || '',
-			mode,
 			content,
 			assets,
 			creationSource,
 			createdAt: now,
-			updatedAt: now
+			updatedAt: now,
 		};
 		await saveDocument(doc);
 		if (saveTimer) {
@@ -192,7 +190,7 @@ export const documentStore = {
 	async saveNow(
 		id: string,
 		content: string,
-		assets?: Record<string, SavedDocumentAsset>
+		assets?: Record<string, SavedDocumentAsset>,
 	): Promise<void> {
 		if (!id) return;
 		if (saveTimer) {
@@ -210,7 +208,7 @@ export const documentStore = {
 			content,
 			assets: assets ?? known.assets,
 			name: deriveNameFromContent(content),
-			updatedAt: Date.now()
+			updatedAt: Date.now(),
 		};
 		docMeta.set(id, next);
 		await saveDocument(next);
@@ -248,5 +246,5 @@ export const documentStore = {
 			setCurrentDocument(null, true);
 		}
 		recentDocuments = recentDocuments.filter((doc) => doc.id !== id);
-	}
+	},
 };

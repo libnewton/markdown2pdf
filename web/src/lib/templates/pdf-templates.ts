@@ -500,5 +500,5 @@ Set \`bibliography: inline\` to cite a trailing BibTeX entry as \`[@md2pdf]\`. T
 `;
 
 export const PDF_TEMPLATES: Template[] = [
-	{ id: 'welcome', name: 'Feature Demo', icon: '🚀', content: WELCOME }
+	{ id: 'welcome', name: 'Feature Demo', icon: '🚀', content: WELCOME },
 ];

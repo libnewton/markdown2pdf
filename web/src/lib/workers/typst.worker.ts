@@ -6,7 +6,7 @@ import {
 	createTypstRenderer,
 	loadFonts,
 	type TypstCompiler,
-	type TypstRenderer
+	type TypstRenderer,
 } from '@myriaddreamin/typst.ts';
 import typstCompilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm?url';
 import typstRendererWasmUrl from '@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm?url';
@@ -53,7 +53,7 @@ const CORE_FONTS: string[] = [
 	'/fonts/DejaVuSansMono.ttf',
 	'/fonts/DejaVuSansMono-Bold.ttf',
 	'/fonts/DejaVuSansMono-Oblique.ttf',
-	'/fonts/DejaVuSansMono-BoldOblique.ttf'
+	'/fonts/DejaVuSansMono-BoldOblique.ttf',
 ];
 
 // --------------------------------------------------------------------------
@@ -89,9 +89,9 @@ function loadPlugin(url: string): Promise<Plugin> {
 				result = new Uint8Array(
 					(instance.exports.memory as WebAssembly.Memory).buffer,
 					ptr,
-					len
+					len,
 				).slice();
-			}
+			},
 		};
 		instance = (await WebAssembly.instantiate(bytes, { typst_env: env })).instance;
 		return (fn: string, ...args: Uint8Array[]): Uint8Array => {
@@ -115,7 +115,10 @@ const getMermaid = () => loadPlugin('/md2pdf/vendor/mmdr/typst_mmdr.wasm');
 
 const encode = (s: string) => new TextEncoder().encode(s);
 const decode = (b: Uint8Array) => new TextDecoder().decode(b);
-const lines = (b: Uint8Array) => decode(b).split('\n').filter((l) => l !== '');
+const lines = (b: Uint8Array) =>
+	decode(b)
+		.split('\n')
+		.filter((l) => l !== '');
 
 // --------------------------------------------------------------------------
 // Compiler setup
@@ -136,7 +139,7 @@ async function registerPackage(compiler: TypstCompiler): Promise<void> {
 			} else {
 				compiler.addSource(vpath, await resp.text());
 			}
-		})
+		}),
 	);
 }
 
@@ -147,12 +150,12 @@ async function registerPackage(compiler: TypstCompiler): Promise<void> {
 const SCRIPT_FONTS: { pattern: RegExp; fonts: string[] }[] = [
 	{
 		pattern: /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/,
-		fonts: ['/fonts/NotoSansKR-Regular.otf', '/fonts/NotoSansKR-Bold.otf']
+		fonts: ['/fonts/NotoSansKR-Regular.otf', '/fonts/NotoSansKR-Bold.otf'],
 	},
 	{
 		pattern: /[\u3000-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/,
-		fonts: ['/fonts/NotoSansSC-Regular.otf', '/fonts/NotoSansSC-Bold.otf']
-	}
+		fonts: ['/fonts/NotoSansSC-Regular.otf', '/fonts/NotoSansSC-Bold.otf'],
+	},
 ];
 
 const loadedFonts = new Set<string>();
@@ -202,7 +205,7 @@ function getCompiler(): Promise<TypstCompiler> {
 			const compiler = createTypstCompiler();
 			await compiler.init({
 				getModule: () => typstCompilerWasmUrl,
-				beforeBuild: [loadFonts(CORE_FONTS, { assets: false })]
+				beforeBuild: [loadFonts(CORE_FONTS, { assets: false })],
 			});
 			await registerPackage(compiler);
 			return compiler;
@@ -229,11 +232,14 @@ function getRenderer(): Promise<TypstRenderer> {
 async function renderPreview(artifact: Uint8Array): Promise<SvgDocument> {
 	const renderer = await getRenderer();
 	let svg = '';
-	await renderer.runWithSession({ format: 'vector', artifactContent: artifact }, async (session) => {
-		svg = await session.renderSvg({
-			data_selection: { body: true, defs: true, css: true, js: false }
-		});
-	});
+	await renderer.runWithSession(
+		{ format: 'vector', artifactContent: artifact },
+		async (session) => {
+			svg = await session.renderSvg({
+				data_selection: { body: true, defs: true, css: true, js: false },
+			});
+		},
+	);
 	return splitSvgDocument(svg);
 }
 
@@ -259,7 +265,7 @@ async function fetchTwemoji(codepoints: string[]): Promise<void> {
 				} catch {
 					// A missing glyph just renders as nothing — don't fail the render.
 				}
-			})
+			}),
 	);
 }
 
@@ -297,7 +303,10 @@ async function renderMermaid(rows: string[][]): Promise<Asset[]> {
 		const mermaid = await getMermaid();
 		for (const { key, source } of missing) {
 			try {
-				mermaidCache.set(key, mermaid('render', encode(source), encode('modern'), encode(''), encode('')));
+				mermaidCache.set(
+					key,
+					mermaid('render', encode(source), encode('modern'), encode(''), encode('')),
+				);
 			} catch {
 				// A diagram that won't render falls back to its source in the output.
 			}
@@ -340,7 +349,7 @@ async function renderHtml(
 	markdown: string,
 	standalone: boolean,
 	id = '',
-	editable = false
+	editable = false,
 ): Promise<{ html: string; diagnostics: string[] }> {
 	const superseded = () => !standalone && id !== '' && id !== latestHtmlId;
 	const engine = await getEngine();
@@ -387,7 +396,7 @@ async function renderHtml(
 	const diagrams = await renderMermaid(wantedDiagrams);
 	if (diagrams.length < wantedDiagrams.length) {
 		diagnostics.push(
-			`${wantedDiagrams.length - diagrams.length} diagram(s) could not be drawn — showing the source`
+			`${wantedDiagrams.length - diagrams.length} diagram(s) could not be drawn — showing the source`,
 		);
 	}
 	assets.push(...diagrams);
@@ -400,8 +409,8 @@ async function renderHtml(
 			md,
 			encode(`standalone=${standalone ? 1 : 0}\neditable=${editable ? 1 : 0}`),
 			encode(manifest),
-			blob
-		)
+			blob,
+		),
 	);
 	return { html, diagnostics };
 }
@@ -427,7 +436,7 @@ let mainMapped = false;
 async function compileTypst(
 	markdown: string,
 	images: Record<string, Uint8Array<ArrayBuffer>> = {},
-	format: 'pdf' | 'preview' = 'pdf'
+	format: 'pdf' | 'preview' = 'pdf',
 ): Promise<{ result: Uint8Array; diagnostics: string[] }> {
 	const compiler = await getCompiler();
 	await ensureScriptFonts(compiler, markdown);
@@ -452,7 +461,7 @@ async function compileTypst(
 	const compileResult = await compiler.compile({
 		mainFilePath: '/main.typ',
 		format: format === 'pdf' ? 1 : 0,
-		diagnostics: 'unix'
+		diagnostics: 'unix',
 	});
 
 	const diagnostics = (compileResult.diagnostics ?? []).map(String);
@@ -473,24 +482,20 @@ function reply(id: string, error: string) {
 		id,
 		ok: false,
 		error,
-		diagnostics: []
+		diagnostics: [],
 	} satisfies CompileResponse);
 }
 
 async function runOne(message: CompileRequest): Promise<void> {
 	const fmt = message.format || 'pdf';
 	try {
-		const { result, diagnostics } = await compileTypst(
-			message.markdown,
-			message.images,
-			fmt
-		);
+		const { result, diagnostics } = await compileTypst(message.markdown, message.images, fmt);
 		if (fmt === 'pdf') {
 			const copy = new Uint8Array(result.length);
 			copy.set(result);
 			ctx.postMessage(
 				{ type: 'compile-result', id: message.id, ok: true, pdf: copy.buffer, diagnostics },
-				[copy.buffer]
+				[copy.buffer],
 			);
 			return;
 		}
@@ -538,8 +543,8 @@ ctx.onmessage = (event: MessageEvent<CompileRequest | HtmlRequest | CancelReques
 					id: message.id,
 					ok: true,
 					html,
-					diagnostics
-				} satisfies CompileResponse)
+					diagnostics,
+				} satisfies CompileResponse),
 			)
 			.catch((error) => reply(message.id, error instanceof Error ? error.message : String(error)));
 		return;

@@ -40,16 +40,8 @@
     readOnly?: boolean
   }
 
-  let {
-    seoTitle,
-    seoDescription,
-    initialMarkdown = '',
-    readOnly = false,
-  }: Props = $props()
+  let { seoTitle, seoDescription, initialMarkdown = '', readOnly = false }: Props = $props()
 
-  // ========================================
-  // State
-  // ========================================
   let markdown = $state('')
   let hasInitializedMarkdown = false
   let editorPane = $state<EditorPane | null>(null)
@@ -110,8 +102,7 @@
         markdown = initialMarkdown
         return
       }
-      const pdfDocs = documentStore.recentDocuments.filter((d) => d.mode === 'pdf')
-      const invalidAutoDocs = pdfDocs.filter(
+      const invalidAutoDocs = documentStore.recentDocuments.filter(
         (doc) => isLegacyImplicitBlankDocument(doc) || isBrokenTemplateDocument(doc),
       )
       if (invalidAutoDocs.length > 0) {
@@ -119,13 +110,14 @@
           await documentStore.deleteDocument(doc.id)
         }
       }
-      const usablePdfDocs = pdfDocs.filter(
+      const usableDocs = documentStore.recentDocuments.filter(
         (doc) => !isLegacyImplicitBlankDocument(doc) && !isBrokenTemplateDocument(doc),
       )
-      // Try loading current doc if it belongs to this mode
       if (documentStore.currentDocId) {
-        const currentDoc = documentStore.recentDocuments.find((d) => d.id === documentStore.currentDocId)
-        if (currentDoc?.mode === 'pdf' && !isLegacyImplicitBlankDocument(currentDoc)) {
+        const currentDoc = documentStore.recentDocuments.find(
+          (d) => d.id === documentStore.currentDocId,
+        )
+        if (currentDoc && !isLegacyImplicitBlankDocument(currentDoc)) {
           const doc = await documentStore.loadDocument(documentStore.currentDocId)
           if (doc !== null) {
             applyLoadedDocument(doc)
@@ -134,8 +126,8 @@
         }
       }
       // Check if there are recent PDF docs
-      if (usablePdfDocs.length > 0) {
-        const doc = await documentStore.loadDocument(usablePdfDocs[0].id)
+      if (usableDocs.length > 0) {
+        const doc = await documentStore.loadDocument(usableDocs[0].id)
         if (doc !== null) {
           applyLoadedDocument(doc)
           return
@@ -144,7 +136,7 @@
       // Create new doc from initial markdown or template
       const defaultContent = initialMarkdown || PDF_TEMPLATES[0]?.content || ''
       markdown = defaultContent
-      const doc = await documentStore.createDocument('pdf', defaultContent, undefined, 'template')
+      const doc = await documentStore.createDocument(defaultContent, undefined, 'template')
       applyLoadedDocument(doc)
     })()
   })
@@ -280,14 +272,6 @@
   // document is not re-queued faster than it can be rendered.
   let lastCycleMs = 0
 
-  const UI = {
-    loading: 'Initializing rendering engine...',
-    placeholder: 'Type Markdown here...',
-  }
-  function t<K extends keyof typeof UI>(key: K): string {
-    return UI[key]
-  }
-
   $effect(() => {
     if (!browser) return
 
@@ -312,11 +296,8 @@
     }
   })
 
-  // ========================================
-  // Lifecycle
-  // ========================================
   onMount(() => {
-    loadingText = t('loading')
+    loadingText = 'Initializing rendering engine...'
     client = getSharedTypstWorkerClient()
 
     // A mode in the URL wins over the default split.
@@ -360,11 +341,12 @@
       }
 
       if (e.key === 'Escape') {
-        if (!isShortcutsOpen && !isAboutOpen && !isExportOpen) return
+        if (!isShortcutsOpen && !isAboutOpen && !isExportOpen && !replacePrompt) return
         claim()
         isShortcutsOpen = false
         isAboutOpen = false
         isExportOpen = false
+        replacePrompt?.answer(false)
         return
       }
       // `?` where you are not typing — the usual way to ask for this list.
@@ -644,9 +626,6 @@
     for (const index of visibleSlots) mountPage(index)
   })
 
-  // ========================================
-  // Functions
-  // ========================================
   // All Markdown processing happens inside the Typst compile (the md2pdf
   // engine). The host only resolves images Typst cannot fetch itself.
   async function compile(md: string) {
@@ -769,15 +748,29 @@
     if (file) void openFile(file)
   }
 
+  // `confirm()` blocks the whole tab, which stops the worker's messages from
+  // being delivered and leaves the preview frozen behind the dialog.
+  let replacePrompt = $state<{ name: string; answer: (ok: boolean) => void } | null>(null)
+
+  function confirmReplace(name: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      replacePrompt = {
+        name,
+        answer: (ok) => {
+          replacePrompt = null
+          resolve(ok)
+        },
+      }
+    })
+  }
+
   /** An image is inserted where the cursor is; anything else replaces the document. */
   async function openFile(file: File) {
     if (file.type.startsWith('image/')) {
       await editorPane?.insertImageFile(file)
       return
     }
-    if (markdown.trim() !== '' && !confirm(`Replace the current document with ${file.name}?`)) {
-      return
-    }
+    if (markdown.trim() !== '' && !(await confirmReplace(file.name))) return
     markdown = await file.text()
   }
 
@@ -797,14 +790,9 @@
       }
     }
 
-    return Object.fromEntries(
-      [...referenced].map((path) => [path, imageAssets[path].bytes]),
-    )
+    return Object.fromEntries([...referenced].map((path) => [path, imageAssets[path].bytes]))
   }
 
-  // ========================================
-  // Resizer Logic
-  // ========================================
   function startResize(e: MouseEvent) {
     e.preventDefault()
     isResizing = true
@@ -838,9 +826,22 @@
     document.removeEventListener('mouseup', stopResize)
   }
 
-  // ========================================
-  // Drag & Drop Logic
-  // ========================================
+  // A `separator` with `tabindex` that answers to no key is worse than one
+  // that cannot be focused at all — it is a stop on the tab order that does
+  // nothing. Home/End go to the two ends of the allowed range.
+  function resizeKey(e: KeyboardEvent) {
+    const step = e.shiftKey ? 10 : 2
+    const to = {
+      ArrowLeft: leftPaneWidth - step,
+      ArrowRight: leftPaneWidth + step,
+      Home: 20,
+      End: 80,
+    }[e.key]
+    if (to === undefined) return
+    e.preventDefault()
+    leftPaneWidth = Math.min(Math.max(to, 20), 80)
+  }
+
   function hasFiles(e: DragEvent): boolean {
     return e.dataTransfer?.types?.includes('Files') ?? false
   }
@@ -952,7 +953,16 @@
   {#if isDragging}
     <div class="drop-overlay">
       <div class="drop-overlay-content">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="17 8 12 3 7 8"></polyline>
           <line x1="12" y1="3" x2="12" y2="15"></line>
@@ -982,10 +992,11 @@
       {:else}
         <DocumentMenu
           bind:this={documentMenu}
-          mode="pdf"
           currentContent={markdown}
           {documentAssets}
-          onDocumentLoad={(doc) => { applyLoadedDocument(doc) }}
+          onDocumentLoad={(doc) => {
+            applyLoadedDocument(doc)
+          }}
         />
       {/if}
     </div>
@@ -1000,7 +1011,14 @@
           title={mode === 'edit' ? 'Editor only' : mode === 'view' ? 'Document only' : 'Split'}
         >
           <!-- Which half is filled is which pane you get. -->
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
             {#if mode !== 'view'}
               <rect x="3" y="5" width="9" height="14" fill="currentColor" stroke="none"></rect>
             {/if}
@@ -1032,24 +1050,39 @@
         >
           Export
           <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-            <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+            <path
+              d="M3 4.5L6 7.5L9 4.5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linecap="round"
+            />
           </svg>
         </button>
         {#if isExportOpen}
           <div class="dropdown-menu">
             <button
               class="menu-item"
-              onclick={() => { isExportOpen = false; void downloadPdf() }}
-              disabled={!previewDoc}
-            >PDF</button>
+              onclick={() => {
+                isExportOpen = false
+                void downloadPdf()
+              }}
+              disabled={!previewDoc}>PDF</button
+            >
             <button
               class="menu-item"
-              onclick={() => { isExportOpen = false; downloadMarkdown() }}
-            >Markdown</button>
+              onclick={() => {
+                isExportOpen = false
+                downloadMarkdown()
+              }}>Markdown</button
+            >
             <button
               class="menu-item"
-              onclick={() => { isExportOpen = false; void downloadHtml() }}
-            >HTML</button>
+              onclick={() => {
+                isExportOpen = false
+                void downloadHtml()
+              }}>HTML</button
+            >
           </div>
         {/if}
       </div>
@@ -1064,12 +1097,32 @@
       aria-label={settingsStore.theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
     >
       {#if settingsStore.theme === 'dark'}
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <circle cx="12" cy="12" r="4"></circle>
-          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>
+          <path
+            d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+          ></path>
         </svg>
       {:else}
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>
         </svg>
       {/if}
@@ -1085,7 +1138,16 @@
           onclick={() => editorPane?.insertMarkdownSnippet(`\n\n${PAGEBREAK_TOKEN}\n\n`)}
           title="Insert page break"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <line x1="2" y1="12" x2="6" y2="12"></line>
             <line x1="18" y1="12" x2="22" y2="12"></line>
             <path d="M6 8V4h12v4"></path>
@@ -1093,8 +1155,21 @@
           </svg>
           <span class="tool-label">Break</span>
         </button>
-        <button class="tool-btn" onclick={handleUpload} title="Insert an image, or open a Markdown file">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button
+          class="tool-btn"
+          onclick={handleUpload}
+          title="Insert an image, or open a Markdown file"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="17 8 12 3 7 8"></polyline>
             <line x1="12" y1="3" x2="12" y2="15"></line>
@@ -1112,8 +1187,8 @@
           target="_blank"
           rel="noopener"
           title="Reference — every feature, source next to result"
-          aria-label="Reference"
-        >?</a>
+          aria-label="Reference">?</a
+        >
       {/if}
 
       <button
@@ -1123,8 +1198,21 @@
         aria-label="Keyboard shortcuts"
       >
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <rect x="0.75" y="3.25" width="14.5" height="9.5" rx="1.75" stroke="currentColor" stroke-width="1.3"/>
-          <path d="M4 6h.01M6.5 6h.01M9 6h.01M11.5 6h.01M4.5 9.5h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <rect
+            x="0.75"
+            y="3.25"
+            width="14.5"
+            height="9.5"
+            rx="1.75"
+            stroke="currentColor"
+            stroke-width="1.3"
+          />
+          <path
+            d="M4 6h.01M6.5 6h.01M9 6h.01M11.5 6h.01M4.5 9.5h6"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+          />
         </svg>
       </button>
 
@@ -1135,7 +1223,9 @@
         aria-label="About md2pdf"
       >
         <svg class="gh-icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+          <path
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+          />
         </svg>
       </button>
     </div>
@@ -1154,7 +1244,7 @@
       <EditorPane
         bind:this={editorPane}
         bind:markdown
-        placeholder={t('placeholder')}
+        placeholder="Type Markdown here..."
         {errorMessage}
         {readOnly}
         onImageSaved={handleImageSaved}
@@ -1167,7 +1257,6 @@
       />
     </section>
 
-    <!-- Resizer -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
@@ -1175,8 +1264,13 @@
       class:hidden={viewMode !== 'both'}
       class:active={isResizing}
       onmousedown={startResize}
+      onkeydown={resizeKey}
       role="separator"
+      aria-label="Editor width"
       aria-orientation="vertical"
+      aria-valuemin={20}
+      aria-valuemax={80}
+      aria-valuenow={Math.round(leftPaneWidth)}
       tabindex="0"
     ></div>
 
@@ -1206,61 +1300,63 @@
     >
       <!-- View mode leaves nothing for this bar to hold, so it goes away. -->
       {#if viewMode !== 'view' || status === 'error'}
-      <div class="preview-toolbar">
-        <div class="preview-status-wrapper">
-          <!-- View mode is for reading: no editing tools, no paged/pageless
+        <div class="preview-toolbar">
+          <div class="preview-status-wrapper">
+            <!-- View mode is for reading: no editing tools, no paged/pageless
                switch, just the document. -->
-          {#if viewMode !== 'view'}
-            <div class="view-switch" role="group" aria-label="Preview mode">
-              <button
-                class:active={previewMode === 'pages'}
-                aria-pressed={previewMode === 'pages'}
-                onclick={() => (previewMode = 'pages')}
+            {#if viewMode !== 'view'}
+              <div class="view-switch" role="group" aria-label="Preview mode">
+                <button
+                  class:active={previewMode === 'pages'}
+                  aria-pressed={previewMode === 'pages'}
+                  onclick={() => (previewMode = 'pages')}
+                >
+                  Pages
+                </button>
+                <button
+                  class:active={previewMode === 'document'}
+                  aria-pressed={previewMode === 'document'}
+                  onclick={() => {
+                    previewMode = 'document'
+                    if (!htmlDoc) void renderHtml(markdown)
+                  }}
+                >
+                  Web
+                </button>
+              </div>
+            {/if}
+            {#if previewMode === 'pages'}
+              <span class="page-info"
+                >{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span
               >
-                Pages
-              </button>
+            {/if}
+            {#if status === 'error'}
+              <div class="error-badge">
+                <span>⚠️ Failed</span>
+              </div>
+            {:else if warnings.length > 0}
               <button
-                class:active={previewMode === 'document'}
-                aria-pressed={previewMode === 'document'}
-                onclick={() => {
-                  previewMode = 'document'
-                  if (!htmlDoc) void renderHtml(markdown)
-                }}
+                class="warning-badge"
+                onclick={() => (isWarningsOpen = !isWarningsOpen)}
+                aria-expanded={isWarningsOpen}
+                title="Content the preview could not render"
               >
-                Web
+                {warnings.length}
+                {warnings.length === 1 ? 'warning' : 'warnings'}
               </button>
-            </div>
-          {/if}
-          {#if previewMode === 'pages'}
-            <span class="page-info">{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span>
-          {/if}
-          {#if status === 'error'}
-            <div class="error-badge">
-              <span>⚠️ Failed</span>
-            </div>
-          {:else if warnings.length > 0}
-            <button
-              class="warning-badge"
-              onclick={() => (isWarningsOpen = !isWarningsOpen)}
-              aria-expanded={isWarningsOpen}
-              title="Content the preview could not render"
-            >
-              {warnings.length}
-              {warnings.length === 1 ? 'warning' : 'warnings'}
-            </button>
-          {/if}
+            {/if}
+          </div>
+          <div class="preview-toolbar-right">
+            {#if previewMode === 'pages'}
+              <div class="zoom">
+                <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
+                <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
+                <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
+                <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
+              </div>
+            {/if}
+          </div>
         </div>
-        <div class="preview-toolbar-right">
-          {#if previewMode === 'pages'}
-            <div class="zoom">
-              <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
-              <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
-              <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
-              <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
-            </div>
-          {/if}
-        </div>
-      </div>
       {/if}
       <div class="preview-container" bind:this={previewContainerEl}>
         {#if showPreviewCompilingHint}
@@ -1304,7 +1400,6 @@
     </section>
   </main>
 
-
   {#if isShortcutsOpen}
     <ShortcutOverlay onClose={() => (isShortcutsOpen = false)} />
   {/if}
@@ -1313,25 +1408,61 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-backdrop" onclick={() => (isAboutOpen = false)}>
-      <div class="modal-dialog" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h3 class="modal-title">About md2pdf</h3>
+      <div
+        class="modal-dialog"
+        onclick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="about-title"
+        tabindex="-1"
+      >
+        <h3 class="modal-title" id="about-title">About md2pdf</h3>
         <p class="modal-help">
-          Markdown in, typeset PDF or a self-contained HTML page out. Everything — the
-          Markdown engine, the Typst typesetter, the fonts — runs in this browser tab:
-          no account, no upload, and it keeps working offline.
+          Markdown in, typeset PDF or a self-contained HTML page out. Everything — the Markdown
+          engine, the Typst typesetter, the fonts — runs in this browser tab: no account, no upload,
+          and it keeps working offline.
         </p>
         <p class="modal-help">
-          Your documents live in this browser's storage only. <strong>Export</strong> is
-          how you get them out.
+          Your documents live in this browser's storage only. <strong>Export</strong> is how you get them
+          out.
         </p>
         <div class="modal-actions">
           <a
             class="btn btn-secondary btn-sm"
             href="https://github.com/libnewton/markdown2pdf"
             target="_blank"
-            rel="noopener noreferrer"
-          >Source on GitHub</a>
-          <button class="btn btn-primary btn-sm" onclick={() => (isAboutOpen = false)}>Close</button>
+            rel="noopener noreferrer">Source on GitHub</a
+          >
+          <button class="btn btn-primary btn-sm" onclick={() => (isAboutOpen = false)}>Close</button
+          >
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if replacePrompt}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal-backdrop" onclick={() => replacePrompt?.answer(false)}>
+      <div
+        class="modal-dialog"
+        onclick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="replace-title"
+        tabindex="-1"
+      >
+        <h3 class="modal-title" id="replace-title">Replace this document?</h3>
+        <p class="modal-help">
+          Opening <strong>{replacePrompt.name}</strong> discards what is in the editor now.
+        </p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary btn-sm" onclick={() => replacePrompt?.answer(false)}>
+            Cancel
+          </button>
+          <button class="btn btn-primary btn-sm" onclick={() => replacePrompt?.answer(true)}>
+            Replace
+          </button>
         </div>
       </div>
     </div>
@@ -1339,9 +1470,6 @@
 </div>
 
 <style>
-  /* ========================================
-     App Container
-     ======================================== */
   .app {
     display: flex;
     flex-direction: column;
@@ -1374,9 +1502,6 @@
     background: var(--color-gray-50);
   }
 
-  /* ========================================
-     Navbar
-     ======================================== */
   /* Three columns, so the middle one sits dead centre no matter how wide the
      document name in the first one gets. */
   .navbar {
@@ -1536,14 +1661,11 @@
       display: none;
     }
     .tool-btn {
-      width: 26px;
+      width: var(--control);
       padding: 0;
     }
   }
 
-  /* ========================================
-     Workspace
-     ======================================== */
   .workspace {
     flex: 1;
     display: flex;
@@ -1551,9 +1673,6 @@
     background-color: var(--color-gray-100);
   }
 
-  /* ========================================
-     Panes
-     ======================================== */
   .pane {
     flex-shrink: 0;
     height: 100%;
@@ -1578,7 +1697,6 @@
     position: relative;
   }
 
-  /* Resizer */
   .resizer {
     width: var(--divider-width);
     background: var(--color-gray-200);
@@ -1588,9 +1706,35 @@
     transition: background var(--transition-fast);
   }
 
+  .resizer::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 4px;
+    height: 40px;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--color-gray-400) 0px,
+      var(--color-gray-400) 2px,
+      transparent 2px,
+      transparent 6px
+    );
+    border-radius: 2px;
+    opacity: 0.5;
+  }
+
   .resizer:hover,
+  .resizer:focus-visible,
   .resizer.active {
     background: var(--color-gray-400);
+  }
+
+  .resizer:hover::after,
+  .resizer:focus-visible::after,
+  .resizer.active::after {
+    opacity: 1;
   }
 
   /* Preview Pane. It takes whatever the editor and the divider leave, rather
@@ -1757,17 +1901,8 @@
     padding: 2px 8px;
     border-radius: 12px;
     animation: fadeIn 0.2s ease-out;
-  }
-
-  .error-badge {
     background: var(--color-danger-bg);
     color: var(--color-danger);
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   @keyframes fadeIn {
@@ -1835,9 +1970,6 @@
     overflow: hidden;
   }
 
-  /* ========================================
-     Menu
-     ======================================== */
   .menu-container {
     position: relative;
     display: inline-block;
@@ -1886,7 +2018,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(15, 23, 42, 0.45);
+    background: light-dark(rgba(15, 23, 42, 0.45), rgba(0, 0, 0, 0.66));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1894,10 +2026,11 @@
   }
   .modal-dialog {
     background: var(--color-white);
-    border-radius: 8px;
-    padding: 1.25rem 1.5rem 1rem;
-    width: min(420px, calc(100vw - 2rem));
-    box-shadow: 0 10px 32px rgba(15, 23, 42, 0.25);
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg) var(--space-lg) var(--space-md);
+    width: min(420px, calc(100vw - var(--space-xl)));
+    box-shadow: var(--shadow-md);
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
@@ -1917,13 +2050,10 @@
   .modal-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 0.5rem;
-    margin-top: 0.25rem;
+    gap: var(--space-sm);
+    margin-top: var(--space-xs);
   }
 
-  /* ========================================
-     Mobile Layout
-     ======================================== */
   .mobile-tabs {
     display: none;
   }
@@ -1948,7 +2078,7 @@
       position: absolute;
       inset: 0;
       z-index: 1;
-      padding-bottom: 50px;
+      padding-bottom: calc(50px + env(safe-area-inset-bottom));
     }
 
     .pane.mobile-hidden {
@@ -1962,14 +2092,17 @@
       display: none;
     }
 
-    /* Mobile Tabs */
+    /* The bar is fixed to the bottom edge, which on a phone with a home
+       indicator is under it — the inset moves the buttons clear while the
+       background still runs to the edge. */
     .mobile-tabs {
       display: flex;
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      height: 50px;
+      height: calc(50px + env(safe-area-inset-bottom));
+      padding-bottom: env(safe-area-inset-bottom);
       background: var(--color-white);
       border-top: 1px solid var(--color-gray-200);
       z-index: 100;
@@ -2007,7 +2140,5 @@
     .hidden-mobile {
       display: none !important;
     }
-
   }
-
 </style>

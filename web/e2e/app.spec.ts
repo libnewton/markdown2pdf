@@ -18,7 +18,12 @@ async function type(page: Page, md: string, marker?: string) {
 	await page.locator('.cm-content').click();
 	await page.keyboard.press('ControlOrMeta+a');
 	await page.keyboard.type(md);
-	const expected = marker ?? md.split('\n').find((l) => /^[A-Za-z#-]/.test(l))?.replace(/^#+ /, '');
+	const expected =
+		marker ??
+		md
+			.split('\n')
+			.find((l) => /^[A-Za-z#-]/.test(l))
+			?.replace(/^#+ /, '');
 	if (expected) await expect.poll(() => documentText(page)).toContain(expected.slice(0, 20));
 }
 
@@ -46,7 +51,7 @@ test('ticking a checkbox writes to the document and undoes cleanly', async ({ pa
 	await page.evaluate(() => {
 		const root = document.querySelector('.html-preview')!.shadowRoot!;
 		const box = [...root.querySelectorAll<HTMLInputElement>('.md2pdf-task > input')].find(
-			(b) => !b.checked
+			(b) => !b.checked,
 		);
 		box!.click();
 	});
@@ -118,9 +123,11 @@ test('a diagram is embedded as an image, never as inline markup', async ({ page 
 	await expect
 		.poll(async () =>
 			page.evaluate(() => {
-				const fig = document.querySelector('.html-preview')!.shadowRoot!.querySelector('.md2pdf-mermaid');
+				const fig = document
+					.querySelector('.html-preview')!
+					.shadowRoot!.querySelector('.md2pdf-mermaid');
 				return { img: !!fig?.querySelector('img'), svg: !!fig?.querySelector('svg') };
-			})
+			}),
 		)
 		.toEqual({ img: true, svg: false });
 });
@@ -128,7 +135,10 @@ test('a diagram is embedded as an image, never as inline markup', async ({ page 
 test('no document script is ever hoisted into the page', async ({ page }) => {
 	await type(page, '```js\nconst a = 1\n```\n', 'const a');
 	const hoisted = await page.evaluate(
-		() => [...document.head.querySelectorAll('script')].filter((s) => s.textContent?.includes('md2pdfBound')).length
+		() =>
+			[...document.head.querySelectorAll('script')].filter((s) =>
+				s.textContent?.includes('md2pdfBound'),
+			).length,
 	);
 	expect(hoisted).toBe(0);
 });
@@ -136,5 +146,7 @@ test('no document script is ever hoisted into the page', async ({ page }) => {
 test('the paged preview compiles', async ({ page }) => {
 	await type(page, '# Title\n\nSome text.\n', 'Some text');
 	await page.getByRole('button', { name: 'Pages', exact: true }).click();
-	await expect.poll(() => page.locator('.page-slot').count(), { timeout: 80_000 }).toBeGreaterThan(0);
+	await expect
+		.poll(() => page.locator('.page-slot').count(), { timeout: 80_000 })
+		.toBeGreaterThan(0);
 });

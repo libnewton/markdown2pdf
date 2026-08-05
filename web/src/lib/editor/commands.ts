@@ -24,11 +24,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 		name: 'table',
 		label: 'Table',
 		snippet: '| Column | Column |\n| --- | --- |\n| Cell | Cell |\n',
-		caret: 2
+		caret: 2,
 	},
 	{ name: 'code', label: 'Code block', snippet: '```\n\n```\n', caret: 3 },
 	{ name: 'info', label: 'Callout', snippet: ':::info\n\n:::\n', caret: 8 },
-	{ name: 'math', label: 'Math block', snippet: '$$\n\n$$\n', caret: 3 }
+	{ name: 'math', label: 'Math block', snippet: '$$\n\n$$\n', caret: 3 },
 ];
 
 /**
@@ -46,7 +46,7 @@ export function slashCommand(line: string): SlashCommand | undefined {
  */
 export function toggleWrap(
 	selected: string,
-	marker: string
+	marker: string,
 ): { text: string; from: number; to: number } {
 	const wrapped =
 		selected.length >= marker.length * 2 &&
@@ -59,7 +59,7 @@ export function toggleWrap(
 	return {
 		text: marker + selected + marker,
 		from: marker.length,
-		to: marker.length + selected.length
+		to: marker.length + selected.length,
 	};
 }
 

@@ -44,7 +44,7 @@ export function splitSvgDocument(svg: string): SvgDocument {
 		return {
 			markup,
 			width: attrNumber(markup, 'data-page-width', 595),
-			height: attrNumber(markup, 'data-page-height', 842)
+			height: attrNumber(markup, 'data-page-height', 842),
 		};
 	});
 

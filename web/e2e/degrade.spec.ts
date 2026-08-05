@@ -15,7 +15,9 @@ test('an unreachable image degrades instead of failing the render', async ({ pag
 	await page.keyboard.type('# Still here\n\n![x](https://no-such-host.invalid/a.png)\n\nAfter.\n');
 
 	// The paged preview compiles rather than erroring out.
-	await expect.poll(() => page.locator('.page-slot').count(), { timeout: 80_000 }).toBeGreaterThan(0);
+	await expect
+		.poll(() => page.locator('.page-slot').count(), { timeout: 80_000 })
+		.toBeGreaterThan(0);
 	await expect(page.locator('.error-badge')).toHaveCount(0);
 
 	// And the Web view says what it could not get.

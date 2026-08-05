@@ -85,7 +85,14 @@
   }
 </script>
 
-<MarkdownEditor bind:this={markdownEditor} bind:markdown {placeholder} {readOnly} {onNewDocument} {onScrolled} />
+<MarkdownEditor
+  bind:this={markdownEditor}
+  bind:markdown
+  {placeholder}
+  {readOnly}
+  {onNewDocument}
+  {onScrolled}
+/>
 {#if errorMessage}
   <div class="error-bar">{errorMessage}</div>
 {/if}

@@ -8,7 +8,7 @@ describe('buildAssetBundle', () => {
 	it('concatenates the payload and describes it by byte length', () => {
 		const { manifest, blob } = buildAssetBundle([
 			['images/a.png', bytes('abc')],
-			['twemoji/1f600.svg', bytes('de')]
+			['twemoji/1f600.svg', bytes('de')],
 		]);
 		expect(manifest).toBe('images/a.png\t3\ntwemoji/1f600.svg\t2\n');
 		expect(text(blob)).toBe('abcde');
@@ -17,7 +17,7 @@ describe('buildAssetBundle', () => {
 	it('measures bytes, not characters, so multi-byte assets stay aligned', () => {
 		const { manifest, blob } = buildAssetBundle([
 			['a', bytes('é😀')],
-			['b', bytes('x')]
+			['b', bytes('x')],
 		]);
 		// 2 bytes for é + 4 for the emoji.
 		expect(manifest).toBe('a\t6\nb\t1\n');

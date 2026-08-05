@@ -10,9 +10,9 @@ const config = {
 	kit: {
 		adapter: adapter(),
 		prerender: {
-			handleHttpError: 'fail'
-		}
-	}
+			handleHttpError: 'fail',
+		},
+	},
 };
 
 export default config;

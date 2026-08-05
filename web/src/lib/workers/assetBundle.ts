@@ -28,6 +28,6 @@ export function buildAssetBundle(assets: readonly Asset[]): {
  */
 export function unescapeSource(text: string): string {
 	return text.replace(/\\(.)/g, (whole, next: string) =>
-		next === 'n' ? '\n' : next === '\\' ? '\\' : whole
+		next === 'n' ? '\n' : next === '\\' ? '\\' : whole,
 	);
 }
