@@ -349,15 +349,77 @@ fn a_leading_h1_becomes_the_title_and_leaves_the_body() {
     assert!(!body("# The Title\n\nbody text").contains("The Title"));
 }
 
+/// A frontmatter title does not consume the document's first heading. Only a
+/// heading that *became* the title is dropped, because only then would keeping
+/// it print the same words twice.
 #[test]
-fn frontmatter_title_wins_and_keeps_the_h1_out_of_the_body() {
+fn frontmatter_title_leaves_a_leading_h1_in_the_body() {
     let out = html(
-        "---\ntitle: From Frontmatter\nauthors: [Ada, Grace]\ndate: 2026-01-01\n---\n\n# Ignored\n\nbody",
+        "---\ntitle: From Frontmatter\nauthors: [Ada, Grace]\ndate: 2026-01-01\n---\n\n# Kept\n\nbody",
     );
     assert!(out.contains("<h1>From Frontmatter</h1>"), "{out}");
     assert!(out.contains("<span>Ada</span><span>Grace</span>"), "{out}");
     assert!(out.contains("<span>2026-01-01</span>"), "{out}");
-    assert!(!out.contains("Ignored"), "{out}");
+    assert!(body(&format!("{}", "---\ntitle: From Frontmatter\n---\n\n# Kept\n\nbody")).contains("Kept"), "{out}");
+}
+
+/// An empty `title:` is not a title. It used to strip the H1 *and* suppress
+/// the title block, so the headline left the document with nothing taking its
+/// place anywhere.
+#[test]
+fn an_empty_frontmatter_title_falls_back_to_the_leading_h1() {
+    let out = html("---\ntitle: \"\"\n---\n\n# Real Title\n\nbody");
+    assert!(out.contains("<h1>Real Title</h1>"), "{out}");
+    assert!(!body("---\ntitle: \"\"\n---\n\n# Real Title\n\nbody").contains("Real Title"), "{out}");
+}
+
+/// The two renderers have to agree about which heading survives. They did not:
+/// the HTML side dropped a leading H1 whenever *any* title existed, while
+/// `lib.typ` drops it only when the title came from that heading. Nothing
+/// compared them, so the divergence shipped — every `convert_str` in this
+/// suite passed `strip_h1 = false`.
+#[test]
+fn both_renderers_agree_on_which_h1_survives() {
+    // (frontmatter title, leading H1, does the heading stay in the body)
+    let cases = [
+        ("", "# Heading\n\nbody", false),
+        ("title: From Frontmatter\n", "# Heading\n\nbody", true),
+        ("title: \"\"\n", "# Heading\n\nbody", false),
+        // Only a *leading* level-1 heading is ever a title candidate.
+        ("title: From Frontmatter\n", "## Heading\n\nbody", true),
+        ("", "## Heading\n\nbody", true),
+        ("", "text first\n\n# Heading\n\nbody", true),
+    ];
+    for (front, rest, heading_stays) in cases {
+        let md = if front.is_empty() {
+            rest.to_string()
+        } else {
+            format!("---\n{front}---\n\n{rest}")
+        };
+
+        // What `lib.typ` computes before calling `convert`.
+        let fm_title = Frontmatter::parse(&md)
+            .first("title")
+            .filter(|t| !t.is_empty())
+            .unwrap_or_default()
+            .to_string();
+        let h1 = String::from_utf8(crate::leading_h1(md.as_bytes()).unwrap()).unwrap();
+        let from_h1 = fm_title.is_empty() && !h1.is_empty();
+        assert_eq!(from_h1, !heading_stays, "the shared rule disagrees for {md:?}");
+
+        assert_eq!(
+            body(&md).contains("Heading"),
+            heading_stays,
+            "HTML disagrees for {md:?}:\n{}",
+            body(&md)
+        );
+        assert_eq!(
+            convert_str(&md, from_h1).contains("Heading"),
+            heading_stays,
+            "Typst disagrees for {md:?}:\n{}",
+            convert_str(&md, from_h1)
+        );
+    }
 }
 
 #[test]
@@ -1000,21 +1062,72 @@ fn a_heading_cannot_claim_a_reserved_id() {
     assert!(out.contains("id=\"x\""), "a repeated prefix must not survive:\n{out}");
 }
 
+/// Every fixture in `tests/`, so a new one is covered by adding it here once.
+const FIXTURES: &[(&str, &str)] = &[
+    ("html-edge.md", include_str!("../../../tests/html-edge.md")),
+    ("extended.md", include_str!("../../../tests/extended.md")),
+    ("sample.md", include_str!("../../../tests/sample.md")),
+    ("tables.md", include_str!("../../../tests/tables.md")),
+    ("headings.md", include_str!("../../../tests/headings.md")),
+    ("citations.md", include_str!("../../../tests/citations.md")),
+    ("emoji.md", include_str!("../../../tests/emoji.md")),
+    ("cover.md", include_str!("../../../tests/cover.md")),
+    ("frontmatter.md", include_str!("../../../tests/frontmatter.md")),
+];
+
+/// Content does not silently vanish.
+///
+/// The leading-H1 bug was a heading that the renderer deleted and nothing
+/// replaced — invisible to every test here, because they all assert that
+/// something *is* present and none assert that nothing went missing. This
+/// walks the source instead of the output: every heading, task item and code
+/// fence in a fixture has to turn up in both renderings.
+#[test]
+fn no_fixture_loses_a_heading_a_task_or_a_code_block() {
+    for (name, md) in FIXTURES {
+        let html_out = render(md, "standalone=1\n", "", b"");
+        let typst_out = convert_str(md, false);
+
+        // The one heading allowed to disappear is the one promoted to title.
+        let promoted = String::from_utf8(crate::leading_h1(md.as_bytes()).unwrap()).unwrap();
+        let has_fm_title = Frontmatter::parse(md).first("title").is_some_and(|t| !t.is_empty());
+        let consumed = if has_fm_title { String::new() } else { promoted };
+
+        let mut fence = false;
+        for line in md.lines() {
+            let t = line.trim_start();
+            if t.starts_with("```") {
+                fence = !fence;
+                continue;
+            }
+            if fence {
+                continue;
+            }
+            let Some(text) = t.strip_prefix('#').map(str::trim_start) else {
+                continue;
+            };
+            let text = text.trim_start_matches('#').trim();
+            // Inline markup is rendered as elements, so compare on a word that
+            // survives either way.
+            let Some(word) = text
+                .split_whitespace()
+                .find(|w| w.len() > 4 && w.chars().all(|c| c.is_alphanumeric()))
+            else {
+                continue;
+            };
+            if !consumed.is_empty() && consumed.contains(word) {
+                continue;
+            }
+            assert!(html_out.contains(word), "{name}: HTML lost heading word {word:?}");
+            assert!(typst_out.contains(word), "{name}: Typst lost heading word {word:?}");
+        }
+    }
+}
+
 /// Every fixture, through both guards. Opting individual tests in is how the
 /// mermaid path went years without the tag check ever running over it.
 #[test]
 fn no_fixture_can_inject_a_tag_or_an_attribute() {
-    const FIXTURES: &[(&str, &str)] = &[
-        ("html-edge.md", include_str!("../../../tests/html-edge.md")),
-        ("extended.md", include_str!("../../../tests/extended.md")),
-        ("sample.md", include_str!("../../../tests/sample.md")),
-        ("tables.md", include_str!("../../../tests/tables.md")),
-        ("headings.md", include_str!("../../../tests/headings.md")),
-        ("citations.md", include_str!("../../../tests/citations.md")),
-        ("emoji.md", include_str!("../../../tests/emoji.md")),
-        ("cover.md", include_str!("../../../tests/cover.md")),
-        ("frontmatter.md", include_str!("../../../tests/frontmatter.md")),
-    ];
     for (name, md) in FIXTURES {
         for options in ["", "standalone=1\n"] {
             let out = render(md, options, "", b"");

@@ -101,11 +101,14 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     };
 
     // Title precedence mirrors `lib.typ`: frontmatter beats a leading H1, and
-    // the H1 is dropped once it has been promoted to the title.
-    let fm_title = fm.first("title").map(str::to_string);
+    // the H1 is dropped only when it is the thing that became the title. A
+    // frontmatter title does not consume it — that heading belongs to the body
+    // and nothing else would take its place.
+    let fm_title = fm.first("title").filter(|t| !t.is_empty()).map(str::to_string);
     let h1 = leading_h1_text(&body_src);
+    let from_h1 = fm_title.is_none() && h1.is_some();
     let title = fm_title.clone().or_else(|| h1.clone());
-    let body = render_source(&body_src, &mut doc, fm_title.is_some() || h1.is_some());
+    let body = render_source(&body_src, &mut doc, from_h1);
 
     let mut main = String::new();
     main.push_str(&title_block(&fm, title.as_deref(), &doc));
