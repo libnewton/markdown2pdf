@@ -1,29 +1,8 @@
 import { browser } from '$app/environment';
 
-const LIVE_UPDATE_KEY = 'md2pdf-live-update';
 export const THEME_KEY = 'md2pdf-theme';
 
 export type Theme = 'light' | 'dark';
-
-function readBool(key: string, fallback: boolean): boolean {
-	if (!browser) return fallback;
-	try {
-		const v = localStorage.getItem(key);
-		if (v === null) return fallback;
-		return v !== 'false';
-	} catch {
-		return fallback;
-	}
-}
-
-function writeBool(key: string, value: boolean) {
-	if (!browser) return;
-	try {
-		localStorage.setItem(key, value ? 'true' : 'false');
-	} catch {
-		// ignore
-	}
-}
 
 /**
  * The stored preference, or the system one on a first visit. Resolved once:
@@ -42,13 +21,7 @@ function initialTheme(): Theme {
 }
 
 class SettingsStore {
-	liveUpdate = $state(readBool(LIVE_UPDATE_KEY, true));
 	theme = $state<Theme>(initialTheme());
-
-	setLiveUpdate(value: boolean) {
-		this.liveUpdate = value;
-		writeBool(LIVE_UPDATE_KEY, value);
-	}
 
 	setTheme(value: Theme) {
 		this.theme = value;

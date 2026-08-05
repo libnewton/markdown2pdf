@@ -18,8 +18,9 @@ runs client-side via WebAssembly — no server, no setup, no telemetry.
 
 ## Features
 
-- **Live preview** — SVG preview rendered directly from Typst as you type, with
-  a pause toggle (`Ctrl/Cmd+Enter` to compile on demand).
+- **Live preview** — updates as you type, always. The pageless **Web** view
+  needs no Typst compile at all; the paged **Pages** view compiles only while
+  it is the tab on screen.
 - **Code editor** — CodeMirror 6 with Markdown syntax highlighting.
 - **Document management** — auto-saves to IndexedDB; switch between recent docs.
 - **Image upload** — paste or drop images straight into the editor.

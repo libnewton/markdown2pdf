@@ -216,7 +216,7 @@ Implementation: `src/lib/mermaid/render.ts` + Mermaid pre-pass in `PdfEditor.sve
 
 `src/lib/stores/settingsStore.svelte.ts` (Svelte 5 runes, localStorage-backed):
 
-- `liveUpdate: boolean` — gates the auto-compile effect. When off, the toolbar shows an "Update" button and `Ctrl/Cmd+Enter` triggers a compile from anywhere.
+- The preview is always live. Typing is never blocked by it: CodeMirror owns the text and emits on a 150 ms throttle, the Typst compile runs in a worker with supersession on both sides, and it only runs while the paged preview is the tab on screen.
 - `pageNumbers: boolean` — default for the `set page(numbering:)` toggle; frontmatter `pageNumbers:` overrides.
 - `corsProxy: string` — optional proxy URL. The image loader calls it as `${proxy}?url=<encoded>` (or `${proxy}&url=...` if the proxy already contains `?`).
 

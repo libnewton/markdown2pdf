@@ -160,9 +160,6 @@
   let viewMode = $state<ViewMode>('both')
   let showEditor = $derived(viewMode !== 'view')
   let showPreview = $derived(viewMode !== 'edit')
-  // Pausing exists so a heavy document does not recompile under your fingers.
-  // Nobody is typing in view mode, so there it is always live.
-  let liveUpdate = $derived(viewMode === 'view' || settingsStore.liveUpdate)
 
   function setViewMode(next: ViewMode) {
     viewMode = next
@@ -381,7 +378,6 @@
     if (!client) return
     if (isLoading) return
     if (previewMode !== 'document') return
-    if (hasEverCompiled && !liveUpdate) return
 
     const md = markdown
     if (htmlTimer) window.clearTimeout(htmlTimer)
@@ -883,21 +879,7 @@
           Update available
         </button>
       {/if}
-      {#if viewMode === 'view'}
-        <!-- Nothing is being edited, so live-or-paused is beside the point;
-             the theme is the one thing a reader still wants. -->
-        {@render themeToggle()}
-      {:else}
-        <button
-          class="live-toggle"
-          class:on={settingsStore.liveUpdate}
-          onclick={() => settingsStore.setLiveUpdate(!settingsStore.liveUpdate)}
-          title={settingsStore.liveUpdate ? 'Pause live preview' : 'Enable live preview'}
-        >
-          <span class="live-dot" aria-hidden="true"></span>
-          {settingsStore.liveUpdate ? 'Live' : 'Paused'}
-        </button>
-      {/if}
+      {@render themeToggle()}
 
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1100,16 +1082,6 @@
           {/if}
         </div>
         <div class="preview-toolbar-right">
-          {#if !liveUpdate}
-            <button
-              class="tool-btn"
-              onclick={compileNow}
-              disabled={status === 'compiling'}
-              title="Compile now"
-            >
-              Update
-            </button>
-          {/if}
           {#if previewMode === 'pages'}
             <div class="zoom">
               <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
@@ -1296,7 +1268,7 @@
 
   /* Every control in the chrome is the same typeface, weight and size — only
      the height changes between the navbar row and the pane strips. */
-  .navbar :is(.live-toggle, .btn, .tool-btn, .view-switch button),
+  .navbar :is(.btn, .tool-btn, .view-switch button),
   .toolbar :is(.tool-btn, .view-switch button),
   .preview-toolbar :is(.tool-btn, .view-switch button, .zoom button, .page-info, .zoom-level) {
     font-family: inherit;
@@ -1376,35 +1348,6 @@
       width: 26px;
       padding: 0;
     }
-  }
-
-  /* Live update toggle */
-  .live-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5em;
-    height: var(--control-lg);
-    padding: 0 0.75rem;
-    background: var(--color-gray-50);
-    border: 1px solid var(--color-gray-200);
-    border-radius: var(--radius-sm);
-    color: var(--color-gray-700);
-    cursor: pointer;
-  }
-  .live-toggle:hover {
-    background: var(--color-gray-100);
-    border-color: var(--color-gray-300);
-  }
-  .live-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--color-gray-400);
-  }
-  .live-toggle.on .live-dot {
-    background: var(--color-success);
-    box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18);
   }
 
   /* ========================================
