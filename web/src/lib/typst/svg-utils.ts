@@ -9,7 +9,36 @@ const SVG_OPEN =
 
 function parseSvg(markup: string): SVGSVGElement {
 	const doc = new DOMParser().parseFromString(SVG_OPEN + markup + '</svg>', 'image/svg+xml');
+	scrub(doc.documentElement);
 	return document.adoptNode(doc.documentElement) as unknown as SVGSVGElement;
+}
+
+/**
+ * Drop anything executable before the tree is adopted into the live document.
+ *
+ * This SVG is typst.ts's rendering of a document we did not write, and unlike
+ * the HTML preview it does not land in a shadow root — it goes straight into
+ * the page. A `<script>` built by DOMParser is inert even after adoption, but
+ * an `onload=` attribute is not, and neither is a `javascript:` href.
+ */
+function scrub(root: Element) {
+	const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+	const doomed: Element[] = [];
+	for (let el: Node | null = root; el; el = walker.nextNode()) {
+		if (!(el instanceof Element)) continue;
+		if (el.localName === 'script' || el.localName === 'foreignObject') {
+			doomed.push(el);
+			continue;
+		}
+		for (const attr of [...el.attributes]) {
+			const name = attr.localName.toLowerCase();
+			const scheme = attr.value.trim().slice(0, 11).toLowerCase();
+			if (name.startsWith('on') || scheme.startsWith('javascript:')) {
+				el.removeAttributeNode(attr);
+			}
+		}
+	}
+	doomed.forEach((el) => el.remove());
 }
 
 /**

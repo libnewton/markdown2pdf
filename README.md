@@ -88,6 +88,11 @@ http(s) hosts, capped at 32 MB and 20 s per image; `--allow-private-hosts`,
 `--max-size` and `--timeout` adjust that. A URL that cannot be fetched becomes
 a blank placeholder rather than failing the render.
 
+The browser applies the same 32 MB and 20 s ceilings, and additionally caps a
+document at 64 remote images fetched 6 at a time, so a long image list cannot
+spend the tab's memory and connections on the document author's behalf. Those
+requests never carry credentials.
+
 ## Markdown coverage
 
 Core CommonMark + GFM (tables incl. `+` column-width markers, task lists,

@@ -193,10 +193,15 @@ async function renderPreview(artifact: Uint8Array): Promise<SvgDocument> {
 // HTML target embeds the same bytes as data: URIs.
 const twemojiCache = new Map<string, Uint8Array>();
 
+// Keys arriving from the engine are structurally constrained — twemoji are hex
+// codepoints, fonts are names it was compiled with — but they end up inside a
+// fetch path, so the shape is checked here rather than assumed to hold forever.
+const SAFE_KEY = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 async function fetchTwemoji(codepoints: string[]): Promise<void> {
 	await Promise.all(
 		codepoints
-			.filter((cp) => !twemojiCache.has(cp))
+			.filter((cp) => !twemojiCache.has(cp) && SAFE_KEY.test(cp))
 			.map(async (cp) => {
 				try {
 					const resp = await fetch('/md2pdf/twemoji/' + cp + '.svg');
@@ -260,6 +265,8 @@ async function renderMermaid(markdown: string): Promise<Asset[]> {
 // preview never asks: it gets the same faces from the app's own stylesheet.
 const fontCache = new Map<string, Promise<Uint8Array>>();
 
+const safePath = (key: string) => key.split('/').every((part) => SAFE_KEY.test(part));
+
 function loadFont(key: string): Promise<Uint8Array> {
 	let cached = fontCache.get(key);
 	if (!cached) {
@@ -283,7 +290,7 @@ async function renderHtml(markdown: string, standalone: boolean): Promise<string
 
 	const assets: Asset[] = [];
 	if (standalone) {
-		for (const key of lines(engine('html_fonts', md))) {
+		for (const key of lines(engine('html_fonts', md)).filter(safePath)) {
 			assets.push([key, await loadFont(key)]);
 		}
 	}

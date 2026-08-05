@@ -21,10 +21,28 @@ function hashUrl(url: string): string {
 
 const cache = new Map<string, Uint8Array<ArrayBuffer> | null>();
 
+// The same limits the CLI documents. Without them one document can point at a
+// hundred URLs, or at a file with no end to it, and spend the tab's memory and
+// connections on the author's behalf.
+const MAX_BYTES = 32 * 1024 * 1024;
+const TIMEOUT_MS = 20_000;
+const MAX_IMAGES = 64;
+const MAX_PARALLEL = 6;
+
 async function fetchDirect(url: string): Promise<Uint8Array<ArrayBuffer> | null> {
-	const resp = await fetch(url, { mode: 'cors' });
+	const resp = await fetch(url, {
+		mode: 'cors',
+		// A document must never be able to make a request that carries the
+		// reader's cookies, even to this app's own origin.
+		credentials: 'omit',
+		redirect: 'follow',
+		signal: AbortSignal.timeout(TIMEOUT_MS)
+	});
 	if (!resp.ok) return null;
+	const declared = Number(resp.headers.get('content-length'));
+	if (declared > MAX_BYTES) return null;
 	const buf = await resp.arrayBuffer();
+	if (buf.byteLength > MAX_BYTES) return null;
 	return new Uint8Array(buf);
 }
 
@@ -82,6 +100,18 @@ export function cachedRemoteImages(markdown: string): {
  */
 export async function prefetchRemoteImages(urls: string[]): Promise<boolean> {
 	if (urls.length === 0) return false;
-	const results = await Promise.all(urls.map((url) => fetchOne(url)));
-	return results.some((bytes) => bytes !== null);
+	const queue = urls.slice(0, MAX_IMAGES);
+	let next = 0;
+	let gotNew = false;
+	// A few at a time. Firing every URL at once is what turns a document with a
+	// long image list into a stall.
+	await Promise.all(
+		Array.from({ length: Math.min(MAX_PARALLEL, queue.length) }, async () => {
+			while (next < queue.length) {
+				const bytes = await fetchOne(queue[next++]);
+				if (bytes) gotNew = true;
+			}
+		})
+	);
+	return gotNew;
 }
