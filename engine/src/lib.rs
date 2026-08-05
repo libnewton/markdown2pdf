@@ -1420,13 +1420,41 @@ fn render_math(display: bool, latex: &str, alignment: Alignment) -> String {
     }
 }
 
+/// Reject schemes that execute. Relative paths and fragments pass through.
+///
+/// An allowlist, not a blocklist: comrak has already decoded entities in the
+/// destination, so the usual `&#106;avascript:` and case tricks arrive
+/// normalised, and anything unrecognised is refused rather than guessed at.
+pub(crate) fn safe_url(url: &str) -> Option<&str> {
+    let trimmed = url.trim();
+    let scheme: String = trimmed
+        .chars()
+        .take_while(|c| *c != ':' && *c != '/' && *c != '?' && *c != '#')
+        .collect();
+    let has_scheme = trimmed.len() > scheme.len() && trimmed[scheme.len()..].starts_with(':');
+    if has_scheme {
+        let s = scheme.trim().to_ascii_lowercase();
+        if !matches!(s.as_str(), "http" | "https" | "mailto" | "tel" | "ftp") {
+            return None;
+        }
+    }
+    Some(trimmed)
+}
+
 fn render_link(url: &str, label: &str) -> String {
     let label = if label.trim().is_empty() {
         esc_text(url)
     } else {
         label.to_string()
     };
-    format!("#link(\"{}\")[{}]", esc_string(url), label)
+    // A rejected scheme keeps its text and loses its link, exactly as in the
+    // HTML renderer. Typst turns a link into a PDF annotation and typst.ts
+    // into an `<a>` in the preview SVG, which the editor adopts into the page
+    // itself — so `javascript:` must not reach either.
+    match safe_url(url) {
+        Some(href) => format!("#link(\"{}\")[{}]", esc_string(href), label),
+        None => label,
+    }
 }
 
 /// Port of `renderImage`: HackMD `=WxH` dimension syntax + remote-URL aliasing.
@@ -1773,6 +1801,50 @@ mod tests {
         assert!(out.contains("`[@inline]`"), "{out}");
         assert!(out.contains("[@fenced]"), "{out}");
         assert!(!out.contains("#cite"), "{out}");
+    }
+
+    /// Both renderers refuse the same schemes. They used to disagree: only the
+    /// HTML side checked, so `javascript:` reached Typst's link annotation —
+    /// and, through typst.ts, an `<a>` the editor adopts into the page itself.
+    #[test]
+    fn both_renderers_refuse_the_same_link_schemes() {
+        for url in [
+            "javascript:alert(1)",
+            "JaVaScRiPt:alert(1)",
+            " javascript:alert(1)",
+            "vbscript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "file:///etc/passwd",
+        ] {
+            assert_eq!(safe_url(url), None, "{url} was allowed");
+            let out = convert_str(&format!("[label]({url})"), false);
+            assert!(!out.contains("#link("), "{url} became a link:\n{out}");
+            assert!(out.contains("label"), "{url} lost its text:\n{out}");
+        }
+        for url in ["https://e.com/x", "mailto:a@e.com", "./rel.md", "#frag"] {
+            assert!(safe_url(url).is_some(), "{url} was refused");
+            let out = convert_str(&format!("[label]({url})"), false);
+            assert!(out.contains("#link("), "{url} lost its link:\n{out}");
+        }
+    }
+
+    /// A URL reaches Typst inside a string literal, and Typst can `read()`.
+    /// A breakout there would be worse than an XSS.
+    #[test]
+    fn a_link_url_cannot_break_out_of_the_typst_string() {
+        let out = convert_str(r#"[x](https://e.com/a"+read("/etc/passwd")+")"#, false);
+        assert_eq!(
+            out.trim(),
+            r#"#link("https://e.com/a\"+read(\"/etc/passwd\")+\"")[x]"#
+        );
+        // Every quote inside the argument is escaped, so the literal ends
+        // exactly where the renderer put its closing delimiter.
+        let arg = out.trim().trim_start_matches("#link(\"");
+        let unescaped = arg
+            .char_indices()
+            .filter(|&(i, c)| c == '"' && !arg[..i].ends_with('\\'))
+            .count();
+        assert_eq!(unescaped, 1, "extra unescaped quote in {arg}");
     }
 
     #[test]

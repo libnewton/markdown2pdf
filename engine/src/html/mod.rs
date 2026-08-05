@@ -17,7 +17,7 @@ mod tokens;
 
 use crate::{
     build_options, hash_url, is_remote, leading_h1_index, match_emoji,
-    parse_dims, parse_placeholder, plain_text, preprocess, preprocess_citations,
+    parse_dims, parse_placeholder, plain_text, preprocess, preprocess_citations, safe_url,
     split_inline_bibliography, task_checked, Admonition, Preprocessed, Spoiler,
     CITATION_CLOSE_TOKEN, CITATION_OPEN_TOKEN,
 };
@@ -119,15 +119,23 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     let main = main.replace(TOC_SLOT, &inline_toc(&doc.headings));
 
     let lang = fm.first("lang").unwrap_or(if doc.german { "de" } else { "en" });
+    // Only the standalone export carries the behaviour script. A fragment is
+    // mounted by a host that has to re-execute it to make it run at all, and
+    // "take the first <script> out of the document and run it" is not a
+    // primitive worth handing to a renderer whose input is untrusted — the
+    // editor implements copy and anchor scrolling itself instead.
+    let script = if standalone {
+        format!("<script>{}</script>", css::SCRIPT)
+    } else {
+        String::new()
+    };
     let fragment = format!(
         "<style>{fonts}{style}</style>\
          <div class=\"md2pdf\" id=\"md2pdf-root\" lang=\"{lang}\">\
-         {outline}<main class=\"md2pdf-doc\">{main}</main></div>\
-         <script>{script}</script>",
+         {outline}<main class=\"md2pdf-doc\">{main}</main></div>{script}",
         fonts = math_font_faces(&doc, &main),
         style = css::style(),
         lang = esc_attr(lang),
-        script = css::SCRIPT,
     );
     if standalone {
         document(&fragment, &esc_attr(lang), title.as_deref().unwrap_or("Document"))
@@ -316,6 +324,13 @@ impl Doc {
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
             .join("-");
+        // `md2pdf-` is the renderer's own namespace: the outline toggle, the
+        // root, the footnotes and the bibliography all live there. Dropping the
+        // prefix keeps the anchor readable while making a heading structurally
+        // unable to mint a second element with one of those ids.
+        while let Some(rest) = base.strip_prefix("md2pdf-") {
+            base = rest.to_string();
+        }
         if base.is_empty() {
             base = "section".to_string();
         }
@@ -593,14 +608,21 @@ fn code_block(doc: &Doc, info: &str, literal: &str) -> String {
     )
 }
 
+/// A diagram, as an image rather than inline SVG.
+///
+/// The SVG is the mmdr plugin's output over a diagram source the document
+/// controls, so it is not ours to trust: inline, one hostile `onload` or
+/// `<foreignObject>` would execute, and in the editor's preview it would land
+/// in the page rather than the shadow root. Loaded through `<img>` it cannot
+/// script or fetch, whatever it contains.
 fn mermaid(doc: &Doc, code: &str) -> String {
-    match doc.assets.text(&mermaid_key(code)) {
-        // The SVG comes from the mmdr plugin, but a diagram label could still
-        // carry markup — refuse anything scriptable rather than inline it.
-        Some(svg) if !svg.to_ascii_lowercase().contains("<script") => {
-            format!("<div class=\"md2pdf-mermaid\">{svg}</div>")
-        }
-        _ => format!(
+    let label = if doc.german { "Mermaid-Diagramm" } else { "Mermaid diagram" };
+    match doc.assets.data_uri(&mermaid_key(code)) {
+        Some(src) => format!(
+            "<figure class=\"md2pdf-mermaid\"><img src=\"{src}\" alt=\"{label}\" \
+             loading=\"lazy\" decoding=\"async\"></figure>"
+        ),
+        None => format!(
             "<div class=\"md2pdf-code\" data-lang=\"mermaid\"><pre><code>{}</code></pre></div>",
             esc_text(code)
         ),
@@ -770,24 +792,6 @@ fn link(url: &str, label: &str) -> String {
         // A rejected scheme still shows its text; it just is not clickable.
         None => format!("<span class=\"md2pdf-missing\">{label}</span>"),
     }
-}
-
-/// Reject schemes that execute. Relative paths and fragments pass through.
-fn safe_url(url: &str) -> Option<String> {
-    let trimmed = url.trim();
-    let scheme: String = trimmed
-        .chars()
-        .take_while(|c| *c != ':' && *c != '/' && *c != '?' && *c != '#')
-        .collect();
-    let has_scheme = trimmed.len() > scheme.len() && trimmed[scheme.len()..].starts_with(':');
-    if has_scheme {
-        let s = scheme.trim().to_ascii_lowercase();
-        let allowed = matches!(s.as_str(), "http" | "https" | "mailto" | "tel" | "ftp");
-        if !allowed {
-            return None;
-        }
-    }
-    Some(trimmed.to_string())
 }
 
 fn image(doc: &Doc, url: &str, title: &str, alt: &str) -> String {

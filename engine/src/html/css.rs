@@ -355,7 +355,7 @@ const REST: &str = r#"}
   font-size: .85em;
 }
 .md2pdf-mermaid { margin: 1.6em auto; max-width: 100%; text-align: center; }
-.md2pdf-mermaid svg { max-width: 100%; height: auto; }
+.md2pdf-mermaid img { display: inline-block; max-width: 100%; height: auto; }
 /* No scroll container: `overflow-x` would drag `overflow-y` to `auto` with it,
    and every formula paints a few pixels outside its box, so each one ended up
    scrollable and clipped. Overflow stays visible instead. */

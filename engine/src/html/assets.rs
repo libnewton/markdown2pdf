@@ -31,9 +31,9 @@ impl Assets {
         Self(map)
     }
 
-    /// UTF-8 contents of an asset — used for SVGs, which are inlined verbatim.
-    pub(crate) fn text(&self, key: &str) -> Option<&str> {
-        std::str::from_utf8(self.0.get(key)?.as_slice()).ok()
+    #[cfg(test)]
+    fn bytes(&self, key: &str) -> Option<&[u8]> {
+        self.0.get(key).map(Vec::as_slice)
     }
 
     /// A `data:` URI for `key`, or `None` when the host could not supply it.
@@ -123,16 +123,39 @@ mod tests {
     #[test]
     fn decode_splits_the_blob_by_manifest_lengths() {
         let a = Assets::decode("images/a.txt\t3\nimages/b.txt\t2\n", b"abcde");
-        assert_eq!(a.text("images/a.txt"), Some("abc"));
-        assert_eq!(a.text("images/b.txt"), Some("de"));
-        assert_eq!(a.text("images/c.txt"), None);
+        assert_eq!(a.bytes("images/a.txt"), Some(&b"abc"[..]));
+        assert_eq!(a.bytes("images/b.txt"), Some(&b"de"[..]));
+        assert_eq!(a.bytes("images/c.txt"), None);
     }
 
     #[test]
     fn decode_survives_a_truncated_blob() {
         let a = Assets::decode("images/a.txt\t3\nimages/b.txt\t9\n", b"abc");
-        assert_eq!(a.text("images/a.txt"), Some("abc"));
+        assert_eq!(a.bytes("images/a.txt"), Some(&b"abc"[..]));
         assert_eq!(a.data_uri("images/b.txt"), None);
+    }
+
+    /// The manifest is host-written, but a bad one must not hand one asset's
+    /// bytes out under another's name.
+    #[test]
+    fn a_malformed_manifest_never_misaligns_the_blob() {
+        // A length past the end takes what is left and stops; it does not wrap
+        // into the next entry.
+        let over = Assets::decode("a\t99\nb\t2\n", b"abcde");
+        assert_eq!(over.bytes("a"), Some(&b"abcde"[..]));
+        assert_eq!(over.bytes("b"), None);
+
+        // Unparsable and tab-less lines are skipped without consuming bytes.
+        let junk = Assets::decode("a\tnope\nno-tab\nb\t2\n", b"xy");
+        assert_eq!(junk.bytes("b"), Some(&b"xy"[..]));
+
+        // A repeated key keeps the last slice rather than blending two.
+        let dup = Assets::decode("a\t2\na\t3\n", b"xyabc");
+        assert_eq!(dup.bytes("a"), Some(&b"abc"[..]));
+
+        // Only the first tab separates; the rest belongs to the key.
+        let tabbed = Assets::decode("a\tb\t2\n", b"xy");
+        assert_eq!(tabbed.bytes("a"), None);
     }
 
     #[test]

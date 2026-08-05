@@ -47,6 +47,66 @@ Attribute breakouts in a heading and a table:
 
 Ampersands: a & b &amp; c &notareal; &#x41; &#65;
 
+## Schemes that try to hide
+
+The scheme check is an allowlist, so an encoded or padded `javascript:` has to
+fail the same way a plain one does:
+
+[entity](&#106;avascript:alert(1)), [hex entity](&#x6a;avascript:alert(1)),
+[padded](&#0000106;avascript:alert(1)), [leading space]( javascript:alert(1)),
+[tab inside](java&#9;script:alert(1)), [newline inside](java&#10;script:alert(1)),
+[upper](JaVaScRiPt:alert(1)), [null](java&#0;script:alert(1)),
+[protocol-relative](//example.invalid/x), [svg data](data:image/svg+xml,<svg onload="alert(1)"/>).
+
+## Diagram from hostile source
+
+The SVG a diagram renders to is never inlined, so nothing in here can become
+markup even if the plugin passes a label straight through:
+
+```mermaid
+graph LR
+  A["</svg><script>alert(1)</script>"] --> B["<img src=x onerror=alert(1)>"]
+  B --> C["<foreignObject><iframe src=javascript:alert(1)></foreignObject>"]
+```
+
+## Inline tag whitelist
+
+Only `<br>` survives as markup; every other shape is text:
+<u foo=bar>attrs</u>, < u>space</ u>, <u/>self-closed, <U>upper</U>,
+<br>, <br/>, <br />, <bR>, <break>, <u<script>nested</u>.
+
+## Math that tries to escape
+
+Inline $\text{</span><img src=x onerror=alert(1)>}$ and
+$\href{javascript:alert(1)}{click}$ and $a < b$ and $\text{"quoted"}$ and
+a block:
+
+$$\text{</math><script>alert(1)</script>}$$
+
+## Sizes and widths that try to escape
+
+![sized](https://example.invalid/y.png "=100x100;}</style><script>alert(1)</script>")
+![quoted](https://example.invalid/z.png "=\"onerror=\"alert(1)x100")
+
+| a | b |
+| --- | ---+++"onload="alert(1) |
+| c | d |
+
+## Id collisions
+
+The drawer toggle and the footnote anchors have fixed ids, and a heading slug
+must not be able to take one over.
+
+### md2pdf-toc-state
+
+### md2pdf-fn-1
+
+### md2pdf-root
+
+A footnote to collide with[^1].
+
+[^1]: The real note.
+
 ## Duplicate headings
 
 ### Same heading

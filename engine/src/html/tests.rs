@@ -160,31 +160,149 @@ const ALLOWED_TAGS: &[&str] = &[
     "header", "section", "nav", "aside", "article", "p", "span", "h1", "h2", "h3", "h4", "h5",
     "h6", "a", "em", "strong", "del", "mark", "sup", "sub", "u", "br", "hr", "code", "pre",
     "button", "ul", "ol", "li", "input", "label", "table", "thead", "tbody", "tr", "th", "td",
-    "colgroup", "col", "blockquote", "details", "summary", "figure", "figcaption", "img", "svg",
-    "g", "nobr",
+    "colgroup", "col", "blockquote", "details", "summary", "figure", "figcaption", "img", "nobr",
 ];
 
-/// Assert that every tag in `out` is one the renderer emits — a whitelist
-/// beats grepping for individual payloads, which escaped text keeps matching.
+/// MathML, spelled out. `math-core`'s output is inserted unescaped, so this is
+/// the list that decides what "trusted" means — an open-ended
+/// `starts_with('m')` also waved through `<marquee>` and `<map>`.
+const ALLOWED_MATHML: &[&str] = &[
+    "math", "annotation", "annotation-xml", "semantics", "merror", "mfrac", "mi", "mmultiscripts",
+    "mn", "mo", "mover", "mpadded", "mphantom", "mprescripts", "mroot", "mrow", "ms", "mspace",
+    "msqrt", "mstyle", "msub", "msubsup", "msup", "mtable", "mtd", "mtext", "mtr", "munder",
+    "munderover",
+];
+
+/// Attributes the renderer emits. Everything else — and anything at all
+/// starting with `on` — came from the document.
+const ALLOWED_ATTRS: &[&str] = &[
+    "align", "alt", "charset", "checked", "class", "content", "data-done", "data-lang",
+    "data-level", "data-theme", "decoding", "disabled", "display", "draggable", "for", "height",
+    "href", "id", "lang", "loading", "name", "open", "rel", "scriptlevel", "span", "src", "start",
+    "style", "tabindex", "title", "type", "width", "xmlns",
+];
+
 fn assert_no_injected_tags(out: &str) {
-    let mut rest = out;
-    while let Some(i) = rest.find('<') {
-        rest = &rest[i + 1..];
-        let name: String = rest
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '!' || *c == '/')
-            .collect();
-        let name = name.trim_start_matches('/').to_ascii_lowercase();
-        if name.is_empty() {
-            continue;
-        }
-        // MathML elements all start with `m`; math-core is trusted output.
-        let mathml = name.starts_with('m') && name.len() <= 12;
+    for (name, _) in elements(out) {
         assert!(
-            ALLOWED_TAGS.contains(&name.as_str()) || mathml,
+            ALLOWED_TAGS.contains(&name.as_str()) || ALLOWED_MATHML.contains(&name.as_str()),
             "unexpected <{name}> in output:\n{out}"
         );
     }
+}
+
+/// The other half of the whitelist: a tag we emit can still carry an attribute
+/// we did not, and an `href` we did emit can still point somewhere it should
+/// not. Both are what an escaping failure actually looks like.
+fn assert_no_injected_attributes(out: &str) {
+    for (tag, attrs) in elements(out) {
+        // MathML carries a long presentation vocabulary (`lspace`, `stretchy`,
+        // `mathvariant`, …) that is inert and not worth enumerating. What
+        // matters is that math-core never reaches a navigable attribute: every
+        // MathML element accepts `href`.
+        let mathml = ALLOWED_MATHML.contains(&tag.as_str());
+        for (name, value) in attributes(&attrs) {
+            assert!(
+                !name.starts_with("on"),
+                "event handler {name}={value:?} on <{tag}>:\n{out}"
+            );
+            if mathml {
+                assert!(
+                    !matches!(name.as_str(), "href" | "xlink:href" | "src"),
+                    "navigable {name}={value:?} on MathML <{tag}>:\n{out}"
+                );
+                continue;
+            }
+            assert!(
+                ALLOWED_ATTRS.contains(&name.as_str()) || name.starts_with("aria-"),
+                "unexpected attribute {name} on <{tag}>:\n{out}"
+            );
+            if name == "href" || name == "src" {
+                let v = value.trim().to_ascii_lowercase();
+                let ok = v.starts_with('#')
+                    || v.starts_with("http://")
+                    || v.starts_with("https://")
+                    || v.starts_with("mailto:")
+                    || v.starts_with("tel:")
+                    || v.starts_with("ftp:")
+                    || v.starts_with("data:image/")
+                    || v.starts_with("data:font/")
+                    || !v.contains(':');
+                assert!(ok, "unsafe {name}={value:?} on <{tag}>:\n{out}");
+            }
+        }
+    }
+}
+
+/// `(tag-name, attribute-text)` for every start tag, skipping the contents of
+/// raw-text elements so a `<` inside the stylesheet or the script is not read
+/// as markup.
+fn elements(out: &str) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let mut rest = out;
+    while let Some(i) = rest.find('<') {
+        rest = &rest[i + 1..];
+        let closing = rest.starts_with('/');
+        let name: String = rest
+            .trim_start_matches('/')
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '!' || *c == '-')
+            .collect();
+        let name = name.to_ascii_lowercase();
+        if name.is_empty() {
+            continue;
+        }
+        let end = rest.find('>').unwrap_or(rest.len());
+        if !closing {
+            let attrs = rest[name.len().min(end)..end].to_string();
+            found.push((name.clone(), attrs));
+        }
+        rest = &rest[end..];
+        // `<style>` and `<script>` are raw text: skip to the matching close so
+        // CSS selectors and JS comparisons do not parse as tags.
+        if !closing && (name == "style" || name == "script") {
+            let close = format!("</{name}>");
+            if let Some(i) = rest.find(&close) {
+                rest = &rest[i + close.len()..];
+            }
+        }
+    }
+    found
+}
+
+fn attributes(attrs: &str) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let mut rest = attrs.trim();
+    while !rest.is_empty() {
+        let name: String = rest.chars().take_while(|c| !"= \t\n/>".contains(*c)).collect();
+        if name.is_empty() {
+            rest = &rest[rest.chars().next().map_or(0, char::len_utf8)..];
+            continue;
+        }
+        rest = rest[name.len()..].trim_start();
+        let value = if let Some(after) = rest.strip_prefix('=') {
+            let after = after.trim_start();
+            let quote = after.chars().next().filter(|c| *c == '"' || *c == '\'');
+            match quote {
+                Some(q) => {
+                    let body = &after[1..];
+                    let end = body.find(q).unwrap_or(body.len());
+                    rest = &body[(end + 1).min(body.len())..];
+                    body[..end].to_string()
+                }
+                None => {
+                    let end = after.find(|c: char| c.is_whitespace()).unwrap_or(after.len());
+                    rest = &after[end..];
+                    after[..end].to_string()
+                }
+            }
+        } else {
+            String::new()
+        };
+        found.push((name.to_ascii_lowercase(), value));
+        rest = rest.trim_start();
+    }
+    found
 }
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n0000";
@@ -196,8 +314,17 @@ fn a_fragment_carries_its_own_styles_and_root() {
     let out = render("# Title\n\ntext", "", "", b"");
     assert!(out.starts_with("<style>"), "{out}");
     assert!(out.contains("<div class=\"md2pdf\" id=\"md2pdf-root\" lang=\"en\">"));
-    assert!(out.trim_end().ends_with("</script>"));
     assert!(!out.contains("<!doctype"));
+}
+
+/// A fragment is mounted by a host that would have to re-execute the script to
+/// make it run at all. Not shipping one means the host never needs a
+/// "run the first script you find in this document" primitive.
+#[test]
+fn only_the_standalone_export_carries_a_script() {
+    assert!(!render("# a\n\ntext", "", "", b"").contains("<script"));
+    let standalone = render("# a\n\ntext", "standalone=1\n", "", b"");
+    assert!(standalone.contains("<script>"), "{standalone}");
 }
 
 #[test]
@@ -529,19 +656,27 @@ fn a_figure_is_never_nested_inside_a_paragraph() {
 }
 
 #[test]
-fn mermaid_inlines_the_hosts_svg_and_falls_back_to_code() {
+fn mermaid_embeds_the_hosts_svg_as_an_image_and_falls_back_to_code() {
     let key = mermaid_key("graph LR\nA-->B");
     let out = html_with("```mermaid\ngraph LR\nA-->B\n```", &key, b"<svg><g/></svg>");
-    assert!(out.contains("<div class=\"md2pdf-mermaid\"><svg><g/></svg></div>"), "{out}");
+    assert!(out.contains("<figure class=\"md2pdf-mermaid\"><img src=\"data:image/svg+xml;base64,"), "{out}");
+    assert!(out.contains("alt=\"Mermaid diagram\""), "{out}");
     assert!(body("```mermaid\ngraph LR\n```").contains("data-lang=\"mermaid\""));
 }
 
+/// The diagram SVG is the plugin's rendering of a source the document controls,
+/// so it is never inlined. Inside `<img>` it cannot script or fetch, whatever
+/// it turns out to contain.
 #[test]
-fn a_scriptable_mermaid_svg_is_refused() {
+fn a_scriptable_mermaid_svg_is_embedded_inert() {
     let key = mermaid_key("graph LR");
-    let out = html_with("```mermaid\ngraph LR\n```", &key, b"<svg><script>x</script></svg>");
-    assert!(!out.contains("<script>x"), "{out}");
-    assert!(out.contains("data-lang=\"mermaid\""), "{out}");
+    let hostile = br#"<svg onload="alert(1)"><script>x</script><foreignObject><img src=x onerror=alert(1)></foreignObject><a xlink:href="javascript:alert(1)">go</a></svg>"#;
+    let out = html_with("```mermaid\ngraph LR\n```", &key, hostile);
+    for payload in ["<script", "onload", "onerror", "javascript:", "foreignObject"] {
+        assert!(!out.contains(payload), "{payload} survived into the markup:\n{out}");
+    }
+    assert!(out.contains("<img src=\"data:image/svg+xml;base64,"), "{out}");
+    assert_no_injected_tags(&out);
 }
 
 #[test]
@@ -815,4 +950,78 @@ fn the_edge_case_fixture_renders_without_panicking() {
     assert_no_injected_tags(&strip_chrome(&out));
     // The fixture ends in a BibTeX block, so citations must have resolved.
     assert!(out.contains("md2pdf-ref-knuth"), "{}", strip_chrome(&out));
+}
+
+/// `math-core`'s MathML is inserted unescaped — the one place left where the
+/// renderer trusts markup it did not write. `\text{…}` takes arbitrary content
+/// and every MathML element accepts `href`, so this is where that trust is
+/// checked rather than assumed.
+#[test]
+fn hostile_tex_cannot_reach_the_markup() {
+    let cases = [
+        r"\text{</span><img src=x onerror=alert(1)>}",
+        r"\href{javascript:alert(1)}{click}",
+        r"\text{</math><script>alert(1)</script>}",
+        r#"\text{" onload="alert(1)}"#,
+        r"\text{a & b < c > d}",
+        r"\class{md2pdf-toc-btn}{x}",
+    ];
+    for latex in cases {
+        for md in [format!("${latex}$"), format!("$${latex}$$")] {
+            let out = html(&md);
+            // The guards are the real check: an escaped `&lt;img …&gt;` is
+            // text and fine, an actual element or attribute is not.
+            assert_no_injected_tags(&out);
+            assert_no_injected_attributes(&out);
+            for tag in ["<script", "<img", "<iframe", "<span onload"] {
+                assert!(!out.contains(tag), "{latex} produced {tag}:\n{out}");
+            }
+        }
+    }
+}
+
+/// The renderer's own ids are not up for grabs. A heading that slugs to one of
+/// them would mint a duplicate, and every `#fragment` and `getElementById` for
+/// that id would then resolve to whichever came first in the document.
+#[test]
+fn a_heading_cannot_claim_a_reserved_id() {
+    let out = html(
+        "### md2pdf-toc-state\n\n### md2pdf-root\n\n### md2pdf-fn-1\n\n\
+         ### md2pdf-md2pdf-x\n\ntext[^n]\n\n[^n]: note",
+    );
+    for reserved in ["md2pdf-toc-state", "md2pdf-root", "md2pdf-fn-1"] {
+        assert_eq!(
+            out.matches(&format!("id=\"{reserved}\"")).count(),
+            1,
+            "{reserved} was minted twice:\n{out}"
+        );
+    }
+    assert!(out.contains("id=\"toc-state\""), "{out}");
+    assert!(out.contains("id=\"x\""), "a repeated prefix must not survive:\n{out}");
+}
+
+/// Every fixture, through both guards. Opting individual tests in is how the
+/// mermaid path went years without the tag check ever running over it.
+#[test]
+fn no_fixture_can_inject_a_tag_or_an_attribute() {
+    const FIXTURES: &[(&str, &str)] = &[
+        ("html-edge.md", include_str!("../../../tests/html-edge.md")),
+        ("extended.md", include_str!("../../../tests/extended.md")),
+        ("sample.md", include_str!("../../../tests/sample.md")),
+        ("tables.md", include_str!("../../../tests/tables.md")),
+        ("headings.md", include_str!("../../../tests/headings.md")),
+        ("citations.md", include_str!("../../../tests/citations.md")),
+        ("emoji.md", include_str!("../../../tests/emoji.md")),
+        ("cover.md", include_str!("../../../tests/cover.md")),
+        ("frontmatter.md", include_str!("../../../tests/frontmatter.md")),
+    ];
+    for (name, md) in FIXTURES {
+        for options in ["", "standalone=1\n"] {
+            let out = render(md, options, "", b"");
+            let checked = if options.is_empty() { out.clone() } else { strip_chrome(&out) };
+            assert_no_injected_tags(&checked);
+            assert_no_injected_attributes(&checked);
+            assert!(!checked.contains("<script"), "{name}: script in a fragment");
+        }
+    }
 }
