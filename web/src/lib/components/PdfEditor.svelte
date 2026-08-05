@@ -167,10 +167,36 @@
     if (next === 'view') previewMode = 'document'
     const url = new URL(page.url)
     for (const mode of VIEW_MODES) url.searchParams.delete(mode)
-    url.searchParams.set(next, '')
-    // `?view` reads better than `?view=`, and both parse the same.
-    replaceState(url.href.replace(/=(?=&|$)/g, ''), page.state)
+    // `?view` reads better than `?view=`, and both parse the same. Built by
+    // hand rather than by patching what `URLSearchParams` serialised: with a
+    // fragment present the `=` is followed by `#`, so a trailing-only fixup
+    // left `/?view=#heading` behind.
+    const params = [...url.searchParams].map(([k, v]) => (v === '' ? k : `${k}=${v}`))
+    url.search = [...params, next].join('&')
+    replaceState(url.href, page.state)
   }
+
+  let htmlPreview = $state<HtmlPreview | null>(null)
+
+  /**
+   * Follow an outline jump in the URL. Inside a shadow root the browser cannot
+   * resolve a fragment itself, so it neither scrolls nor records where the
+   * reader is — which left `?view` unable to produce a link to a section.
+   */
+  function setHash(id: string) {
+    const url = new URL(page.url)
+    url.hash = id
+    replaceState(url.href, page.state)
+  }
+
+  // A `#heading` the page was opened with, applied once the document it names
+  // has actually been rendered.
+  let pendingHash = ''
+
+  $effect(() => {
+    if (!browser || !pendingHash || !htmlDoc) return
+    if (htmlPreview?.scrollTo(pendingHash)) pendingHash = ''
+  })
 
   // Mobile state
   let activeMobileTab = $state<'editor' | 'preview'>('editor')
@@ -264,6 +290,12 @@
         previewMode = 'document'
         activeMobileTab = 'preview'
       }
+    }
+    // `/?view#some-heading` is a link to a section, so honour it once the
+    // document naming that heading has rendered.
+    if (page.url.hash.length > 1) {
+      pendingHash = decodeURIComponent(page.url.hash.slice(1))
+      previewMode = 'document'
     }
 
     // Hide loading overlay and trigger first compile
@@ -1105,7 +1137,12 @@
         ></div>
         {#if previewMode === 'document'}
           <div class="html-preview-container">
-            <HtmlPreview html={htmlDoc} theme={settingsStore.theme} />
+            <HtmlPreview
+              bind:this={htmlPreview}
+              html={htmlDoc}
+              theme={settingsStore.theme}
+              onnavigate={setHash}
+            />
           </div>
         {/if}
         {#if previewMode === 'pages' && status === 'compiling' && !previewDoc}

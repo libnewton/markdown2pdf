@@ -5,7 +5,16 @@
 	// same thing the download and the CLI produce. It is mounted in a shadow
 	// root so the document's CSS and the app's CSS can never reach each other.
 
-	let { html = '', theme }: { html?: string; theme: 'light' | 'dark' } = $props();
+	let {
+		html = '',
+		theme,
+		onnavigate
+	}: {
+		html?: string;
+		theme: 'light' | 'dark';
+		/** A heading the reader jumped to, so the URL can follow along. */
+		onnavigate?: (id: string) => void;
+	} = $props();
 
 	let host = $state<HTMLDivElement | null>(null);
 	let root: ShadowRoot | null = null;
@@ -59,25 +68,34 @@
 	// which is a poor thing to hand a renderer whose input is a file someone
 	// sent you. Re-implementing the same two behaviours costs less.
 	function onClick(e: Event) {
-		const target = e.composedPath()[0];
-		if (!(target instanceof Element)) return;
+		const clicked = e.composedPath()[0];
+		if (!(clicked instanceof Element)) return;
 
-		const copy = target.closest('.md2pdf-copy');
+		const copy = clicked.closest('.md2pdf-copy');
 		if (copy instanceof HTMLElement) {
 			void copyCode(copy);
 			return;
 		}
 
-		const link = target.closest('a[href^="#"]');
+		const link = clicked.closest('a[href^="#"]');
 		if (!(link instanceof HTMLAnchorElement) || !root) return;
 		// The browser cannot resolve a fragment against ids inside a shadow
 		// root, so the jump is ours to make.
 		e.preventDefault();
 		const toggle = root.getElementById('md2pdf-toc-state');
 		if (toggle instanceof HTMLInputElement) toggle.checked = false;
-		root
-			.getElementById(decodeURIComponent(link.hash.slice(1)))
-			?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+		const id = decodeURIComponent(link.hash.slice(1));
+		const target = root.getElementById(id);
+		if (!target) return;
+		target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+		onnavigate?.(id);
+	}
+
+	/** Jump to `id` without a click — for a link arriving in the URL. */
+	export function scrollTo(id: string): boolean {
+		const target = root?.getElementById(id);
+		target?.scrollIntoView({ block: 'start' });
+		return !!target;
 	}
 
 	async function copyCode(button: HTMLElement) {
