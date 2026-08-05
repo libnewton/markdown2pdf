@@ -37,3 +37,7 @@ remote
 
 # Python bytecode from bin/md2pdf
 __pycache__/
+
+# Playwright
+web/test-results
+web/playwright-report

@@ -37,6 +37,10 @@ web:
     - npm ci --cache .npm --prefer-offline
     - npm run check
     - npm test
+    # The browser tests cover what unit tests structurally cannot: the
+    # document the app actually renders.
+    - npx playwright install --with-deps chromium
+    - npm run test:e2e
 
 pages:
   stage: build
