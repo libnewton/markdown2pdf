@@ -258,6 +258,12 @@
   type PreviewMode = 'pages' | 'document'
   let previewMode = $state<PreviewMode>('pages')
   let htmlDoc = $state('')
+  // Content the render had to degrade — an image it could not fetch, a diagram
+  // it could not draw. The document still renders, which is why these would
+  // otherwise pass unnoticed.
+  let warnings = $state<string[]>([])
+  let isWarningsOpen = $state(false)
+  const unreachable = (url: string) => `could not fetch: ${url}`
   let htmlTimer: number | null = null
   const HTML_DEBOUNCE_MS = 120
 
@@ -520,12 +526,20 @@
     try {
       // `editable` gives the fragment its source lines and live checkboxes;
       // the reference view has a source it will not write to, so it opts out.
-      const html = await client.renderHtml(md, imagesToSend(documentImages(md)), false, !readOnly)
+      const { html, diagnostics } = await client.renderHtml(
+        md,
+        imagesToSend(documentImages(md)),
+        false,
+        !readOnly,
+      )
       // Both guards matter: `seq` catches a render this component superseded,
       // `md === markdown` catches one that finished against text the document
       // has since moved past — which is how a checkbox click during the
       // debounce window got repainted in its old state.
-      if (seq === htmlSeq && md === markdown) htmlDoc = html
+      if (seq === htmlSeq && md === markdown) {
+        htmlDoc = html
+        warnings = [...new Set([...diagnostics, ...cachedRemoteImages(md).failed.map(unreachable)])]
+      }
     } catch (error) {
       // A render the worker dropped in favour of a newer one is not an error.
       if (error instanceof Error && error.message === SUPERSEDED) return
@@ -732,7 +746,7 @@
     editorPane?.flushPendingEdit()
     if (!client) return
     const md = markdown
-    const html = await client.renderHtml(md, imagesToSend(documentImages(md)), true)
+    const { html } = await client.renderHtml(md, imagesToSend(documentImages(md)), true)
     download(new Blob([html], { type: 'text/html;charset=utf-8' }), '.html')
   }
 
@@ -1224,6 +1238,16 @@
             <div class="error-badge">
               <span>⚠️ Failed</span>
             </div>
+          {:else if warnings.length > 0}
+            <button
+              class="warning-badge"
+              onclick={() => (isWarningsOpen = !isWarningsOpen)}
+              aria-expanded={isWarningsOpen}
+              title="Content the preview could not render"
+            >
+              {warnings.length}
+              {warnings.length === 1 ? 'warning' : 'warnings'}
+            </button>
           {/if}
         </div>
         <div class="preview-toolbar-right">
@@ -1249,6 +1273,13 @@
           bind:this={svgContainerEl}
         ></div>
         {#if previewMode === 'document'}
+          {#if isWarningsOpen && warnings.length > 0}
+            <ul class="warning-list">
+              {#each warnings as warning (warning)}
+                <li>{warning}</li>
+              {/each}
+            </ul>
+          {/if}
           <div class="html-preview-container">
             <HtmlPreview
               bind:this={htmlPreview}
@@ -1681,6 +1712,40 @@
     display: flex;
     align-items: center;
     gap: var(--space-md);
+  }
+
+  /* A degraded render, not a failed one: the document is on screen and
+     something in it is a placeholder. Amber rather than red. */
+  .warning-badge {
+    height: var(--control);
+    padding: 0 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-gray-800);
+    background: light-dark(#fef3c7, #4a3a10);
+    border: 1px solid light-dark(#fcd34d, #7c6218);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .warning-list {
+    position: absolute;
+    z-index: 5;
+    top: var(--pane-toolbar-height);
+    left: var(--space-sm);
+    right: var(--space-sm);
+    max-height: 40%;
+    overflow: auto;
+    margin: 0;
+    padding: var(--space-sm) var(--space-md) var(--space-sm) var(--space-xl);
+    font-size: 0.75rem;
+    line-height: 1.7;
+    color: var(--color-gray-800);
+    background: var(--color-white);
+    border: 1px solid light-dark(#fcd34d, #7c6218);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    overflow-wrap: anywhere;
   }
 
   .error-badge {

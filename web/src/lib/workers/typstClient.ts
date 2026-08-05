@@ -101,13 +101,13 @@ export class TypstWorkerClient {
 		images: Record<string, Uint8Array<ArrayBuffer>> = {},
 		standalone = false,
 		editable = false
-	): Promise<string> {
+	): Promise<{ html: string; diagnostics: string[] }> {
 		const id = this.#nextId();
 		const request: HtmlRequest = { type: 'html', id, markdown, images, standalone, editable };
 		return new Promise<CompileResult>((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });
 			this.#worker.postMessage(request);
-		}).then((r) => r.html ?? '');
+		}).then((r) => ({ html: r.html ?? '', diagnostics: r.diagnostics ?? [] }));
 	}
 
 	/**

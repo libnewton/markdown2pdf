@@ -284,7 +284,7 @@ async function renderHtml(
 	standalone: boolean,
 	id = '',
 	editable = false
-): Promise<string> {
+): Promise<{ html: string; diagnostics: string[] }> {
 	const superseded = () => !standalone && id !== '' && id !== latestHtmlId;
 	const engine = await getEngine();
 	const md = encode(markdown);
@@ -299,6 +299,10 @@ async function renderHtml(
 	}
 
 	const assets: Asset[] = [];
+	// What the document asked for and did not get. The engine already degrades
+	// each of these to a placeholder, which is the right behaviour and also the
+	// reason nobody notices — so it is reported rather than swallowed.
+	const diagnostics: string[] = [];
 	if (standalone) {
 		for (const [key] of wanted.font ?? []) {
 			if (safePath(key)) assets.push([key, await loadFont(key)]);
@@ -307,10 +311,12 @@ async function renderHtml(
 	for (const [path] of wanted.image ?? []) {
 		const bytes = imageStore.get(path);
 		if (bytes) assets.push([path, bytes]);
+		else diagnostics.push(`image not found: ${path}`);
 	}
-	for (const [, alias] of wanted.remote ?? []) {
+	for (const [url, alias] of wanted.remote ?? []) {
 		const bytes = imageStore.get(alias);
 		if (bytes) assets.push([alias, bytes]);
+		else diagnostics.push(`could not fetch: ${url}`);
 	}
 	const codepoints = (wanted.emoji ?? []).map(([cp]) => cp);
 	await fetchTwemoji(codepoints);
@@ -320,11 +326,18 @@ async function renderHtml(
 		if (bytes) assets.push(['twemoji/' + cp + '.svg', bytes]);
 	}
 	// Diagrams are the expensive part: a cold one loads a 3.9 MB plugin.
-	assets.push(...(await renderMermaid(wanted.mermaid ?? [])));
+	const wantedDiagrams = wanted.mermaid ?? [];
+	const diagrams = await renderMermaid(wantedDiagrams);
+	if (diagrams.length < wantedDiagrams.length) {
+		diagnostics.push(
+			`${wantedDiagrams.length - diagrams.length} diagram(s) could not be drawn — showing the source`
+		);
+	}
+	assets.push(...diagrams);
 	if (superseded()) throw new Error(SUPERSEDED);
 
 	const { manifest, blob } = buildAssetBundle(assets);
-	return decode(
+	const html = decode(
 		engine(
 			'render_html',
 			md,
@@ -333,6 +346,7 @@ async function renderHtml(
 			blob
 		)
 	);
+	return { html, diagnostics };
 }
 
 /**
@@ -460,13 +474,13 @@ ctx.onmessage = (event: MessageEvent<CompileRequest | HtmlRequest | CancelReques
 		// as soon as they notice — before paying for diagrams and fonts.
 		if (!message.standalone) latestHtmlId = message.id;
 		renderHtml(message.markdown, message.standalone ?? false, message.id, message.editable ?? false)
-			.then((html) =>
+			.then(({ html, diagnostics }) =>
 				ctx.postMessage({
 					type: 'compile-result',
 					id: message.id,
 					ok: true,
 					html,
-					diagnostics: []
+					diagnostics
 				} satisfies CompileResponse)
 			)
 			.catch((error) => reply(message.id, error instanceof Error ? error.message : String(error)));

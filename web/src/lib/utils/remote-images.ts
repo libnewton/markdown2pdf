@@ -78,9 +78,11 @@ export function collectRemoteImageUrls(markdown: string): string[] {
 export function cachedRemoteImages(markdown: string): {
 	images: Record<string, Uint8Array<ArrayBuffer>>;
 	missing: string[];
+	failed: string[];
 } {
 	const images: Record<string, Uint8Array<ArrayBuffer>> = {};
 	const missing: string[] = [];
+	const failed: string[] = [];
 	for (const url of collectRemoteImageUrls(markdown)) {
 		if (!cache.has(url)) {
 			missing.push(url);
@@ -88,30 +90,48 @@ export function cachedRemoteImages(markdown: string): {
 		}
 		const bytes = cache.get(url);
 		// A cached `null` is a URL that failed — known, so not missing.
-		if (bytes) images[`remote/${hashUrl(url)}`] = bytes;
+		if (bytes) {
+			images[`remote/${hashUrl(url)}`] = bytes;
+		} else {
+			// Typst treats a missing `image()` as fatal, so one unreachable URL
+			// used to take the whole paged preview down with it — silently. A
+			// blank stand-in keeps the rest of the document renderable, which
+			// is what the CLI has always done.
+			images[`remote/${hashUrl(url)}`] = BLANK_PNG;
+			failed.push(url);
+		}
 	}
-	return { images, missing };
+	return { images, missing, failed };
 }
+
+/** A 1×1 fully transparent PNG: valid to decode, invisible on the page. */
+const BLANK_PNG = new Uint8Array([
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+	0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+	0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+	0x42, 0x60, 0x82
+]);
 
 /**
  * Fetch the images this document references that are not cached yet.
- * Resolves to true when at least one new image became available, i.e. when a
- * recompile would show something new.
+ *
+ * Resolves to true when any of them reached a verdict — a failure counts,
+ * because a failure now produces a placeholder, and without a recompile the
+ * document would keep the missing image that Typst refuses to render.
  */
 export async function prefetchRemoteImages(urls: string[]): Promise<boolean> {
 	if (urls.length === 0) return false;
 	const queue = urls.slice(0, MAX_IMAGES);
 	let next = 0;
-	let gotNew = false;
 	// A few at a time. Firing every URL at once is what turns a document with a
 	// long image list into a stall.
 	await Promise.all(
 		Array.from({ length: Math.min(MAX_PARALLEL, queue.length) }, async () => {
-			while (next < queue.length) {
-				const bytes = await fetchOne(queue[next++]);
-				if (bytes) gotNew = true;
-			}
+			while (next < queue.length) await fetchOne(queue[next++]);
 		})
 	);
-	return gotNew;
+	// Every queued URL is in the cache now, so the next pass has an answer for
+	// each and this cannot loop.
+	return queue.length > 0;
 }
