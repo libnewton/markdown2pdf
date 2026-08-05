@@ -203,6 +203,23 @@
     replaceState(url.href, page.state)
   }
 
+  // Scroll sync, for the Web preview only — the paged preview is a Typst
+  // render with nothing tying a page back to a line.
+  //
+  // Each side drives the other, so a flag suppresses the echo. It clears on
+  // the next frame rather than after a timeout, because that is exactly how
+  // long the scroll it caused takes to arrive.
+  let syncing = false
+
+  function sync(move: () => void) {
+    if (syncing || previewMode !== 'document' || !showEditor || !showPreview) return
+    syncing = true
+    move()
+    requestAnimationFrame(() => {
+      syncing = false
+    })
+  }
+
   // A `#heading` the page was opened with, applied once the document it names
   // has actually been rendered.
   let pendingHash = ''
@@ -1128,6 +1145,11 @@
         {readOnly}
         onImageSaved={handleImageSaved}
         onNewDocument={() => void documentMenu?.newBlank()}
+        onScrolled={() =>
+          sync(() => {
+            const line = editorPane?.topLine()
+            if (line) htmlPreview?.scrollToLine(line)
+          })}
       />
     </section>
 
@@ -1234,6 +1256,11 @@
               theme={settingsStore.theme}
               onnavigate={setHash}
               ontasktoggle={(line, checked) => editorPane?.setTaskMarker(line, checked)}
+              onscrolled={() =>
+                sync(() => {
+                  const line = htmlPreview?.lineAtTop()
+                  if (line) editorPane?.scrollToLine(line)
+                })}
             />
           </div>
         {/if}
