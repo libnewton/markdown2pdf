@@ -315,6 +315,10 @@ const REST: &str = r#"}
 .md2pdf-t-k { color: var(--md-t-k); }
 .md2pdf-t-t { color: var(--md-t-t); }
 .md2pdf-t-m { color: var(--md-t-m); }
+.md2pdf-t-f { color: var(--md-t-f); }
+.md2pdf-t-o { color: var(--md-t-o); }
+.md2pdf-t-p { color: var(--md-t-p); }
+.md2pdf-t-v { color: var(--md-t-v); }
 
 /* ---- tables ----------------------------------------------------------- */
 
