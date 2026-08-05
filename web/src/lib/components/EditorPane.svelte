@@ -36,6 +36,10 @@
     markdownEditor?.flushPendingEdit()
   }
 
+  export function setTaskMarker(line: number, checked: boolean): boolean {
+    return markdownEditor?.setTaskMarker(line, checked) ?? false
+  }
+
   export function insertMarkdownSnippet(snippet: string): void {
     if (markdownEditor?.insertTextAtSelection(snippet)) {
       return

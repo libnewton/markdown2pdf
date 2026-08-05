@@ -747,9 +747,23 @@ fn item_body<'a>(doc: &mut Doc, f: &Frame<'a>, item: &'a AstNode<'a>) -> String 
 
 fn task_item<'a>(doc: &mut Doc, f: &Frame<'a>, item: &'a AstNode<'a>) -> String {
     let checked = if task_checked(item) { " checked" } else { "" };
+    // comrak marks the whole list as a task list when any one item is a task,
+    // so a plain `Item` sibling arrives here too. It has no `[ ]` to write to,
+    // so it gets no line and stays inert.
+    let is_task = matches!(item.data.borrow().value, NodeValue::TaskItem(_));
+    let line = if is_task { f.line_of(item) } else { 0 };
+
+    let (attrs, id) = if doc.editable && line > 0 {
+        (
+            format!(" data-md-line=\"{line}\" aria-labelledby=\"md2pdf-task-{line}\""),
+            format!(" id=\"md2pdf-task-{line}\""),
+        )
+    } else {
+        (" disabled".to_string(), String::new())
+    };
     format!(
-        "<li class=\"md2pdf-task\"><input type=\"checkbox\" disabled{checked}>\
-         <div>{}</div></li>",
+        "<li class=\"md2pdf-task\"><input type=\"checkbox\"{attrs}{checked}>\
+         <div{id}>{}</div></li>",
         item_body(doc, f, item)
     )
 }

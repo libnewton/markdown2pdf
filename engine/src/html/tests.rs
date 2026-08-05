@@ -1104,6 +1104,76 @@ fn every_reported_line_is_inside_the_document() {
     }
 }
 
+/// Ticking a box in the preview edits the document, so the box has to know
+/// which line to edit — through every pass that moves lines.
+#[test]
+fn an_interactive_task_carries_the_line_that_wrote_it() {
+    let out = editable("- [ ] open\n- [x] done");
+    assert!(out.contains("data-md-line=\"1\""), "{out}");
+    assert!(out.contains("data-md-line=\"2\""), "{out}");
+    assert!(!out.contains("disabled"), "{out}");
+    // Named by its own text rather than by a wrapping label, which would make
+    // links and code spans inside the item toggle the box.
+    assert!(out.contains("aria-labelledby=\"md2pdf-task-1\""), "{out}");
+    assert!(out.contains("<div id=\"md2pdf-task-1\">"), "{out}");
+
+    // Through a blank-line collapse, an admonition, and a blockquote.
+    assert!(editable("intro\n\n\n\n\n- [ ] t").contains("data-md-line=\"6\""));
+    assert!(editable(":::info\n- [ ] t\n:::").contains("data-md-line=\"2\""));
+    assert!(editable("> - [x] t").contains("data-md-line=\"1\""));
+}
+
+/// The contract the editor relies on, stated once: whatever line a checkbox
+/// names, that line of the *source* holds a task marker the editor can flip.
+/// The pattern here is the one `web/src/lib/utils/task-marker.ts` uses.
+#[test]
+fn every_checkbox_points_at_a_line_that_holds_a_marker() {
+    fn is_marker(line: &str) -> bool {
+        let rest = line.trim_start_matches([' ', '\t', '>']);
+        let rest = match rest.chars().next() {
+            Some('-') | Some('*') | Some('+') => &rest[1..],
+            Some(c) if c.is_ascii_digit() => {
+                let digits = rest.chars().take_while(char::is_ascii_digit).count();
+                match rest[digits..].chars().next() {
+                    Some('.') | Some(')') => &rest[digits + 1..],
+                    _ => return false,
+                }
+            }
+            _ => return false,
+        };
+        let rest = rest.trim_start_matches([' ', '\t']);
+        matches!(rest.as_bytes(), [b'[', b' ' | b'x' | b'X', b']', ..])
+            && rest.len() > 3
+            && rest.len() != rest.trim_start_matches(['[']).len()
+    }
+
+    let mut checked = 0;
+    for (name, md) in FIXTURES {
+        let out = editable(md);
+        let source: Vec<&str> = md.lines().collect();
+        let mut rest = out.as_str();
+        while let Some(i) = rest.find("<input type=\"checkbox\" data-md-line=\"") {
+            rest = &rest[i + 37..];
+            let end = rest.find('"').unwrap();
+            let line: usize = rest[..end].parse().unwrap();
+            let text = source.get(line - 1).copied().unwrap_or("");
+            assert!(is_marker(text), "{name} line {line} is not a marker: {text:?}");
+            checked += 1;
+            rest = &rest[end..];
+        }
+    }
+    assert!(checked > 3, "only {checked} checkboxes across the fixtures — is this vacuous?");
+}
+
+/// A list where only some items are tasks: comrak marks the whole list, but a
+/// plain sibling has no `[ ]` to write to and must not offer one.
+#[test]
+fn only_a_real_task_item_becomes_clickable() {
+    let out = editable("- [ ] task\n- plain");
+    assert_eq!(out.matches("data-md-line").count(), 2, "one list, one task:\n{out}");
+    assert_eq!(out.matches("disabled").count(), 1, "the plain item stays inert:\n{out}");
+}
+
 /// The default output is unchanged: this is preview machinery, and a download
 /// has no source to point back at.
 #[test]
@@ -1266,3 +1336,4 @@ fn no_fixture_can_inject_a_tag_or_an_attribute() {
         }
     }
 }
+

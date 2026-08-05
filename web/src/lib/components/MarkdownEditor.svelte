@@ -6,7 +6,9 @@
   import { markdown as langMarkdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
+  import { isolateHistory } from '@codemirror/commands'
   import { linkAround, slashCommand, toggleWrap } from '$lib/editor/commands'
+  import { taskMarker } from '$lib/utils/task-marker'
 
   interface Props {
     markdown: string
@@ -63,6 +65,37 @@
     suppressEditorUpdate = false
     flushPendingEdit()
     editorView.focus()
+    return true
+  }
+
+  /**
+   * Set the task marker on `line` (1-based) to `checked`.
+   *
+   * Returns false when that line no longer carries a marker — the preview was
+   * stale, so nothing is written and the next render puts the box back.
+   */
+  export function setTaskMarker(line: number, checked: boolean): boolean {
+    // `EditorState.readOnly` is a facet commands consult; it does not stop a
+    // dispatch, so the reference view needs the guard spelled out.
+    if (readOnly || !editorView) return false
+    if (line < 1 || line > editorView.state.doc.lines) return false
+    const l = editorView.state.doc.line(line)
+    const marker = taskMarker(l.text)
+    if (!marker) return false
+    // Already right: the click was against a render that had fallen behind.
+    if (marker.checked === checked) return true
+
+    suppressEditorUpdate = true
+    editorView.dispatch({
+      changes: { from: l.from + marker.at, to: l.from + marker.at + 1, insert: checked ? 'x' : ' ' },
+      // One toggle, one undo step: without this two quick ticks merge.
+      annotations: isolateHistory.of('full'),
+    })
+    suppressEditorUpdate = false
+    // Publish now rather than after the typing throttle, so the preview
+    // catches up immediately. No `focus()`: clicking a box in the preview must
+    // not pull the caret into a pane you may not be looking at.
+    flushPendingEdit()
     return true
   }
 

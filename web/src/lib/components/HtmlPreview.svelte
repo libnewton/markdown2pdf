@@ -8,12 +8,15 @@
 	let {
 		html = '',
 		theme,
-		onnavigate
+		onnavigate,
+		ontasktoggle
 	}: {
 		html?: string;
 		theme: 'light' | 'dark';
 		/** A heading the reader jumped to, so the URL can follow along. */
 		onnavigate?: (id: string) => void;
+		/** A checkbox the reader ticked, by the source line that wrote it. */
+		ontasktoggle?: (line: number, checked: boolean) => void;
 	} = $props();
 
 	let host = $state<HTMLDivElement | null>(null);
@@ -23,9 +26,13 @@
 		if (!host) return;
 		if (!root) {
 			root = host.attachShadow({ mode: 'open' });
-			// Bound to the root rather than its children, so it outlives every
+			// Bound to the root rather than its children, so both outlive every
 			// re-render below.
 			root.addEventListener('click', onClick);
+			// `change`, not `click`: it fires for keyboard activation too,
+			// reports the state after the toggle, and — being composed: false —
+			// stops at the root instead of leaking into the page.
+			root.addEventListener('change', onChange);
 		}
 		mount(root, html);
 	});
@@ -57,9 +64,17 @@
 			styleEl.textContent = css;
 			mountedStyle = css;
 		}
+		// Replacing the body destroys whatever had focus, so a box reached by
+		// keyboard gets it back.
+		const focused = (target.activeElement as HTMLElement | null)?.dataset?.mdLine;
 		// Everything after the stylesheet, replaced in one parse.
 		while (styleEl.nextSibling) styleEl.nextSibling.remove();
 		styleEl.insertAdjacentHTML('afterend', body);
+		if (focused) {
+			target
+				.querySelector<HTMLInputElement>(`input[data-md-line="${focused}"]`)
+				?.focus({ preventScroll: true });
+		}
 	}
 
 	// The download carries a script for these two behaviours. A fragment does
@@ -102,6 +117,12 @@
 	export function toggleOutline() {
 		const toggle = root?.getElementById('md2pdf-toc-state');
 		if (toggle instanceof HTMLInputElement) toggle.checked = !toggle.checked;
+	}
+
+	function onChange(e: Event) {
+		const box = e.composedPath()[0];
+		if (!(box instanceof HTMLInputElement) || !box.dataset.mdLine) return;
+		ontasktoggle?.(Number(box.dataset.mdLine), box.checked);
 	}
 
 	async function copyCode(button: HTMLElement) {

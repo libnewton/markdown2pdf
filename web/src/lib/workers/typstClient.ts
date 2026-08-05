@@ -1,4 +1,5 @@
 import type { SvgDocument } from '$lib/typst/svg-split';
+import type { HtmlRequest } from './compileProtocol';
 
 type CompileRequest = {
 	type: 'compile';
@@ -6,14 +7,6 @@ type CompileRequest = {
 	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
 	format?: 'pdf' | 'preview';
-};
-
-type HtmlRequest = {
-	type: 'html';
-	id: string;
-	markdown: string;
-	images?: Record<string, Uint8Array<ArrayBuffer>>;
-	standalone?: boolean;
 };
 
 type CompileResponse =
@@ -106,10 +99,11 @@ export class TypstWorkerClient {
 	renderHtml(
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>> = {},
-		standalone = false
+		standalone = false,
+		editable = false
 	): Promise<string> {
 		const id = this.#nextId();
-		const request: HtmlRequest = { type: 'html', id, markdown, images, standalone };
+		const request: HtmlRequest = { type: 'html', id, markdown, images, standalone, editable };
 		return new Promise<CompileResult>((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });
 			this.#worker.postMessage(request);

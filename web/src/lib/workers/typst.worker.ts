@@ -9,7 +9,7 @@ import {
 } from '@myriaddreamin/typst.ts';
 import typstCompilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm?url';
 import typstRendererWasmUrl from '@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm?url';
-import { SUPERSEDED } from './compileProtocol';
+import { SUPERSEDED, type HtmlRequest } from './compileProtocol';
 import { splitSvgDocument, type SvgDocument } from '$lib/typst/svg-split';
 import { buildAssetBundle, unescapeSource, type Asset } from './assetBundle';
 
@@ -29,14 +29,6 @@ type CompileRequest = {
 	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
 	format?: 'pdf' | 'preview';
-};
-
-type HtmlRequest = {
-	type: 'html';
-	id: string;
-	markdown: string;
-	images?: Record<string, Uint8Array<ArrayBuffer>>;
-	standalone?: boolean;
 };
 
 type CompileResponse =
@@ -287,7 +279,12 @@ function loadFont(key: string): Promise<Uint8Array> {
 // the way through rather than rendered for a pane that has already moved on.
 let latestHtmlId = '';
 
-async function renderHtml(markdown: string, standalone: boolean, id = ''): Promise<string> {
+async function renderHtml(
+	markdown: string,
+	standalone: boolean,
+	id = '',
+	editable = false
+): Promise<string> {
 	const superseded = () => !standalone && id !== '' && id !== latestHtmlId;
 	const engine = await getEngine();
 	const md = encode(markdown);
@@ -331,7 +328,7 @@ async function renderHtml(markdown: string, standalone: boolean, id = ''): Promi
 		engine(
 			'render_html',
 			md,
-			encode(`standalone=${standalone ? 1 : 0}`),
+			encode(`standalone=${standalone ? 1 : 0}\neditable=${editable ? 1 : 0}`),
 			encode(manifest),
 			blob
 		)
@@ -462,7 +459,7 @@ ctx.onmessage = (event: MessageEvent<CompileRequest | HtmlRequest | CancelReques
 		// render is one of a stream, so the newest wins and the rest can stop
 		// as soon as they notice — before paying for diagrams and fonts.
 		if (!message.standalone) latestHtmlId = message.id;
-		renderHtml(message.markdown, message.standalone ?? false, message.id)
+		renderHtml(message.markdown, message.standalone ?? false, message.id, message.editable ?? false)
 			.then((html) =>
 				ctx.postMessage({
 					type: 'compile-result',

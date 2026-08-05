@@ -309,6 +309,10 @@ const REST: &str = r#"}
 .md2pdf-copy:focus-visible { opacity: 1; }
 .md2pdf-copy:hover { color: var(--md-fg); }
 
+/* Live only in the editor's preview; the download's boxes are disabled. */
+.md2pdf-task > input:not(:disabled) { cursor: pointer; }
+.md2pdf-task > input:focus-visible { outline: 2px solid var(--md-accent); outline-offset: 2px; }
+
 .md2pdf-t-c { color: var(--md-t-c); font-style: italic; }
 .md2pdf-t-s { color: var(--md-t-s); }
 .md2pdf-t-n { color: var(--md-t-n); }

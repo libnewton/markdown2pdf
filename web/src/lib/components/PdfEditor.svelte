@@ -501,7 +501,9 @@
     if (!client) return
     const seq = ++htmlSeq
     try {
-      const html = await client.renderHtml(md, imagesToSend(documentImages(md)))
+      // `editable` gives the fragment its source lines and live checkboxes;
+      // the reference view has a source it will not write to, so it opts out.
+      const html = await client.renderHtml(md, imagesToSend(documentImages(md)), false, !readOnly)
       // Both guards matter: `seq` catches a render this component superseded,
       // `md === markdown` catches one that finished against text the document
       // has since moved past — which is how a checkbox click during the
@@ -1231,6 +1233,7 @@
               html={htmlDoc}
               theme={settingsStore.theme}
               onnavigate={setHash}
+              ontasktoggle={(line, checked) => editorPane?.setTaskMarker(line, checked)}
             />
           </div>
         {/if}
