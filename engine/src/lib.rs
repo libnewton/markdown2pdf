@@ -273,19 +273,54 @@ fn build_options() -> Options<'static> {
 // Pre-parse pass — extract custom block syntax comrak cannot parse
 // ==========================================================================
 
+/// One line of Markdown plus the 1-based line of the source it came from, or
+/// 0 for a line a pass invented.
+///
+/// The passes below rewrite whole blocks — a `:::info` of any length becomes
+/// three lines, a run of blank lines becomes three — so comrak's line numbers
+/// describe the text it was handed and not the text the author wrote.
+/// Carrying the origin along is what lets a rendered element point back at
+/// the line that produced it.
+type Line = (String, u32);
+
+fn as_lines(src: &str) -> Vec<Line> {
+    src.split('\n')
+        .enumerate()
+        .map(|(i, l)| (l.to_string(), i as u32 + 1))
+        .collect()
+}
+
+fn join_lines(lines: &[Line]) -> (String, Vec<u32>) {
+    let text = lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join("\n");
+    (text, lines.iter().map(|(_, o)| *o).collect())
+}
+
+/// Map origins expressed in `base`'s coordinates into `base`'s own, for the
+/// passes that re-run over a block's extracted body.
+pub(crate) fn rebase(local: &[u32], base: &[u32]) -> Vec<u32> {
+    local
+        .iter()
+        .map(|&l| if l == 0 { 0 } else { base.get(l as usize - 1).copied().unwrap_or(0) })
+        .collect()
+}
+
 struct Admonition {
     kind: String,
     title: String,
     source: String,
+    origin: Vec<u32>,
 }
 
 struct Spoiler {
     summary: String,
     source: String,
+    origin: Vec<u32>,
 }
 
 struct Preprocessed {
     markdown: String,
+    /// One entry per line of `markdown`, naming its line in the original source.
+    origin: Vec<u32>,
     admonitions: Vec<Admonition>,
     spoilers: Vec<Spoiler>,
     /// Per-table column-width multipliers, indexed by `<!--tablewidths:N-->`.
@@ -393,12 +428,14 @@ const ADMONITION_KINDS: &[&str] = &[
 /// placeholder that comrak parses as a standalone `HtmlBlock`.
 fn preprocess(src: &str) -> Preprocessed {
     let normalized = src.replace("\r\n", "\n");
-    let md0 = preprocess_blank_lines(&normalized);
-    let (md1, admonitions) = preprocess_admonitions(&md0);
-    let (md2, spoilers) = preprocess_spoilers(&md1);
-    let (md3, table_widths) = preprocess_table_widths(&md2);
+    let l0 = preprocess_blank_lines(as_lines(&normalized));
+    let (l1, admonitions) = preprocess_admonitions(l0);
+    let (l2, spoilers) = preprocess_spoilers(l1);
+    let (l3, table_widths) = preprocess_table_widths(l2);
+    let (markdown, origin) = join_lines(&l3);
     Preprocessed {
-        markdown: md3,
+        markdown,
+        origin,
         admonitions,
         spoilers,
         table_widths,
@@ -408,57 +445,56 @@ fn preprocess(src: &str) -> Preprocessed {
 /// Collapse a run of 3+ blank lines into a `[[md2pdf-blank-line]]` token so the
 /// extra vertical space survives parsing. Skips fenced code; only fires between
 /// two "preservable" lines (not list/quote/table/rule/fence/pagebreak).
-fn preprocess_blank_lines(src: &str) -> String {
-    if !src.contains("\n\n\n") {
-        return src.to_string();
+fn preprocess_blank_lines(lines: Vec<Line>) -> Vec<Line> {
+    if !lines.windows(3).any(|w| w.iter().all(|(l, _)| l.trim().is_empty())) {
+        return lines;
     }
-    let lines: Vec<&str> = src.split('\n').collect();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Line> = Vec::new();
     let mut fence: Option<(char, usize)> = None;
     let mut i = 0;
     while i < lines.len() {
-        let line = lines[i];
-        if let Some((fc, fl)) = fence_marker(line) {
+        let line = &lines[i];
+        if let Some((fc, fl)) = fence_marker(&line.0) {
             match fence {
                 None => fence = Some((fc, fl)),
                 Some((c, l)) if c == fc && fl >= l => fence = None,
                 _ => {}
             }
-            out.push(line.to_string());
+            out.push(line.clone());
             i += 1;
             continue;
         }
         if fence.is_some() {
-            out.push(line.to_string());
+            out.push(line.clone());
             i += 1;
             continue;
         }
-        if line.trim().is_empty() {
+        if line.0.trim().is_empty() {
             let start = i;
-            while i < lines.len() && lines[i].trim().is_empty() {
+            while i < lines.len() && lines[i].0.trim().is_empty() {
                 i += 1;
             }
             let blank_count = i - start;
-            let prev = out.iter().rev().find(|l| !l.trim().is_empty());
+            let prev = out.iter().rev().find(|(l, _)| !l.trim().is_empty());
             let next = lines.get(i);
             if blank_count >= 2
-                && prev.is_some_and(|l| should_preserve_blank(l))
-                && next.is_some_and(|l| should_preserve_blank(l))
+                && prev.is_some_and(|(l, _)| should_preserve_blank(l))
+                && next.is_some_and(|(l, _)| should_preserve_blank(l))
             {
-                out.push(String::new());
-                out.push(EXTRA_BLANK_LINE_TOKEN.to_string());
-                out.push(String::new());
+                // Three lines stand in for the whole run; the token belongs to
+                // no line of the source, so it carries no origin.
+                out.push((String::new(), 0));
+                out.push((EXTRA_BLANK_LINE_TOKEN.to_string(), 0));
+                out.push((String::new(), 0));
             } else {
-                for _ in 0..blank_count {
-                    out.push(String::new());
-                }
+                out.extend(lines[start..i].iter().cloned());
             }
             continue;
         }
-        out.push(line.to_string());
+        out.push(line.clone());
         i += 1;
     }
-    out.join("\n")
+    out
 }
 
 /// Whether a blank gap next to this line should be preserved as vertical space.
@@ -513,25 +549,25 @@ fn fence_marker(line: &str) -> Option<(char, usize)> {
 /// widen that column (`---` = 1fr, `---+` = 2fr, `---++` = 3fr). comrak rejects
 /// `+` in delimiter rows, so the `+`s are stripped here and the widths recorded
 /// behind a `<!--tablewidths:N-->` placeholder before the header row.
-fn preprocess_table_widths(src: &str) -> (String, Vec<Vec<usize>>) {
-    let lines: Vec<&str> = src.split('\n').collect();
+fn preprocess_table_widths(lines: Vec<Line>) -> (Vec<Line>, Vec<Vec<usize>>) {
     if !lines
         .iter()
-        .any(|l| l.contains('+') && l.contains('-') && l.contains('|'))
+        .any(|(l, _)| l.contains('+') && l.contains('-') && l.contains('|'))
     {
-        return (src.to_string(), Vec::new());
+        return (lines, Vec::new());
     }
-    let code = code_block_lines(src);
+    let (text, _) = join_lines(&lines);
+    let code = code_block_lines(&text);
     let mut blocks: Vec<Vec<usize>> = Vec::new();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Line> = Vec::new();
     for i in 0..lines.len() {
-        let line = lines[i];
+        let line = &lines[i];
         if code.contains(&(i + 1)) {
-            out.push(line.to_string());
+            out.push(line.clone());
             continue;
         }
-        let prev = i.checked_sub(1).map(|p| lines[p]);
-        if let Some((widths, stripped)) = parse_separator_widths(line, prev) {
+        let prev = i.checked_sub(1).map(|p| lines[p].0.as_str());
+        if let Some((widths, stripped)) = parse_separator_widths(&line.0, prev) {
             let id = blocks.len();
             blocks.push(widths);
             let header = out.pop().unwrap_or_default();
@@ -539,15 +575,16 @@ fn preprocess_table_widths(src: &str) -> (String, Vec<Vec<usize>>) {
             // inside a list item or a blockquote stays inside it. No blank lines
             // around it: an HTML comment is a block on its own and can interrupt
             // a paragraph, and blank lines would loosen an enclosing list.
-            let (prefix, _) = split_prefix(&header);
-            out.push(format!("{prefix}<!--tablewidths:{id}-->"));
+            let (prefix, _) = split_prefix(&header.0);
+            out.push((format!("{prefix}<!--tablewidths:{id}-->"), 0));
             out.push(header);
-            out.push(stripped);
+            // The separator row keeps its own line: only its `+` markers went.
+            out.push((stripped, line.1));
             continue;
         }
-        out.push(line.to_string());
+        out.push(line.clone());
     }
-    (out.join("\n"), blocks)
+    (out, blocks)
 }
 
 /// 1-based line numbers comrak reads as code, fenced or indented. The width
@@ -648,86 +685,83 @@ fn rebuild_row(original: &str, cells: &[String]) -> String {
 
 /// `:::kind ... :::` — CommonMark fence style. A fence of N colons closes only
 /// on a line of N or more colons, so longer fences may nest shorter ones.
-fn preprocess_admonitions(src: &str) -> (String, Vec<Admonition>) {
+fn preprocess_admonitions(lines: Vec<Line>) -> (Vec<Line>, Vec<Admonition>) {
     let mut blocks: Vec<Admonition> = Vec::new();
-    let lines: Vec<&str> = src.split('\n').collect();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Line> = Vec::new();
     let mut i = 0;
     let mut fence: Option<(char, usize)> = None;
     while i < lines.len() {
         // `:::` inside a code fence is literal, not an admonition.
-        if let Some((fc, fl)) = fence_marker(lines[i]) {
+        if let Some((fc, fl)) = fence_marker(&lines[i].0) {
             match fence {
                 None => fence = Some((fc, fl)),
                 Some((c, l)) if c == fc && fl >= l => fence = None,
                 _ => {}
             }
-            out.push(lines[i].to_string());
+            out.push(lines[i].clone());
             i += 1;
             continue;
         }
         if let Some((fence_len, kind, title)) =
-            fence.is_none().then(|| parse_admonition_open(lines[i])).flatten()
+            fence.is_none().then(|| parse_admonition_open(&lines[i].0)).flatten()
         {
-            let mut body: Vec<&str> = Vec::new();
+            let mut body: Vec<Line> = Vec::new();
             i += 1;
-            while i < lines.len() && !is_colon_closer(lines[i], fence_len) {
-                body.push(lines[i]);
+            while i < lines.len() && !is_colon_closer(&lines[i].0, fence_len) {
+                body.push(lines[i].clone());
                 i += 1;
             }
             i += 1; // skip closing fence
             let id = blocks.len();
-            blocks.push(Admonition {
-                kind,
-                title,
-                source: body.join("\n"),
-            });
-            out.push(String::new());
-            out.push(format!("<!--admonition:{id}-->"));
-            out.push(String::new());
+            let (source, origin) = join_lines(&body);
+            // The body is re-parsed as its own document, so it keeps its own
+            // origins to be rebased against these when it is rendered.
+            blocks.push(Admonition { kind, title, source, origin });
+            out.push((String::new(), 0));
+            out.push((format!("<!--admonition:{id}-->"), 0));
+            out.push((String::new(), 0));
             continue;
         }
-        out.push(lines[i].to_string());
+        out.push(lines[i].clone());
         i += 1;
     }
-    (out.join("\n"), blocks)
+    (out, blocks)
 }
 
 /// `+++++ ... +++++` — first non-blank inner line (or trailing text on the
 /// opener) is the summary; the rest is the spoiler body.
-fn preprocess_spoilers(src: &str) -> (String, Vec<Spoiler>) {
+fn preprocess_spoilers(lines: Vec<Line>) -> (Vec<Line>, Vec<Spoiler>) {
     let mut blocks: Vec<Spoiler> = Vec::new();
-    let lines: Vec<&str> = src.split('\n').collect();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Line> = Vec::new();
     let mut i = 0;
     let mut fence: Option<(char, usize)> = None;
     while i < lines.len() {
         // `+++++` inside a code fence is literal, not a spoiler.
-        if let Some((fc, fl)) = fence_marker(lines[i]) {
+        if let Some((fc, fl)) = fence_marker(&lines[i].0) {
             match fence {
                 None => fence = Some((fc, fl)),
                 Some((c, l)) if c == fc && fl >= l => fence = None,
                 _ => {}
             }
-            out.push(lines[i].to_string());
+            out.push(lines[i].clone());
             i += 1;
             continue;
         }
         if let Some(inline) =
-            fence.is_none().then(|| parse_spoiler_open(lines[i])).flatten()
+            fence.is_none().then(|| parse_spoiler_open(&lines[i].0)).flatten()
         {
-            let close = ((i + 1)..lines.len()).find(|&j| is_spoiler_closer(lines[j]));
+            let close = ((i + 1)..lines.len()).find(|&j| is_spoiler_closer(&lines[j].0));
             if let Some(close) = close {
-                let mut body: Vec<&str> = lines[(i + 1)..close].to_vec();
+                let mut body: Vec<Line> = lines[(i + 1)..close].to_vec();
                 let summary = if !inline.is_empty() {
                     inline
                 } else {
                     let mut k = 0;
-                    while k < body.len() && body[k].trim().is_empty() {
+                    while k < body.len() && body[k].0.trim().is_empty() {
                         k += 1;
                     }
                     if k < body.len() {
-                        let s = body[k].trim().to_string();
+                        let s = body[k].0.trim().to_string();
                         body = body[(k + 1)..].to_vec();
                         s
                     } else {
@@ -735,25 +769,27 @@ fn preprocess_spoilers(src: &str) -> (String, Vec<Spoiler>) {
                     }
                 };
                 let id = blocks.len();
+                let (source, origin) = join_lines(&body);
                 blocks.push(Spoiler {
                     summary: if summary.is_empty() {
                         "spoiler".to_string()
                     } else {
                         summary
                     },
-                    source: body.join("\n"),
+                    source,
+                    origin,
                 });
-                out.push(String::new());
-                out.push(format!("<!--spoiler:{id}-->"));
-                out.push(String::new());
+                out.push((String::new(), 0));
+                out.push((format!("<!--spoiler:{id}-->"), 0));
+                out.push((String::new(), 0));
                 i = close + 1;
                 continue;
             }
         }
-        out.push(lines[i].to_string());
+        out.push(lines[i].clone());
         i += 1;
     }
-    (out.join("\n"), blocks)
+    (out, blocks)
 }
 
 /// Parse a `:::kind title` opener -> (fence length, kind, title).
@@ -1780,11 +1816,11 @@ mod tests {
     }
 
     fn widths(md: &str) -> Vec<Vec<usize>> {
-        preprocess_table_widths(md).1
+        preprocess_table_widths(as_lines(md)).1
     }
 
     fn stripped(md: &str) -> String {
-        preprocess_table_widths(md).0
+        join_lines(&preprocess_table_widths(as_lines(md)).0).0
     }
 
     #[test]

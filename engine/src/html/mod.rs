@@ -79,7 +79,12 @@ pub(crate) fn mermaid_key(code: &str) -> String {
 // ==========================================================================
 
 pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> String {
-    let standalone = option(options, "standalone").is_some_and(|v| v != "0" && !v.is_empty());
+    let flag = |key| option(options, key).is_some_and(|v| v != "0" && !v.is_empty());
+    let standalone = flag("standalone");
+    // The render is backed by a source the reader can edit: blocks carry the
+    // line they came from, and task checkboxes are live. A download has no
+    // source to point at, so it never sets this.
+    let editable = flag("editable");
     let fm = Frontmatter::parse(src);
     let inline_bib = fm.first("bibliography").is_some_and(|v| v == "inline");
     let (body_src, bib_src) = if inline_bib {
@@ -98,6 +103,7 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
         note_index: HashMap::new(),
         headings: Vec::new(),
         slugs: HashMap::new(),
+        editable,
     };
 
     // Title precedence mirrors `lib.typ`: frontmatter beats a leading H1, and
@@ -108,7 +114,9 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     let h1 = leading_h1_text(&body_src);
     let from_h1 = fm_title.is_none() && h1.is_some();
     let title = fm_title.clone().or_else(|| h1.clone());
-    let body = render_source(&body_src, &mut doc, from_h1);
+    // The top level is its own baseline: line N is line N.
+    let base: Vec<u32> = (1..=body_src.lines().count() as u32 + 1).collect();
+    let body = render_source(&body_src, &mut doc, from_h1, &base);
 
     let mut main = String::new();
     main.push_str(&title_block(&fm, title.as_deref(), &doc));
@@ -312,6 +320,7 @@ struct Doc {
     note_index: HashMap<String, usize>,
     headings: Vec<Heading>,
     slugs: HashMap<String, usize>,
+    editable: bool,
 }
 
 impl Doc {
@@ -394,6 +403,9 @@ struct Frame<'a> {
     spoilers: Vec<Spoiler>,
     table_widths: Vec<Vec<usize>>,
     pending_widths: Cell<Option<usize>>,
+    /// Original source line per line of the text comrak was handed, already
+    /// rebased through any enclosing block.
+    origin: Vec<u32>,
 }
 
 impl<'a> Frame<'a> {
@@ -404,7 +416,15 @@ impl<'a> Frame<'a> {
             spoilers: pre.spoilers,
             table_widths: pre.table_widths,
             pending_widths: Cell::new(None),
+            origin: pre.origin,
         }
+    }
+
+    /// The source line a node came from, or 0 when it came from a line some
+    /// pass invented.
+    fn line_of(&self, node: &AstNode) -> u32 {
+        let n = node.data.borrow().sourcepos.start.line;
+        self.origin.get(n.saturating_sub(1)).copied().unwrap_or(0)
     }
 
     fn collect_notes(&mut self, node: &'a AstNode<'a>) {
@@ -420,13 +440,27 @@ impl<'a> Frame<'a> {
 /// Render one Markdown source. Recursive: admonition, spoiler and row bodies
 /// come back through here, sharing `doc` so footnote numbers, heading ids and
 /// citations stay consistent across the whole document.
-fn render_source(src: &str, doc: &mut Doc, strip_h1: bool) -> String {
+/// Render a document, or a block's extracted body.
+///
+/// `base` maps this source's lines onto the original document's, so a node
+/// inside an admonition inside a blank-line run still reports the line the
+/// author typed. It is applied once here rather than at every use.
+fn render_source(src: &str, doc: &mut Doc, strip_h1: bool, base: &[u32]) -> String {
     let prepared = if doc.citations {
         preprocess_citations(src)
     } else {
         src.to_string()
     };
-    let pre = preprocess(&prepared);
+    // Citations are the one pass that rewrites within a line rather than
+    // across lines, so it leaves the mapping alone.
+    let mut pre = preprocess(&prepared);
+    pre.origin = crate::rebase(&pre.origin, base);
+    for a in &mut pre.admonitions {
+        a.origin = crate::rebase(&a.origin, base);
+    }
+    for s in &mut pre.spoilers {
+        s.origin = crate::rebase(&s.origin, base);
+    }
     let arena = Arena::new();
     let root = parse_document(&arena, &pre.markdown, &build_options());
     let mut frame = Frame::new(pre);
@@ -438,10 +472,31 @@ fn render_source(src: &str, doc: &mut Doc, strip_h1: bool) -> String {
         .iter()
         .enumerate()
         .filter(|(i, _)| Some(*i) != skip)
-        .map(|(_, c)| block(doc, &frame, c))
+        .map(|(_, c)| {
+            let html = block(doc, &frame, c);
+            if doc.editable {
+                with_line(html, frame.line_of(c))
+            } else {
+                html
+            }
+        })
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("")
+}
+
+/// Tag a rendered block with the source line it came from.
+///
+/// Written into the opening tag rather than around it, so the attribute costs
+/// no element and cannot disturb the layout it is describing.
+fn with_line(html: String, line: u32) -> String {
+    if line == 0 || !html.starts_with('<') {
+        return html;
+    }
+    match html.find([' ', '>']) {
+        Some(at) => format!("{} data-md-line=\"{line}\"{}", &html[..at], &html[at..]),
+        None => html,
+    }
 }
 
 // ==========================================================================
@@ -527,18 +582,19 @@ fn admonition(doc: &mut Doc, f: &Frame<'_>, id: usize) -> String {
         return String::new();
     };
     let (kind, title, source) = (a.kind.clone(), a.title.clone(), a.source.clone());
+    let origin = a.origin.clone();
     match kind.as_str() {
         "left" | "center" | "right" => {
-            let inner = render_source(&source, doc, false);
+            let inner = render_source(&source, doc, false, &origin);
             if inner.trim().is_empty() {
                 String::new()
             } else {
                 format!("<div class=\"md2pdf-{kind}\">{inner}</div>")
             }
         }
-        "row" => row(doc, &source),
+        "row" => row(doc, &source, &origin),
         _ => {
-            let inner = render_source(&source, doc, false);
+            let inner = render_source(&source, doc, false, &origin);
             let label = if title.is_empty() {
                 tokens::label(&kind, doc.german).to_string()
             } else {
@@ -557,8 +613,8 @@ fn spoiler(doc: &mut Doc, f: &Frame<'_>, id: usize) -> String {
     let Some(s) = f.spoilers.get(id) else {
         return String::new();
     };
-    let (summary, source) = (s.summary.clone(), s.source.clone());
-    let inner = render_source(&source, doc, false);
+    let (summary, source, origin) = (s.summary.clone(), s.source.clone(), s.origin.clone());
+    let inner = render_source(&source, doc, false, &origin);
     format!(
         "<details open><summary>{}</summary>{inner}</details>",
         esc_text(&summary)
@@ -566,11 +622,12 @@ fn spoiler(doc: &mut Doc, f: &Frame<'_>, id: usize) -> String {
 }
 
 /// `::::row` — every top-level block of the body becomes one grid column.
-fn row(doc: &mut Doc, source: &str) -> String {
+fn row(doc: &mut Doc, source: &str, base: &[u32]) -> String {
     if source.trim().is_empty() {
         return String::new();
     }
-    let pre = preprocess(source);
+    let mut pre = preprocess(source);
+    pre.origin = crate::rebase(&pre.origin, base);
     let arena = Arena::new();
     let root = parse_document(&arena, &pre.markdown, &build_options());
     let mut frame = Frame::new(pre);

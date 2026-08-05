@@ -1043,6 +1043,76 @@ fn the_edge_case_fixture_renders_without_panicking() {
     assert!(out.contains("md2pdf-ref-knuth"), "{}", strip_chrome(&out));
 }
 
+fn editable(md: &str) -> String {
+    strip_chrome(&render(md, "editable=1\n", "", b""))
+}
+
+/// Every line of the source a block came from, as the renderer reports it.
+fn lines_of(md: &str) -> Vec<u32> {
+    let out = editable(md);
+    let mut found = Vec::new();
+    let mut rest = out.as_str();
+    while let Some(i) = rest.find("data-md-line=\"") {
+        rest = &rest[i + 14..];
+        let end = rest.find('"').unwrap();
+        found.push(rest[..end].parse().unwrap());
+        rest = &rest[end..];
+    }
+    found
+}
+
+/// Three of the pre-parse passes rewrite whole blocks before comrak sees the
+/// text, so its line numbers describe the text it was handed rather than the
+/// text the author wrote. Each of those shifts gets a case here.
+#[test]
+fn a_block_reports_the_line_the_author_wrote() {
+    // No shift at all: a paragraph on line 1 and one on line 3.
+    assert_eq!(lines_of("first\n\nsecond"), vec![1, 3]);
+
+    // A run of blank lines collapses to three lines; what follows must not
+    // move with it.
+    assert_eq!(lines_of("a\n\n\n\n\nb"), vec![1, 6]);
+
+    // A `+`-width table inserts a placeholder line before the header.
+    assert_eq!(lines_of("| a | b |\n| - | -+ |\n| c | d |\n\nafter"), vec![1, 5]);
+
+    // A heading after several collapsing runs still lands.
+    assert_eq!(lines_of("a\n\n\n\nb\n\n\n\n# h"), vec![1, 5, 9]);
+}
+
+/// An admonition body is lifted out and re-parsed as its own document, so its
+/// blocks start again at line 1 and have to be mapped back.
+#[test]
+fn a_block_inside_a_lifted_body_reports_its_outer_line() {
+    assert_eq!(lines_of(":::info\npara\n:::"), vec![2]);
+    assert_eq!(lines_of("intro\n\n:::info\npara\n:::"), vec![1, 4]);
+    assert_eq!(lines_of("+++++ Summary\nbody\n+++++"), vec![2]);
+    // A collapsing blank run *inside* a lifted body: both mappings compose.
+    assert_eq!(lines_of(":::info\na\n\n\n\nb\n:::"), vec![2, 6]);
+    // Nested one level deeper.
+    assert_eq!(lines_of("::::tip\n:::info\ndeep\n:::\n::::"), vec![3]);
+}
+
+/// Whatever line a block claims, that line has to exist and still hold it.
+#[test]
+fn every_reported_line_is_inside_the_document() {
+    for (name, md) in FIXTURES {
+        let total = md.lines().count() as u32;
+        for line in lines_of(md) {
+            assert!(line >= 1 && line <= total, "{name}: line {line} of {total}");
+        }
+    }
+}
+
+/// The default output is unchanged: this is preview machinery, and a download
+/// has no source to point back at.
+#[test]
+fn source_lines_are_absent_unless_asked_for() {
+    assert!(!html("# a\n\ntext").contains("data-md-line"));
+    assert!(!render("# a\n\ntext", "standalone=1\n", "", b"").contains("data-md-line"));
+    assert!(editable("# a\n\ntext").contains("data-md-line"));
+}
+
 /// `math-core`'s MathML is inserted unescaped — the one place left where the
 /// renderer trusts markup it did not write. `\text{…}` takes arbitrary content
 /// and every MathML element accepts `href`, so this is where that trust is
