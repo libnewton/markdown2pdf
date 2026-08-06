@@ -8,7 +8,7 @@ export default mergeConfig(
 			environment: 'node',
 			pool: 'threads',
 			setupFiles: ['./tests/setup.ts'],
-			include: ['tests/**/*.test.ts']
-		}
-	})
+			include: ['tests/**/*.test.ts'],
+		},
+	}),
 );

@@ -8,7 +8,6 @@ export type DocumentCreationSource = 'template' | 'blank' | 'import';
 export interface SavedDocument {
 	id: string;
 	name: string;
-	mode: 'pdf';
 	content: string;
 	assets?: Record<string, SavedDocumentAsset>;
 	creationSource?: DocumentCreationSource;

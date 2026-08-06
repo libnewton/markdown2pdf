@@ -1,17 +1,29 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { EditorView, basicSetup } from 'codemirror'
-  import { EditorState } from '@codemirror/state'
+  import { keymap } from '@codemirror/view'
+  import { EditorState, EditorSelection } from '@codemirror/state'
   import { markdown as langMarkdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
+  import { isolateHistory } from '@codemirror/commands'
+  import { linkAround, slashCommand, toggleWrap } from '$lib/editor/commands'
+  import { taskMarker } from '$lib/utils/task-marker'
 
   interface Props {
     markdown: string
     placeholder?: string
+    readOnly?: boolean
+    /** `/new` cannot be a snippet — it has to reach the document store. */
+    onNewDocument?: () => void
   }
 
-  let { markdown = $bindable(), placeholder = '' }: Props = $props()
+  let {
+    markdown = $bindable(),
+    placeholder = '',
+    readOnly = false,
+    onNewDocument,
+  }: Props = $props()
 
   let editorView = $state<EditorView | null>(null)
   let editorContainerEl = $state<HTMLDivElement | null>(null)
@@ -56,6 +68,82 @@
     return true
   }
 
+  /**
+   * Set the task marker on `line` (1-based) to `checked`.
+   *
+   * Returns false when that line no longer carries a marker — the preview was
+   * stale, so nothing is written and the next render puts the box back.
+   */
+  export function setTaskMarker(line: number, checked: boolean): boolean {
+    // `EditorState.readOnly` is a facet commands consult; it does not stop a
+    // dispatch, so the reference view needs the guard spelled out.
+    if (readOnly || !editorView) return false
+    if (line < 1 || line > editorView.state.doc.lines) return false
+    const l = editorView.state.doc.line(line)
+    const marker = taskMarker(l.text)
+    if (!marker) return false
+    // Already right: the click was against a render that had fallen behind.
+    if (marker.checked === checked) return true
+
+    suppressEditorUpdate = true
+    editorView.dispatch({
+      changes: {
+        from: l.from + marker.at,
+        to: l.from + marker.at + 1,
+        insert: checked ? 'x' : ' ',
+      },
+      // One toggle, one undo step: without this two quick ticks merge.
+      annotations: isolateHistory.of('full'),
+    })
+    suppressEditorUpdate = false
+    // Publish now rather than after the typing throttle, so the preview
+    // catches up immediately. No `focus()`: clicking a box in the preview must
+    // not pull the caret into a pane you may not be looking at.
+    flushPendingEdit()
+    return true
+  }
+
+  /** Replace the selection, then place the caret where the helper asked. */
+  function replaceSelection(
+    view: EditorView,
+    make: (selected: string) => { text: string; from: number; to: number },
+  ): boolean {
+    const range = view.state.selection.main
+    const { text, from, to } = make(view.state.sliceDoc(range.from, range.to))
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert: text },
+      selection: EditorSelection.range(range.from + from, range.from + to),
+    })
+    return true
+  }
+
+  const editorCommands = [
+    { key: 'Mod-b', run: (v: EditorView) => replaceSelection(v, (s) => toggleWrap(s, '**')) },
+    { key: 'Mod-i', run: (v: EditorView) => replaceSelection(v, (s) => toggleWrap(s, '_')) },
+    { key: 'Mod-k', run: (v: EditorView) => replaceSelection(v, linkAround) },
+    {
+      // `/name` alone on a line, expanded on Enter. Deliberately not a
+      // completion popup: the list is short and typing it out is the fast
+      // path once you know it.
+      key: 'Enter',
+      run: (view: EditorView) => {
+        const line = view.state.doc.lineAt(view.state.selection.main.head)
+        const command = slashCommand(line.text)
+        if (!command) return false
+        if (command.name === 'new') {
+          onNewDocument?.()
+          view.dispatch({ changes: { from: line.from, to: line.to, insert: '' } })
+          return true
+        }
+        view.dispatch({
+          changes: { from: line.from, to: line.to, insert: command.snippet },
+          selection: { anchor: line.from + command.caret },
+        })
+        return true
+      },
+    },
+  ]
+
   onMount(() => {
     if (!editorContainerEl) return
     lastEmittedDoc = markdown
@@ -63,10 +151,16 @@
     const startState = EditorState.create({
       doc: markdown,
       extensions: [
+        // Before basicSetup, so these win over its defaults.
+        keymap.of(editorCommands),
         basicSetup,
         langMarkdown({ codeLanguages: languages }),
         oneDark,
         EditorView.lineWrapping,
+        // `readOnly` refuses the edit; `editable` also takes away the caret,
+        // so the reference view never looks like something you can type in.
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged || suppressEditorUpdate) return
           if (emitTimer !== null) return
@@ -132,7 +226,7 @@
     flex: 1;
     height: 100%;
     overflow: hidden;
-    background-color: #282c34;
+    background-color: var(--editor-bg);
     /* Isolate CodeMirror's internal layout from the rest of the page so
        typing doesn't invalidate layout/paint on the preview pane. */
     contain: strict;

@@ -34,3 +34,11 @@ engine/target
 tests/*.pdf
 remote
 .md2pdf-main-*.typ
+
+# Python bytecode from bin/md2pdf
+__pycache__/
+
+# Playwright
+web/test-results
+test-results
+web/playwright-report

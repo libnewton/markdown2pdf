@@ -1,11 +1,11 @@
 import type { SvgDocument } from '$lib/typst/svg-split';
+import type { HtmlRequest } from './compileProtocol';
 
 type CompileRequest = {
 	type: 'compile';
 	id: string;
 	markdown: string;
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
-	pageNumbers?: boolean;
 	format?: 'pdf' | 'preview';
 };
 
@@ -27,6 +27,13 @@ type CompileResponse =
 	| {
 			type: 'compile-result';
 			id: string;
+			ok: true;
+			html: string;
+			diagnostics: string[];
+	  }
+	| {
+			type: 'compile-result';
+			id: string;
 			ok: false;
 			error: string;
 			diagnostics: string[];
@@ -35,6 +42,7 @@ type CompileResponse =
 type CompileResult = {
 	pdf?: Uint8Array<ArrayBuffer>;
 	preview?: SvgDocument;
+	html?: string;
 	diagnostics: string[];
 };
 
@@ -68,6 +76,7 @@ export class TypstWorkerClient {
 			const result: CompileResult = { diagnostics: message.diagnostics };
 			if ('pdf' in message) result.pdf = new Uint8Array(message.pdf);
 			if ('preview' in message) result.preview = message.preview;
+			if ('html' in message) result.html = message.html;
 			pending.resolve(result);
 		});
 	}
@@ -79,6 +88,26 @@ export class TypstWorkerClient {
 		}
 		this.#pending.clear();
 		this.#pendingPreviewId = null;
+	}
+
+	/**
+	 * Render the document to HTML. This never enters the compile queue — the
+	 * engine produces HTML on its own, so it stays instant even while a PDF
+	 * export is running. `standalone` wraps the fragment in a full document
+	 * for download; the preview pane mounts the fragment in a shadow root.
+	 */
+	renderHtml(
+		markdown: string,
+		images: Record<string, Uint8Array<ArrayBuffer>> = {},
+		standalone = false,
+		editable = false,
+	): Promise<{ html: string; diagnostics: string[] }> {
+		const id = this.#nextId();
+		const request: HtmlRequest = { type: 'html', id, markdown, images, standalone, editable };
+		return new Promise<CompileResult>((resolve, reject) => {
+			this.#pending.set(id, { resolve, reject });
+			this.#worker.postMessage(request);
+		}).then((r) => ({ html: r.html ?? '', diagnostics: r.diagnostics ?? [] }));
 	}
 
 	/**
@@ -95,11 +124,10 @@ export class TypstWorkerClient {
 	compilePdf(
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>> = {},
-		pageNumbers = true
 	): Promise<{ pdf: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
-		return this.#compile(markdown, images, pageNumbers, 'pdf').then((r) => ({
+		return this.#compile(markdown, images, 'pdf').then((r) => ({
 			pdf: r.pdf!,
-			diagnostics: r.diagnostics
+			diagnostics: r.diagnostics,
 		}));
 	}
 
@@ -107,25 +135,26 @@ export class TypstWorkerClient {
 	compilePreview(
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>> = {},
-		pageNumbers = true
 	): Promise<{ preview: SvgDocument; diagnostics: string[] }> {
-		return this.#compile(markdown, images, pageNumbers, 'preview').then((r) => ({
+		return this.#compile(markdown, images, 'preview').then((r) => ({
 			preview: r.preview!,
-			diagnostics: r.diagnostics
+			diagnostics: r.diagnostics,
 		}));
+	}
+
+	#nextId(): string {
+		return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+			? crypto.randomUUID()
+			: String(Date.now()) + Math.random().toString(36).slice(2);
 	}
 
 	#compile(
 		markdown: string,
 		images: Record<string, Uint8Array<ArrayBuffer>>,
-		pageNumbers: boolean,
-		format: 'pdf' | 'preview'
+		format: 'pdf' | 'preview',
 	): Promise<CompileResult> {
-		const id =
-			typeof crypto !== 'undefined' && 'randomUUID' in crypto
-				? crypto.randomUUID()
-				: String(Date.now());
-		const request: CompileRequest = { type: 'compile', id, markdown, images, pageNumbers, format };
+		const id = this.#nextId();
+		const request: CompileRequest = { type: 'compile', id, markdown, images, format };
 		if (format === 'preview') this.#pendingPreviewId = id;
 
 		return new Promise((resolve, reject) => {

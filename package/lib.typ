@@ -10,9 +10,11 @@
 // mitex + mmdr are vendored into the package so it is fully self-contained
 // and offline — no @preview resolution needed (works in typst.ts too).
 #import "vendor/mitex/lib.typ": mi, mitex
-#import "vendor/mmdr/lib.typ": mermaid
+#import "vendor/mmdr/lib.typ": mermaid, mermaid-svg
 
-#let _engine = plugin("engine.wasm")
+// One plugin instance for the whole package — `tokens.typ` owns it so the
+// palette is decoded once and the engine is loaded once.
+#import "tokens.typ": engine as _engine
 
 // Helpers handed to the engine output via `eval` scope.
 #let _md-math(display, src) = if display { mitex(src) } else { mi(src) }
@@ -166,6 +168,69 @@
     })
 }
 
+// ---------------------------------------------------------------------------
+// HTML output
+// ---------------------------------------------------------------------------
+//
+// The engine renders HTML itself — styling, outline, math and highlighting all
+// live in Rust, so the CLI and the browser emit the same bytes. Typst's only
+// job here is the I/O the engine cannot do: read the referenced assets and run
+// the Mermaid plugin. Everything is handed back as one blob plus a
+// `key<TAB>byte-length` manifest.
+
+#let _lines(raw) = {
+  str(raw).split("\n").filter(l => l.trim() != "")
+}
+
+// Collect every asset the document needs, skipping the ones we cannot load so
+// one missing file degrades to a placeholder instead of failing the build.
+//
+// `html_assets` answers for images, remotes, emoji, fonts and diagrams from a
+// single parse; asking each question separately parsed the document five times.
+#let _html-assets(md, read-asset) = {
+  let items = ()
+  for line in _lines(_engine.html_assets(bytes(md))) {
+    let p = line.split("\t")
+    let kind = p.at(0)
+    if kind == "image" {
+      items.push((key: p.at(1), data: read-asset(p.at(1))))
+    } else if kind == "remote" {
+      items.push((key: p.at(2), data: read-asset(p.at(2))))
+    } else if kind == "emoji" {
+      let name = "twemoji/" + p.at(1) + ".svg"
+      items.push((key: name, data: read(name, encoding: none)))
+    } else if kind == "font" {
+      // Only a document with math asks for these, and the alphanumerics face
+      // only once a formula reaches into that block.
+      items.push((key: p.at(1), data: read(p.at(1), encoding: none)))
+    } else if kind == "mermaid" {
+      let code = p.at(2, default: "").replace("\\n", "\n").replace("\\\\", "\\")
+      items.push((key: p.at(1), data: bytes(mermaid-svg(code))))
+    }
+  }
+  items = items.filter(it => it.data != none)
+  (
+    manifest: items.fold("", (acc, it) => acc + it.key + "\t" + str(it.data.len()) + "\n"),
+    blob: items.fold(bytes(()), (acc, it) => acc + it.data),
+  )
+}
+
+// Render Markdown to a self-contained HTML document.
+//
+// `read-asset` must be a closure defined in the calling file — `read()` inside
+// a package resolves against the package root, not the document root, exactly
+// like `asset` in `prepare()`. It should return `none` for a path it cannot
+// read, so a missing image does not fail the whole document.
+#let prepare-html(markdown, read-asset: p => none, standalone: true) = {
+  let assets = _html-assets(markdown, read-asset)
+  str(_engine.render_html(
+    bytes(markdown),
+    bytes("standalone=" + if standalone { "1" } else { "0" }),
+    bytes(assets.manifest),
+    assets.blob,
+  ))
+}
+
 // Prepare a Markdown string for rendering.
 //
 // Returns `(skip, remotes, body, template, scope)`. The caller (`main.typ`)
@@ -229,7 +294,7 @@
         remotes: remotes,
         asset: named.at("asset", default: image),
         // The document declares its own layout: frontmatter beats the caller's
-        // value (the web app's page-numbers toggle is a default, not an override).
+        // value, which is only a default.
         page-numbers: fm.at(
           "pageNumbers",
           default: fm.at(

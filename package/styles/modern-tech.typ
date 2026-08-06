@@ -2,6 +2,7 @@
 // Sans-serif throughout (web-like reading), paragraph spacing, no first-line indent, modern code blocks.
 
 #import "../admonitions.typ": admonition, spoiler, task-item, md2pdf-list-markers, md2pdf-enum-numbering
+#import "../tokens.typ": tokens
 #import "../furniture.typ": bar
 #import "../cover.typ": cover-page
 
@@ -97,13 +98,19 @@
   )
   set document(title: title, author: authors, date: none)
 
-  // 2) Font stack: high-quality Latin sans-serif fonts for text/numbers
+  // 2) Font stack: a Latin sans for text and numbers, then a CJK face for the
+  // characters it has no glyphs for. Typst falls through per character, so the
+  // CJK face only ever paints what the Latin one cannot.
   let body-size = 10.5pt
   set text(
     font: (
       "IBM Plex Sans",
       "Roboto",
       "Libertinus Sans",
+      "Noto Sans SC",
+      "Noto Sans KR",
+      "Noto Sans CJK SC",
+      "Source Han Sans SC",
     ),
     size: body-size,
     // Drives hyphenation, smart quotes, and Typst's localised titles — a
@@ -154,7 +161,7 @@
       below: style.below,
       text(
         weight: "bold",
-        fill: rgb("#333333"),
+        fill: rgb(tokens.base.heading),
         font: ("IBM Plex Sans", "Roboto"),
         size: body-size * style.size,
         tracking: style.tracking,
@@ -164,9 +171,9 @@
   }
 
   // 5) Link colour: tech blue
-  show link: set text(fill: rgb("#0074de"))
+  show link: set text(fill: rgb(tokens.base.accent))
   show cite: it => {
-    show regex("[0-9]+"): set text(fill: rgb("#0074de"))
+    show regex("[0-9]+"): set text(fill: rgb(tokens.base.accent))
     it
   }
 
@@ -176,7 +183,7 @@
     set par(first-line-indent: 0pt)
     block(
       fill: luma(248),
-      stroke: (left: 2pt + rgb("#0074de")),
+      stroke: (left: 2pt + rgb(tokens.base.accent)),
       inset: (left: 0.9em, right: 0.9em, top: 0.7em, bottom: 0.7em),
       radius: 6pt,
       width: 100%,
@@ -285,7 +292,7 @@
   show table.cell.where(y: 0): set text(weight: "bold")
 
   // 10) Highlight: a softer yellow
-  show highlight: set highlight(fill: rgb("#FEF08A"))
+  show highlight: set highlight(fill: rgb(tokens.base.at("mark-bg")))
 
   // Cover page — the first content this template emits, so it lands on page 1.
   // `page()` terminates itself; a `pagebreak()` after it would add a blank page.

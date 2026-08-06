@@ -33,7 +33,7 @@ bibliography-style: ieee
 
 md2pdf turns Markdown into a typeset PDF, 100% in your browser. This document is both a showcase and a reference: the first half demonstrates every syntax the renderer supports, the second half lists every option you can set.
 
-==This sentence is highlighted== to draw the eye. **Bold**, _italic_, **_both at once_**, ~~strikethrough~~, \`inline code\`, __underline__ (the HTML <u>u tag</u> works too), super^script^ and sub~script~ all work inline. A backslash escapes any character: \\*not italic\\*. Footnotes too[^demo].
+==This sentence is highlighted== to draw the eye. **Bold**, _italic_, **_both at once_**, ~~strikethrough~~, \`inline code\`, __underline__, super^script^ and sub~script~ all work inline. A backslash escapes any character: \\*not italic\\*. Footnotes too[^demo].
 
 [^demo]: Footnotes render as numbered notes at the foot of the page.
 
@@ -152,6 +152,20 @@ $$
 
 $$
 \\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}
+$$
+
+\`\\boxed\` frames a result, and amsmath environments line equations up on their
+relation:
+
+$$
+\\boxed{X\\to Y\\to Z \\;\\Rightarrow\\; I(X;Y)\\ \\ge\\ I(X;Z)}
+$$
+
+$$
+\\begin{aligned}
+\\nabla \\cdot \\mathbf{E} &= \\frac{\\rho}{\\varepsilon_0} \\\\
+\\nabla \\times \\mathbf{B} &= \\mu_0\\mathbf{J}
+\\end{aligned}
 $$
 
 ---
@@ -323,6 +337,7 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | \`authors\` or \`author\`                        | one name or a list                            | none                |
 | \`date\`                                       | text or a YAML date                           | none                |
 | \`lang\`                                       | \`en\`, \`de\`, \`de-AT\`, …                        | \`en\`                |
+| \`hide-toc-button\`                            | \`true\` to drop the HTML outline drawer        | \`false\`             |
 | \`pageNumbers\` or \`page-numbers\`              | \`true\`, \`false\`, \`"1"\`, \`"1/1"\`, or a template | \`true\`              |
 | \`header-left\` \`header-center\` \`header-right\` | text or an image                              | empty               |
 | \`header-height\`                              | positive \`pt\`, \`mm\`, \`cm\`, or \`in\` length     | automatic           |
@@ -347,7 +362,7 @@ What each group does:
 
 - **\`title\` / \`authors\` / \`date\`** — printed as a centered title block on page one, or moved onto the cover when one is set. They also feed the header and footer placeholders.
 - **\`lang\`** — drives hyphenation, smart quotes and Typst's built-in titles: under \`lang: de\` a \`[toc]\` is headed "Inhaltsverzeichnis" instead of "Contents". A region may be appended, as in \`de-AT\`.
-- **\`pageNumbers\`** — see the table below. The web app's menu toggle is only a default: frontmatter always wins.
+- **\`pageNumbers\`** — see the table below.
 - **\`header-*\` / \`footer-*\`** — see *Running header & footer*. Set the matching height when a tall image or multi-line slot needs more room; the body margin grows so furniture cannot overlap it.
 - **\`cover-*\`** — see *Cover page*.
 - **\`bibliography\`** — see *Inline bibliography*.
@@ -499,5 +514,5 @@ Set \`bibliography: inline\` to cite a trailing BibTeX entry as \`[@md2pdf]\`. T
 `;
 
 export const PDF_TEMPLATES: Template[] = [
-	{ id: 'welcome', name: 'Feature Demo', icon: '🚀', content: WELCOME }
+	{ id: 'welcome', name: 'Feature Demo', icon: '🚀', content: WELCOME },
 ];

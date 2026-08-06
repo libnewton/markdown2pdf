@@ -1,224 +1,212 @@
----
-status: draft
-owner: md2pdf
-last_reviewed: 2026-05-16
-product_name: md2pdf
-scope: engineering
-stack: sveltekit_adapter_static_prerender
-tags: [sveltekit, adapter-static, prerender, typst, wasm, worker, typst-ts-renderer, svelte5]
----
-
 # md2pdf — Engineering
 
-## 0. Hard constraints (don't cross these lines)
+Working notes for the code as it is. `docs/DESIGN.md` covers why it is shaped
+this way.
 
-- **Fully static**: SvelteKit + `@sveltejs/adapter-static`. The build output drops onto any static host (`svelte.config.js`).
-- **No server features**: no `+server.ts`, no form actions.
-- **prerender boundary**: prerender executes route rendering at build time. Any browser API (`window`, `document`, `indexedDB`, `caches`, …) must be reached only inside `onMount()` or behind `if (browser)`.
-- **Heavy work in workers**: Typst compilation runs in a Web Worker so the UI thread stays responsive.
-- **Offline by default**: all fonts and twemoji SVGs are bundled into `static/`. The only network calls during a compile are user-supplied remote image URLs.
+## Hard constraints
 
----
+- **No server.** SvelteKit with `@sveltejs/adapter-static`, everything
+  prerendered. No `+server.ts`, no form actions, no runtime host.
+- **Prerender boundary.** Route modules run at build time. `window`,
+  `document`, `indexedDB`, `caches` are reachable only inside `onMount()` or
+  behind `if (browser)`.
+- **Offline after first load.** Fonts, the Typst package, the engine and the
+  Twemoji mirror are all same-origin. The only outbound requests at runtime
+  are image URLs the document itself asked for.
+- **One Markdown implementation.** If a change to what Markdown *means* does
+  not live in `engine/`, it is in the wrong place.
 
-## 1. Commands
-
-- Install: `npm install`
-- Dev: `npm run dev`
-- Type check: `npm run check`
-- Build (static): `npm run build`
-- Preview built output: `npm run preview`
-
----
-
-## 2. Directory layout (current)
+## Layout
 
 ```
-src/
-  routes/
-    +layout.ts                       # global prerender + trailingSlash
-    +layout.svelte
-    +page.svelte                     # PDF editor — the homepage
-    +page.ts                         # prerender: true
-    cards/+page.svelte               # Cards mode
-    cards/+page.ts
-    slides/+page.svelte              # Slides mode
-    slides/+page.ts
-  lib/
-    components/
-      PdfEditor.svelte               # PDF mode: editor / SVG preview / export / settings / CORS modal
-      CardsEditor.svelte             # Cards mode: per-page compile
-      SlidesEditor.svelte            # Slides mode: per-page compile
-      CardGallery.svelte             # Card/slide gallery (SVG blobs)
-      EditorPane.svelte              # Wraps Milkdown WYSIWYG + CodeMirror plain editor
-      DocumentMenu.svelte            # Document picker (recent + templates)
-      StatusHint.svelte              # Floating "Updating preview" pill
-    pipeline/
-      markdownToTypst.ts             # mdast → Typst; markdownToTypstPages() for per-page output
-      plugins/
-        remark-mark.ts               # ==highlight==
-        remark-admonitions.ts        # :::success / :::warning / :::tip / :::info / :::danger
-        remark-spoiler.ts            # +++++ … +++++
-        remark-twemoji.ts            # unicode emoji → twemoji nodes
-        remark-emoji-shortcodes.ts   # :innocent: → 😇 (then twemoji)
-        remark-pagebreak-token.ts    # [[pagebreak]] → custom node
-        remark-simple-supersub.ts    # ^sup^ / ~sub~
-    workers/
-      typstClient.ts                 # main-thread wrapper (compilePdf / compileVector)
-      typst.worker.ts                # WASM init, fonts, VFS, compile queue
-    typst/
-      admonitions.typ                # admonition / spoiler / task-item / list-marker helpers
-      styles/*.typ                   # one entry-point article(...) per style
-      renderer.ts                    # typst.ts SVG renderer (lazy WASM)
-      svg-utils.ts                   # per-page SVG extraction
-    mermaid/render.ts                # mermaid → SVG bytes
-    twemoji/loader.ts                # scan markdown → fetch needed twemoji SVGs
-    stores/
-      documentStore.svelte.ts        # IndexedDB-backed document persistence
-      settingsStore.svelte.ts        # liveUpdate, pageNumbers, corsProxy
-    utils/
-      image-utils.ts                 # local image helpers
-      remote-images.ts               # http(s) image fetcher (with CORS-proxy fallback)
-    templates/
-      pdf-templates.ts               # WELCOME + RESUME + AI_CHAT + NOTION
-      card-templates.ts
-      slides-templates.ts
-  hooks.client.ts                    # intentionally empty (no analytics)
-static/
-  fonts/                             # bundled Typst fonts
-  twemoji/                           # bundled emoji SVGs
-docs/                                # design + engineering notes
+engine/                     Rust, one crate, two renderers
+  src/lib.rs                Typst markup + every preprocess pass + the ABI
+  src/html/mod.rs           HTML renderer
+  src/html/highlight.rs     the syntax highlighter
+  src/html/css.rs           the document stylesheet and the export's script
+  src/html/tokens.rs        colour tokens, shared with the Typst side
+  src/html/assets.rs        the key<TAB>len wire format for asset blobs
+  src/html/math.rs          math-core bridge
+  src/html/tests.rs         141 tests, incl. the cross-renderer parity suite
+
+package/                    the `md2pdf` Typst package
+  lib.typ                   prepare() for PDF, prepare-html() for the CLI
+  styles/modern-tech.typ    the one document style
+  engine.wasm               committed; rebuilt by ./build.sh
+  vendor/                   mitex (math), mmdr (mermaid)
+  twemoji/                  3689 SVGs
+
+bin/md2pdf                  the CLI; Python stdlib only
+tests/                      Markdown fixtures + check_html.py
+
+web/src/
+  routes/                   /  and  /reference  — that is all of them
+  lib/components/
+    PdfEditor.svelte        state, wiring, layout, shortcuts, export
+    EditorPane.svelte       wraps the editor, owns image paste/drop
+    MarkdownEditor.svelte   CodeMirror 6
+    HtmlPreview.svelte      the shadow-root mount for the Web view
+    DocumentMenu.svelte     recent documents and templates
+    ShortcutOverlay.svelte  the cheatsheet
+    StatusHint.svelte       the floating "Updating preview" pill
+  lib/workers/
+    typst.worker.ts         Typst compiler + the engine, both in the worker
+    typstClient.ts          the main-thread wrapper
+    compileProtocol.ts      the message types, shared by both sides
+    assetBundle.ts          decodes the engine's asset wire format
+  lib/editor/commands.ts    slash commands and the formatting keymap
+  lib/typst/                vector IR → per-page SVG, and the SVG scrubber
+  lib/storage/documents.ts  IndexedDB
+  lib/stores/               document + settings state (Svelte 5 runes)
+  lib/utils/                remote images, image helpers, task-marker parsing
 ```
 
----
+## Commands
 
-## 3. Routes & prerender
+```sh
+cd engine && cargo test        # the engine's 141 tests
+./build.sh                     # rebuild package/engine.wasm, install @local/md2pdf
+cd web && npm install
+npm run check                  # svelte-check; must be 0 errors 0 warnings
+npm test                       # vitest, node environment
+npm run test:e2e               # playwright, real browser
+npm run format:check           # prettier
+npm run dev
+npm run build                  # → web/build/
+python3 bin/md2pdf tests/sample.md
+python3 tests/check_html.py out.html
+```
 
-### 3.1 Global prerender
+`./build.sh` needs `rustup target add wasm32-unknown-unknown`. **Any commit
+touching `engine/` must re-run it and commit `package/engine.wasm`** — the web
+build has no Rust toolchain and reads the committed artefact.
 
-- `src/routes/+layout.ts`:
-  - `export const prerender = true`
-  - `export const trailingSlash = 'always'`
-- All page-level `+page.ts` files simply `export const prerender = true;`
+## The engine ABI
 
-### 3.2 No dynamic segments
+`wasm-minimal-protocol`; the Typst package calls these through `plugin()`, and
+the worker calls the same module through a hand-written host in
+`typst.worker.ts`.
 
-Routes are now literal paths (`/`, `/cards/`, `/slides/`). No `EntryGenerator` is required.
+| Function | Returns |
+|---|---|
+| `convert(md, strip_h1, citations)` | Typst markup |
+| `render_html(md, options)` | `warnings` `\u{1F}` `html` |
+| `html_assets(md)` | images, remotes, twemoji and mermaid keys in one pass |
+| `leading_h1(md)` | the first H1's text, for the title rule |
+| `remotes(md)` / `twemojis(md)` / `html_images(md)` / `html_fonts(md)` / `html_mermaid(md)` | single-purpose lists, for `lib.typ` |
+| `tokens()` | the colour palette, so Typst and HTML agree |
+| `inline_bibliography(md)` / `without_inline_bibliography(md)` | the citation split |
 
----
+`html_assets` exists because the HTML path used to make five separate calls,
+each re-parsing the whole document. It is one parse; the worker uses it and the
+single-purpose functions remain for `lib.typ`.
 
-## 4. Markdown → Typst → PDF
+`render_html` options are a `key=value` list: `standalone` wraps the fragment
+in a full document (the download), `editable` adds `data-md-line` and live
+checkboxes (the preview only — never a download).
 
-### 4.1 Markdown → Typst (pure function on main thread)
+## Line origins
 
-Implementation: `src/lib/pipeline/markdownToTypst.ts`
+The preprocess passes are not line-preserving: blank runs collapse to three
+lines, admonitions and spoilers collapse a whole block and re-parse the body as
+a fresh document, `+`-width tables insert a line. So the passes carry
+`(String, u32)` — text plus the 1-based line it came from, `0` for lines a pass
+invented — and `render_source` rebases its own origins into original-document
+coordinates once, up front.
 
-- Parse stack: `unified + remark-parse + remark-frontmatter + remark-gfm + remark-math` plus the custom plugins listed above.
-- Two entry points:
-  - `markdownToTypst(md, options)` → one Typst source for the whole document.
-  - `markdownToTypstPages(md, options)` → an array of Typst sources, one per page (cards/slides).
-- Output: a `main.typ` string that begins with `#import "styles/<style>.typ": article`, `#import "/admonitions.typ": admonition, spoiler, task-item`, and `#show: article.with(...)`.
+This is what makes `data-md-line` mean "the line the author wrote" rather than
+"the line after preprocessing", and it is what the task-checkbox write stands
+on. **The Typst renderer ignores these fields entirely.**
 
-### 4.2 Typst compile (Worker)
+The engine still tags every top-level block, not only task items. That fed
+editor↔preview scroll sync, which has been removed; the attribute costs a few
+bytes in the preview, never appears in a download, and keeps the door open if
+sync is attempted again.
 
-- Client wrapper: `src/lib/workers/typstClient.ts`
-- Worker entry: `src/lib/workers/typst.worker.ts`
-
-Message protocol:
-
-- request: `{ type: 'compile', id, mainTypst, images, format? }` (`format` = `'pdf' | 'vector'`)
-- response: `{ type: 'compile-result', id, ok, pdf? | vector?, diagnostics, error? }`
-
-Notes:
-
-- The worker serializes compilations through `compileQueue` to keep the Typst compiler's state consistent.
-- Style files are imported via Vite's `?raw` suffix and added to the VFS through `compiler.addSource('/styles/xxx.typ', ...)`.
-- Images, twemoji SVGs, and remote images are injected via `compiler.mapShadow('/' + path, bytes)`.
-- `loadFonts(CORE_FONTS, { assets: false })` — the `assets: false` is required to suppress typst.ts's default jsdelivr font bundle.
-
-### 4.3 Vite worker conventions
-
-- Worker creation (already wrapped in `TypstWorkerClient`):
+## The worker
 
 ```ts
-new Worker(new URL('./typst.worker.ts', import.meta.url), { type: 'module' });
+// request
+{ type: 'compile', id, markdown, images, pageNumbers, format: 'pdf' | 'preview' }
+{ type: 'html',    id, markdown, images, standalone?, editable? }
+// response
+{ type: 'compile-result', id, ok, pdf? | preview? | html?, diagnostics, error? }
 ```
 
-- `vite.config.ts` sets `worker.format = 'es'`.
-- `vite.config.ts` also defines two custom plugins:
-  - `md2pdf-copy-twemoji` — copies `node_modules/twemoji-emojis/vendor/svg/` to `static/twemoji/` on first build.
-  - `md2pdf-bundle-fonts` — downloads any missing entries from `FONTS_TO_BUNDLE` to `static/fonts/` on first build.
+- Typst compiles are serialised through `compileQueue`; a superseded preview
+  settles with the `SUPERSEDED` marker rather than an error, so the caller can
+  ignore it instead of showing a failure.
+- `html` requests bypass the queue — they never wait on a Typst compile. The
+  worker tracks the latest html id and bails before the asset work when a newer
+  one has arrived.
+- Styles reach the VFS through Vite's `?raw` suffix and `compiler.addSource`.
+  Images, twemoji and remote images go in through `compiler.mapShadow`.
+- `loadFonts(CORE_FONTS, { assets: false })` — `assets: false` suppresses
+  typst.ts's default jsdelivr bundle, which would break the offline guarantee.
+- Fonts can only be *set* after init through `createTypstFontBuilder()` +
+  `compiler.setFonts()`, not appended, which is why `ensureScriptFonts` rebuilds
+  the whole set when a document turns out to contain CJK.
 
----
+## The paged preview
 
-## 5. SVG preview (typst.ts renderer)
+Typst emits vector IR; `@myriaddreamin/typst-ts-renderer` turns it into one
+composite SVG; `svg-split.ts` cuts it into a `<svg>` per `<g class="typst-page">`.
 
-Implementation: `src/lib/typst/renderer.ts` + `src/lib/typst/svg-utils.ts` + each Editor component.
+Those nodes are `adoptNode`d into the **live document**, not a shadow root. A
+`<script>` from `DOMParser` is inert, but event-handler attributes are not, so
+`svg-utils.ts scrub()` strips `on*`, `<script>`, `<foreignObject>` and
+`javascript:` URLs before adoption.
 
-- `getTypstRenderer()` lazy-loads `@myriaddreamin/typst-ts-renderer` WASM (~1 MB), first use only.
-- Flow: Typst produces vector IR (`format: 'vector'`) → `renderer.renderSvg()` returns a composite SVG → `extractPageSvgs()` splits it into one `<svg>` per `<g class="typst-page">`.
-- PDF mode renders all pages into a single scrolling stack.
-- Cards/slides mode uses `markdownToTypstPages()` for per-page compile + incremental update (only recompile changed pages).
-- PDF export runs `client.compilePdf()` on demand to a `Blob` URL.
+The compile is gated on `previewMode === 'pages' && showPreview`. Nothing
+recompiles for a hidden pane.
 
----
+## The Web preview
 
-## 6. Fonts & offline guarantee
+`HtmlPreview.svelte` mounts the fragment in a shadow root. It keeps the
+`<style>` node across renders — re-parsing 600 lines of CSS and an embedded
+font on every keystroke was measurable — and restores focus afterwards, because
+replacing the root's children destroys the focused element.
 
-### 6.1 Fonts (current behaviour)
+Both listeners (`click` for code copying and anchor navigation, `change` for
+checkboxes) are bound once at `attachShadow` time, so they survive the swap.
+`change` rather than `click`: it fires for keyboard activation, reports the
+post-toggle state, and is `composed: false`, so it cannot leak into the page.
 
-- `static/fonts/` ships these:
-  - **Core:** `IBMPlexSans-{Regular,Bold}`, `NewCMMath-{Regular,Book}`
-  - **Latin/serif/mono backup** (formerly the typst-assets "text" bundle): `DejaVuSansMono-{Regular,Bold,Oblique,BoldOblique}`, `LibertinusSerif-{Regular,Bold,Italic,BoldItalic,Semibold}`
-  - **CJK (lazy)**: `NotoSansCJKsc-{Regular,Bold}`, `NotoSerifSC-Regular`
-  - **Emoji (lazy)**: `NotoColorEmoji`
-- The Vite plugin `md2pdf-bundle-fonts` downloads any missing files on first build/dev — once.
-- The worker calls `loadFonts(urls, { assets: false })` so typst.ts does NOT auto-load anything from jsdelivr.
+Nothing is hoisted out of the shadow root. The engine emits its script only
+when `standalone` is set.
 
-### 6.2 Analytics
+## Fonts
 
-`src/hooks.client.ts` is intentionally empty. No analytics SDK is installed.
+`fonts/` in the repo holds IBM Plex Sans, NewCM Math and DejaVu Sans Mono; the
+Vite plugin copies them into `web/static/fonts/` and downloads Noto Sans SC/KR
+there once, on the first build. `web/static/fonts` is gitignored.
 
-### 6.3 Network calls during runtime
+The CJK faces are ~8 MB per weight, so they are excluded from the PWA precache
+and fetched by the worker only once a document actually contains that script —
+by script, so a Chinese document does not also pull the Korean face.
 
-Aside from same-origin assets, the only network call during a compile is:
+## Tests, and what each one is for
 
-- Remote image URLs the user wrote into the markdown.
-  - On CORS error, the optional user-configured proxy is consulted (see Settings → CORS proxy modal).
-  - On total failure, the image is silently dropped; the user can paste/drop the file manually.
+- `engine/src/html/tests.rs` — the bulk. Beyond the per-feature tests: a
+  **cross-renderer parity** suite (both renderers must make the same
+  keep-or-drop decision), a **nothing-disappears** sweep (every heading, task
+  and code block in every fixture appears in both outputs), and **structural
+  XSS guards** (no tag or attribute outside a known set, over every fixture).
+  The parity and sweep tests exist specifically because a per-side test suite
+  is what let the two renderers drift.
+- `tests/check_html.py` — checks the shipped artefact: WCAG AA contrast for
+  every colour token including the syntax ones, in both themes; an `alt` on
+  every image; every in-page link resolving; no external resource, no inline
+  handler, no `javascript:`/`data:` anchor.
+- `web/tests/*` — vitest, node environment, for the pure pieces only.
+- `web/e2e/*` — Playwright. The swallowed-headline bug lived in the rendered
+  document; no unit test could have seen it. These load the app, type, switch
+  tabs and read the shadow root.
 
----
+## Conventions
 
-## 7. Mermaid
-
-Implementation: `src/lib/mermaid/render.ts` + Mermaid pre-pass in `PdfEditor.svelte`.
-
-- `renderMermaidToSvg(code, id)` returns SVG bytes.
-- The Mermaid pre-pass scans for fenced ```` ```mermaid ```` blocks, renders each to SVG, writes the bytes to `images['mermaid-<n>.svg']`, and rewrites the block to `![Mermaid Diagram](mermaid-<n>.svg)` so the standard image pipeline picks it up.
-
----
-
-## 8. Twemoji
-
-- The `md2pdf-copy-twemoji` Vite plugin mirrors `node_modules/twemoji-emojis/vendor/svg/` into `static/twemoji/`.
-- `src/lib/pipeline/plugins/remark-twemoji.ts` walks `text` nodes and replaces matched emoji with `{ type: 'twemoji', codepoint }` nodes.
-- `src/lib/pipeline/plugins/remark-emoji-shortcodes.ts` runs *before* twemoji and expands `:innocent:` → 😇 via `node-emoji`.
-- `src/lib/twemoji/loader.ts` mirrors the same regex + shortcode logic on the raw markdown so that `PdfEditor.compile` can fetch the needed SVGs and inject them into the worker's `images` map.
-- The renderer emits `#box(baseline: 0.15em, height: 1em, image("twemoji/<codepoint>.svg"))` for each twemoji node.
-
----
-
-## 9. Settings
-
-`src/lib/stores/settingsStore.svelte.ts` (Svelte 5 runes, localStorage-backed):
-
-- `liveUpdate: boolean` — gates the auto-compile effect. When off, the toolbar shows an "Update" button and `Ctrl/Cmd+Enter` triggers a compile from anywhere.
-- `pageNumbers: boolean` — default for the `set page(numbering:)` toggle; frontmatter `pageNumbers:` overrides.
-- `corsProxy: string` — optional proxy URL. The image loader calls it as `${proxy}?url=<encoded>` (or `${proxy}&url=...` if the proxy already contains `?`).
-
----
-
-## 10. Known gaps
-
-- Preflight / one-click fixes for shaky AI markdown: not implemented.
-- Asset manager UI: images stored in IndexedDB but no visible list/delete UI.
-- `/Creator` and `/Producer` PDF metadata fields are still set by Typst itself (e.g. `Typst 0.13.1`). Stripping them would require either byte-patching the PDF or an upstream Typst change; neither is in scope.
+- Prettier is authoritative: tabs and semicolons in `.ts`, two spaces and no
+  semicolons in `.svelte`. `npm run format:check` runs in CI.
+- Svelte 5 runes throughout. `$state`, `$derived`, `$effect`, `$props`.
+- Comments explain *why*. What the code does is the code's job.
+- `npm run check` is expected at 0 errors **and** 0 warnings.

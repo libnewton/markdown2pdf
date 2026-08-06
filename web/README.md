@@ -18,9 +18,12 @@ runs client-side via WebAssembly — no server, no setup, no telemetry.
 
 ## Features
 
-- **Live preview** — SVG preview rendered directly from Typst as you type, with
-  a pause toggle (`Ctrl/Cmd+Enter` to compile on demand).
+- **Live preview** — updates as you type, always. The pageless **Web** view
+  needs no Typst compile at all; the paged **Pages** view compiles only while
+  it is the tab on screen.
 - **Code editor** — CodeMirror 6 with Markdown syntax highlighting.
+- **Keyboard shortcuts** — press `?` for the list. Slash commands (`/new`,
+  `/toc`, `/table`, …) expand on Enter when they are alone on a line.
 - **Document management** — auto-saves to IndexedDB; switch between recent docs.
 - **Image upload** — paste or drop images straight into the editor.
 - **Page breaks** — `[[pagebreak]]` for manual pagination.
@@ -39,6 +42,8 @@ npm run dev          # dev server
 npm run build        # static build → build/
 npm run check        # type-check
 npm test             # unit tests
+npm run test:e2e     # browser tests (Playwright)
+npm run format       # prettier
 ```
 
 The `vite.config.ts` plugins copy the `md2pdf` Typst package (`../package/`)

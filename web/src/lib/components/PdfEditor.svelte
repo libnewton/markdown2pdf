@@ -1,8 +1,10 @@
 <script lang="ts">
   import { browser } from '$app/environment'
+  import { page } from '$app/state'
+  import { replaceState } from '$app/navigation'
   import { onMount } from 'svelte'
-  import { buildHeadElement, buildPageElement } from '$lib/typst/svg-utils'
-  import type { SvgDocument, SvgPage } from '$lib/typst/svg-split'
+  import { pageSlots } from '$lib/preview/page-slots'
+  import type { SvgDocument } from '$lib/typst/svg-split'
   import { getSharedTypstWorkerClient, TypstWorkerClient } from '$lib/workers/typstClient'
   import { getMarkdownImportFile, getImageDropFile } from '$lib/utils/image-utils'
   import { PAGEBREAK_TOKEN } from '$lib/pagebreak'
@@ -13,10 +15,13 @@
   import { writable, type Readable } from 'svelte/store'
 
   import StatusHint from '$lib/components/StatusHint.svelte'
+  import HtmlPreview from '$lib/components/HtmlPreview.svelte'
+  import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte'
   import EditorPane from '$lib/components/EditorPane.svelte'
   import DocumentMenu from '$lib/components/DocumentMenu.svelte'
   import { PDF_TEMPLATES } from '$lib/templates/pdf-templates'
   import {
+    deriveNameFromContent,
     documentStore,
     isBrokenTemplateDocument,
     isLegacyImplicitBlankDocument,
@@ -31,17 +36,12 @@
     seoTitle: string
     seoDescription: string
     initialMarkdown?: string
+    /** The reference view: nothing is edited, nothing is saved. */
+    readOnly?: boolean
   }
 
-  let {
-    seoTitle,
-    seoDescription,
-    initialMarkdown = '',
-  }: Props = $props()
+  let { seoTitle, seoDescription, initialMarkdown = '', readOnly = false }: Props = $props()
 
-  // ========================================
-  // State
-  // ========================================
   let markdown = $state('')
   let hasInitializedMarkdown = false
   let editorPane = $state<EditorPane | null>(null)
@@ -66,21 +66,14 @@
   // we can only call it in the browser. SSR/prerender gets a fallback store
   // that is always false; the `{#if $needRefresh}` template branch stays
   // dormant until a real registration happens client-side.
+  let swUpdateTimer: ReturnType<typeof setInterval> | null = null
   const swOptions: RegisterSWOptions = {
     onRegistered(swr) {
-      console.log('SW registered: ', swr)
-      if (swr) {
-        setInterval(
-          () => {
-            console.log('Checking for SW update...')
-            swr.update()
-          },
-          60 * 60 * 1000,
-        )
-      }
+      if (!swr) return
+      swUpdateTimer = setInterval(() => void swr.update(), 60 * 60 * 1000)
     },
     onRegisterError(error) {
-      console.log('SW registration error', error)
+      console.error('service worker registration failed', error)
     },
   }
   let needRefresh: Readable<boolean> = writable(false)
@@ -109,8 +102,7 @@
         markdown = initialMarkdown
         return
       }
-      const pdfDocs = documentStore.recentDocuments.filter((d) => d.mode === 'pdf')
-      const invalidAutoDocs = pdfDocs.filter(
+      const invalidAutoDocs = documentStore.recentDocuments.filter(
         (doc) => isLegacyImplicitBlankDocument(doc) || isBrokenTemplateDocument(doc),
       )
       if (invalidAutoDocs.length > 0) {
@@ -118,13 +110,14 @@
           await documentStore.deleteDocument(doc.id)
         }
       }
-      const usablePdfDocs = pdfDocs.filter(
+      const usableDocs = documentStore.recentDocuments.filter(
         (doc) => !isLegacyImplicitBlankDocument(doc) && !isBrokenTemplateDocument(doc),
       )
-      // Try loading current doc if it belongs to this mode
       if (documentStore.currentDocId) {
-        const currentDoc = documentStore.recentDocuments.find((d) => d.id === documentStore.currentDocId)
-        if (currentDoc?.mode === 'pdf' && !isLegacyImplicitBlankDocument(currentDoc)) {
+        const currentDoc = documentStore.recentDocuments.find(
+          (d) => d.id === documentStore.currentDocId,
+        )
+        if (currentDoc && !isLegacyImplicitBlankDocument(currentDoc)) {
           const doc = await documentStore.loadDocument(documentStore.currentDocId)
           if (doc !== null) {
             applyLoadedDocument(doc)
@@ -133,8 +126,8 @@
         }
       }
       // Check if there are recent PDF docs
-      if (usablePdfDocs.length > 0) {
-        const doc = await documentStore.loadDocument(usablePdfDocs[0].id)
+      if (usableDocs.length > 0) {
+        const doc = await documentStore.loadDocument(usableDocs[0].id)
         if (doc !== null) {
           applyLoadedDocument(doc)
           return
@@ -143,7 +136,7 @@
       // Create new doc from initial markdown or template
       const defaultContent = initialMarkdown || PDF_TEMPLATES[0]?.content || ''
       markdown = defaultContent
-      const doc = await documentStore.createDocument('pdf', defaultContent, undefined, 'template')
+      const doc = await documentStore.createDocument(defaultContent, undefined, 'template')
       applyLoadedDocument(doc)
     })()
   })
@@ -153,42 +146,68 @@
   let isResizing = $state(false)
   let isDragging = $state(false)
 
+  // Which panes are on screen. Mirrored into the URL as `?edit` / `?view` /
+  // `?both`, so a link can open the app the way the sender had it.
+  type ViewMode = 'edit' | 'view' | 'both'
+  const VIEW_MODES: ViewMode[] = ['edit', 'both', 'view']
+  let viewMode = $state<ViewMode>('both')
+  let showEditor = $derived(viewMode !== 'view')
+  let showPreview = $derived(viewMode !== 'edit')
 
+  function setViewMode(next: ViewMode) {
+    viewMode = next
+    // View mode has no paged preview: a page is a PDF idea.
+    if (next === 'view') previewMode = 'document'
+    const url = new URL(page.url)
+    for (const mode of VIEW_MODES) url.searchParams.delete(mode)
+    // `?view` reads better than `?view=`, and both parse the same. Built by
+    // hand rather than by patching what `URLSearchParams` serialised: with a
+    // fragment present the `=` is followed by `#`, so a trailing-only fixup
+    // left `/?view=#heading` behind.
+    const params = [...url.searchParams].map(([k, v]) => (v === '' ? k : `${k}=${v}`))
+    url.search = [...params, next].join('&')
+    replaceState(url.href, page.state)
+  }
 
-  let templates = $derived(PDF_TEMPLATES)
+  let htmlPreview = $state<HtmlPreview | null>(null)
+  let documentMenu = $state<DocumentMenu | null>(null)
+  let isShortcutsOpen = $state(false)
+
+  /** Whether a key event came from somewhere text is being entered. */
+  function isTyping(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null
+    if (!el?.tagName) return false
+    return (
+      el.isContentEditable ||
+      ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ||
+      !!el.closest?.('.cm-editor')
+    )
+  }
+
+  /**
+   * Follow an outline jump in the URL. Inside a shadow root the browser cannot
+   * resolve a fragment itself, so it neither scrolls nor records where the
+   * reader is — which left `?view` unable to produce a link to a section.
+   */
+  function setHash(id: string) {
+    const url = new URL(page.url)
+    url.hash = id
+    replaceState(url.href, page.state)
+  }
+
+  // A `#heading` the page was opened with, applied once the document it names
+  // has actually been rendered.
+  let pendingHash = ''
+
+  $effect(() => {
+    if (!browser || !pendingHash || !htmlDoc) return
+    if (htmlPreview?.scrollTo(pendingHash)) pendingHash = ''
+  })
 
   // Mobile state
   let activeMobileTab = $state<'editor' | 'preview'>('editor')
-  let isMenuOpen = $state(false)
-  let isCorsModalOpen = $state(false)
-  let corsModalDraft = $state('')
-
-  function openCorsModal() {
-    corsModalDraft = settingsStore.corsProxy
-    isCorsModalOpen = true
-    closeMenu()
-  }
-
-  function saveCorsProxy() {
-    settingsStore.setCorsProxy(corsModalDraft)
-    isCorsModalOpen = false
-  }
-
-  function cancelCorsProxy() {
-    isCorsModalOpen = false
-  }
-
-  function toggleMenu(e?: Event) {
-    if (e) {
-      e.stopPropagation()
-      e.preventDefault()
-    }
-    isMenuOpen = !isMenuOpen
-  }
-
-  function closeMenu() {
-    isMenuOpen = false
-  }
+  let isAboutOpen = $state(false)
+  let isExportOpen = $state(false)
 
   // Compilation state
   let status: 'idle' | 'compiling' | 'done' | 'error' = $state('idle')
@@ -209,27 +228,32 @@
   let svgPageCount = $state(0)
   let svgScale = $state(1)
 
+  // Pageless HTML view. The engine renders it without a Typst compile, so it
+  // updates on its own short debounce instead of the adaptive compile one.
+  type PreviewMode = 'pages' | 'document'
+  let previewMode = $state<PreviewMode>('pages')
+  let htmlDoc = $state('')
+  // Content the render had to degrade — an image it could not fetch, a diagram
+  // it could not draw. The document still renders, which is why these would
+  // otherwise pass unnoticed.
+  let warnings = $state<string[]>([])
+  let isWarningsOpen = $state(false)
+  const unreachable = (url: string) => `could not fetch: ${url}`
+  let htmlTimer: number | null = null
+  const HTML_DEBOUNCE_MS = 120
+
   // Auto-compile
   let compileSeq = 0
   let hasEverCompiled = false
 
   // Cached last compiled Markdown + images for PDF export (same as preview)
-  let lastCompiledMarkdown = ''
-  let lastCompiledImages: ImageMap = {}
+  // What the paged preview last compiled, so a remote image arriving late can
+  // tell whether the document has moved on since.
+  let compiledMarkdown = ''
   let autoPreviewTimer: number | null = null
   // The auto-compile debounce follows the last compile's duration, so a slow
   // document is not re-queued faster than it can be rendered.
   let lastCycleMs = 0
-
-  const UI = {
-    export: 'Export PDF',
-    loading: 'Initializing rendering engine...',
-    generating: 'Generating...',
-    placeholder: 'Type Markdown here...',
-  }
-  function t<K extends keyof typeof UI>(key: K): string {
-    return UI[key]
-  }
 
   $effect(() => {
     if (!browser) return
@@ -255,12 +279,25 @@
     }
   })
 
-  // ========================================
-  // Lifecycle
-  // ========================================
   onMount(() => {
-    loadingText = t('loading')
+    loadingText = 'Initializing rendering engine...'
     client = getSharedTypstWorkerClient()
+
+    // A mode in the URL wins over the default split.
+    const requested = VIEW_MODES.find((mode) => page.url.searchParams.has(mode))
+    if (requested) {
+      viewMode = requested
+      if (requested === 'view') {
+        previewMode = 'document'
+        activeMobileTab = 'preview'
+      }
+    }
+    // `/?view#some-heading` is a link to a section, so honour it once the
+    // document naming that heading has rendered.
+    if (page.url.hash.length > 1) {
+      pendingHash = decodeURIComponent(page.url.hash.slice(1))
+      previewMode = 'document'
+    }
 
     // Hide loading overlay and trigger first compile
     isLoading = false
@@ -271,19 +308,81 @@
     // 5 already short-circuits identical writes, but skipping the call
     // entirely keeps this listener off the hot path.
     const handleClickOutside = () => {
-      if (isMenuOpen) closeMenu()
+      if (isExportOpen) isExportOpen = false
     }
     window.addEventListener('click', handleClickOutside)
 
-    // Ctrl/Cmd+Enter triggers an immediate compile. Use capture phase +
-    // stopImmediatePropagation so CodeMirror's editor keymap never sees it
-    // and never inserts a newline.
+    // Capture phase + stopImmediatePropagation, so CodeMirror's own keymap
+    // never sees a shortcut we have claimed and cannot, say, insert a newline
+    // for Ctrl+Enter as well as compiling.
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      const mod = e.ctrlKey || e.metaKey
+      const claim = () => {
         e.preventDefault()
         e.stopImmediatePropagation()
         e.stopPropagation()
-        compileNow()
+      }
+
+      if (e.key === 'Escape') {
+        if (!isShortcutsOpen && !isAboutOpen && !isExportOpen && !replacePrompt) return
+        claim()
+        isShortcutsOpen = false
+        isAboutOpen = false
+        isExportOpen = false
+        replacePrompt?.answer(false)
+        return
+      }
+      // `?` where you are not typing — the usual way to ask for this list.
+      if (!mod && e.key === '?' && !isTyping(e.target)) {
+        claim()
+        isShortcutsOpen = !isShortcutsOpen
+        return
+      }
+      if (!mod) return
+
+      switch (e.key.toLowerCase()) {
+        case 'enter':
+          claim()
+          compileNow()
+          return
+        case 'n':
+          // Cmd/Ctrl+N belongs to the browser, so this one takes Alt too.
+          if (!e.altKey || readOnly) return
+          claim()
+          void documentMenu?.newBlank()
+          return
+        case 's':
+          // Swallowed rather than handled: there is nothing to save, and the
+          // browser's "save page as" is not what anyone means by it here.
+          claim()
+          return
+        case 'e':
+          claim()
+          isExportOpen = !isExportOpen
+          return
+        case 'p':
+          claim()
+          void downloadPdf()
+          return
+        case '1':
+        case '2':
+        case '3':
+          claim()
+          setViewMode(VIEW_MODES[Number(e.key) - 1])
+          return
+        case '\\':
+          claim()
+          if (viewMode !== 'view') previewMode = previewMode === 'pages' ? 'document' : 'pages'
+          return
+        case 'o':
+          claim()
+          previewMode = 'document'
+          htmlPreview?.toggleOutline()
+          return
+        case '/':
+          claim()
+          isShortcutsOpen = !isShortcutsOpen
+          return
       }
     }
     window.addEventListener('keydown', handleKey, true)
@@ -314,6 +413,7 @@
       window.removeEventListener('pagehide', handleHide)
       window.removeEventListener('keydown', handleKey, true)
       if (resizeTimer) clearTimeout(resizeTimer)
+      if (swUpdateTimer) clearInterval(swUpdateTimer)
     }
   })
 
@@ -330,24 +430,22 @@
     documentStore.autoSave(documentStore.currentDocId, markdown, changed ? assets : undefined)
   })
 
-  // Auto-compile effect (debounce 450ms). Gated by the live-update setting:
-  // first compile always runs so the user sees something; later ones obey the toggle.
-  // Important: subscribe to `markdown` ONLY when we'll actually use it. When live
-  // is paused (after the first compile), reading markdown would make every
-  // keystroke re-run this effect for nothing.
+  // Auto-compile effect. Only while the paged preview is actually on screen:
+  // a Typst compile is the most expensive thing the app does, and on the Web
+  // tab — or in `?view`, which is always the Web tab — its result is never
+  // looked at. Export compiles on demand instead of relying on this.
+  // Important: subscribe to `markdown` ONLY when we'll actually use it, so a
+  // keystroke behind a hidden pane does not re-run this effect for nothing.
   $effect(() => {
     if (!browser) return
     if (!client) return
     if (isLoading) return
-
-    const live = settingsStore.liveUpdate
-    if (hasEverCompiled && !live) return
+    if (!showPreview || previewMode !== 'pages') return
 
     const md = markdown
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _pn = settingsStore.pageNumbers
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _cp = settingsStore.corsProxy
+    // Switching back to Pages with nothing changed since: the pages on screen
+    // are already the answer.
+    if (previewDoc && md === compiledMarkdown) return
 
     if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
 
@@ -364,116 +462,89 @@
   function compileNow() {
     // Compile what is on screen, including keystrokes still buffered.
     editorPane?.flushPendingEdit()
-    void compile(markdown)
+    if (previewMode === 'pages') void compile(markdown)
+    else void renderHtml(markdown)
   }
 
-  // Auto-fit on mobile tab switch
+  // The HTML view costs a few milliseconds, so it tracks typing closely rather
+  // than waiting for the Typst compile. Only runs while its tab is showing.
   $effect(() => {
     if (!browser) return
-    if (activeMobileTab === 'preview') {
-      setTimeout(() => {
-        fitWidth()
-      }, 50)
+    if (!client) return
+    if (isLoading) return
+    if (previewMode !== 'document') return
+
+    const md = markdown
+    if (htmlTimer) window.clearTimeout(htmlTimer)
+    htmlTimer = window.setTimeout(() => void renderHtml(md), HTML_DEBOUNCE_MS)
+
+    return () => {
+      if (htmlTimer) window.clearTimeout(htmlTimer)
     }
   })
 
-  // Only the pages near the viewport become DOM; the rest stay as markup
-  // behind correctly-sized placeholders and mount on scroll. That keeps the
-  // per-compile cost proportional to what is on screen, not to the document
-  // length — a 40-page document is otherwise ~240k nodes to rebuild.
-  let pageSlots: HTMLDivElement[] = []
-  let pageMarkup: SvgPage[] = []
-  const visibleSlots = new Set<number>()
-  let headEl: SVGSVGElement | null = null
-  let pageObserver: IntersectionObserver | null = null
+  let htmlSeq = 0
 
-  function mountPage(index: number) {
-    const slot = pageSlots[index]
-    const page = pageMarkup[index]
-    if (!slot || !page) return
-    slot.replaceChildren(buildPageElement(page))
-  }
-
-  function ensureObserver(container: HTMLDivElement): IntersectionObserver {
-    if (pageObserver) return pageObserver
-    pageObserver = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const index = Number((entry.target as HTMLElement).dataset.page)
-          if (entry.isIntersecting) {
-            visibleSlots.add(index)
-            if (!entry.target.firstChild) mountPage(index)
-          } else {
-            visibleSlots.delete(index)
-            entry.target.replaceChildren()
-          }
-        }
-      },
-      // Mount a screenful ahead so scrolling finds pages already rendered.
-      { root: container, rootMargin: '100% 0px' },
-    )
-    return pageObserver
-  }
-
-  function syncSlots(container: HTMLDivElement, pages: SvgPage[]) {
-    const observer = ensureObserver(container)
-
-    while (pageSlots.length > pages.length) {
-      const slot = pageSlots.pop()!
-      observer.unobserve(slot)
-      visibleSlots.delete(pageSlots.length)
-      slot.remove()
-    }
-
-    for (let i = 0; i < pages.length; i++) {
-      let slot = pageSlots[i]
-      if (!slot) {
-        slot = document.createElement('div')
-        slot.className = 'page-slot'
-        slot.dataset.page = String(i)
-        container.appendChild(slot)
-        pageSlots[i] = slot
-        observer.observe(slot)
+  async function renderHtml(md: string) {
+    if (!client) return
+    const seq = ++htmlSeq
+    try {
+      // `editable` gives the fragment its source lines and live checkboxes;
+      // the reference view has a source it will not write to, so it opts out.
+      const { html, diagnostics } = await client.renderHtml(
+        md,
+        imagesToSend(documentImages(md)),
+        false,
+        !readOnly,
+      )
+      // Both guards matter: `seq` catches a render this component superseded,
+      // `md === markdown` catches one that finished against text the document
+      // has since moved past — which is how a checkbox click during the
+      // debounce window got repainted in its old state.
+      if (seq === htmlSeq && md === markdown) {
+        htmlDoc = html
+        warnings = [...new Set([...diagnostics, ...cachedRemoteImages(md).failed.map(unreachable)])]
       }
-      // The placeholder keeps the page's footprint, so scroll position and
-      // document height do not jump while pages are unmounted.
-      slot.style.aspectRatio = `${pages[i].width} / ${pages[i].height}`
+    } catch (error) {
+      // A render the worker dropped in favour of a newer one is not an error.
+      if (error instanceof Error && error.message === SUPERSEDED) return
+      if (seq !== htmlSeq) return
+      status = 'error'
+      errorMessage = error instanceof Error ? error.message : String(error)
     }
   }
 
+  // Auto-fit on mobile tab switch, once the pane has been laid out.
   $effect(() => {
     if (!browser) return
-    const doc = previewDoc
-    const container = svgContainerEl
-    if (!doc || !container) return
-
-    pageMarkup = doc.pages
-    svgPageCount = doc.pages.length
-
-    const nextHead = buildHeadElement(doc.head)
-    if (headEl?.parentNode === container) {
-      container.replaceChild(nextHead, headEl)
-    } else {
-      container.replaceChildren(nextHead)
-      pageSlots = []
-      visibleSlots.clear()
-    }
-    headEl = nextHead
-
-    syncSlots(container, doc.pages)
-    for (const index of visibleSlots) mountPage(index)
+    if (activeMobileTab !== 'preview') return
+    const timer = window.setTimeout(fitWidth, 50)
+    return () => window.clearTimeout(timer)
   })
 
-  // ========================================
-  // Functions
-  // ========================================
+  let slots: ReturnType<typeof pageSlots> | null = null
+
+  $effect(() => {
+    if (!browser || !svgContainerEl) return
+    slots = pageSlots(svgContainerEl)
+    return () => {
+      slots?.destroy()
+      slots = null
+    }
+  })
+
+  $effect(() => {
+    if (!previewDoc || !slots) return
+    svgPageCount = previewDoc.pages.length
+    slots.show(previewDoc)
+  })
+
   // All Markdown processing happens inside the Typst compile (the md2pdf
   // engine). The host only resolves images Typst cannot fetch itself.
   async function compile(md: string) {
     if (!client) return
-    // Only mark "compiled" once real content exists — otherwise a first
-    // compile that races ahead of the document load would, while live
-    // update is paused, leave the preview blank until a manual Update.
+    // Only mark "compiled" once real content exists, so the adaptive delay
+    // below is not calibrated against an empty first pass.
     if (md.trim() !== '') hasEverCompiled = true
 
     const seq = ++compileSeq
@@ -484,22 +555,22 @@
     const startedAt = performance.now()
 
     try {
-      const localImages = collectReferencedImageAssets(md)
       // Remote images are not awaited: compile with what is cached, then
       // recompile if a fetch brings in something new.
-      const { images: remoteImages, missing } = cachedRemoteImages(md)
-      const images: ImageMap = { ...localImages, ...remoteImages }
+      const { missing } = cachedRemoteImages(md)
+      const images = documentImages(md)
 
-      lastCompiledMarkdown = md
-      lastCompiledImages = images
+      compiledMarkdown = md
 
       if (missing.length > 0) {
-        void prefetchRemoteImages(missing, settingsStore.corsProxy).then((gotNew) => {
-          if (gotNew && lastCompiledMarkdown === md) void compile(md)
+        void prefetchRemoteImages(missing).then((gotNew) => {
+          if (!gotNew || compiledMarkdown !== md) return
+          void compile(md)
+          if (previewMode === 'document') void renderHtml(md)
         })
       }
 
-      const result = await client.compilePreview(md, imagesToSend(images), settingsStore.pageNumbers)
+      const result = await client.compilePreview(md, imagesToSend(images))
       if (seq !== compileSeq) return
       previewDoc = result.preview
       status = 'done'
@@ -511,6 +582,11 @@
       status = 'error'
       errorMessage = error instanceof Error ? error.message : String(error)
     }
+  }
+
+  /** Every image byte-array the document references, local and remote. */
+  function documentImages(md: string): ImageMap {
+    return { ...collectReferencedImageAssets(md), ...cachedRemoteImages(md).images }
   }
 
   // The worker keeps every image it has been handed, so a recompile only
@@ -529,12 +605,15 @@
 
   async function downloadPdf() {
     editorPane?.flushPendingEdit()
-    if (!client || !lastCompiledMarkdown) return
+    if (!client) return
+    // Compiled from what is on screen rather than from whatever the preview
+    // last rendered — the paged preview may never have run at all.
+    const md = markdown
     // Open the tab synchronously so it counts as user-initiated and isn't
     // blocked by popup blockers after the async compile.
     const newTab = window.open('', '_blank')
     // @ts-ignore
-    const { pdf } = await client.compilePdf(lastCompiledMarkdown, lastCompiledImages, settingsStore.pageNumbers)
+    const { pdf } = await client.compilePdf(md, imagesToSend(documentImages(md)))
     const blob = new Blob([pdf], { type: 'application/pdf' })
     const url = URL.createObjectURL(blob)
     if (newTab) {
@@ -545,29 +624,67 @@
     setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
+  function download(blob: Blob, extension: string) {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download =
+      (deriveNameFromContent(markdown) || 'document').replace(/[/\\?%*:|"<>]/g, '-') + extension
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  async function downloadHtml() {
+    editorPane?.flushPendingEdit()
+    if (!client) return
+    const md = markdown
+    const { html } = await client.renderHtml(md, imagesToSend(documentImages(md)), true)
+    download(new Blob([html], { type: 'text/html;charset=utf-8' }), '.html')
+  }
+
+  function downloadMarkdown() {
+    editorPane?.flushPendingEdit()
+    download(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), '.md')
+  }
+
   let fileInputEl = $state<HTMLInputElement | null>(null)
 
-  function handleOpenFile() {
+  function handleUpload() {
     fileInputEl?.click()
   }
 
   function onFileSelected(e: Event) {
     const target = e.target as HTMLInputElement
-    const files = target.files
-    if (!files || files.length === 0) return
-
-    const file = files[0]
-    const reader = new FileReader()
-    reader.onload = (evt) => {
-      const content = evt.target?.result
-      if (typeof content === 'string') {
-        markdown = content
-      }
-    }
-    reader.readAsText(file)
-
-    // Reset value so same file can be selected again
+    const file = target.files?.[0]
+    // Reset value so the same file can be picked again
     target.value = ''
+    if (file) void openFile(file)
+  }
+
+  // `confirm()` blocks the whole tab, which stops the worker's messages from
+  // being delivered and leaves the preview frozen behind the dialog.
+  let replacePrompt = $state<{ name: string; answer: (ok: boolean) => void } | null>(null)
+
+  function confirmReplace(name: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      replacePrompt = {
+        name,
+        answer: (ok) => {
+          replacePrompt = null
+          resolve(ok)
+        },
+      }
+    })
+  }
+
+  /** An image is inserted where the cursor is; anything else replaces the document. */
+  async function openFile(file: File) {
+    if (file.type.startsWith('image/')) {
+      await editorPane?.insertImageFile(file)
+      return
+    }
+    if (markdown.trim() !== '' && !(await confirmReplace(file.name))) return
+    markdown = await file.text()
   }
 
   function handleImageSaved(path: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string) {
@@ -586,22 +703,9 @@
       }
     }
 
-    return Object.fromEntries(
-      [...referenced].map((path) => [path, imageAssets[path].bytes]),
-    )
+    return Object.fromEntries([...referenced].map((path) => [path, imageAssets[path].bytes]))
   }
 
-  function handleHelp() {
-    const defaultContent = PDF_TEMPLATES[0]?.content || ''
-    if (markdown.trim() !== '' && markdown !== defaultContent) {
-      if (!confirm('This will overwrite current content. Continue?')) return
-    }
-    markdown = defaultContent
-  }
-
-  // ========================================
-  // Resizer Logic
-  // ========================================
   function startResize(e: MouseEvent) {
     e.preventDefault()
     isResizing = true
@@ -635,15 +739,28 @@
     document.removeEventListener('mouseup', stopResize)
   }
 
-  // ========================================
-  // Drag & Drop Logic
-  // ========================================
+  // A `separator` with `tabindex` that answers to no key is worse than one
+  // that cannot be focused at all — it is a stop on the tab order that does
+  // nothing. Home/End go to the two ends of the allowed range.
+  function resizeKey(e: KeyboardEvent) {
+    const step = e.shiftKey ? 10 : 2
+    const to = {
+      ArrowLeft: leftPaneWidth - step,
+      ArrowRight: leftPaneWidth + step,
+      Home: 20,
+      End: 80,
+    }[e.key]
+    if (to === undefined) return
+    e.preventDefault()
+    leftPaneWidth = Math.min(Math.max(to, 20), 80)
+  }
+
   function hasFiles(e: DragEvent): boolean {
     return e.dataTransfer?.types?.includes('Files') ?? false
   }
 
   function handleDragOver(e: DragEvent) {
-    if (!hasFiles(e)) return
+    if (!hasFiles(e) || readOnly) return
     e.preventDefault()
     isDragging = true
   }
@@ -658,32 +775,19 @@
     if (!hasFiles(e)) return
     e.preventDefault()
     isDragging = false
+    if (readOnly) return
 
     const files = e.dataTransfer?.files
     if (!files || files.length === 0) return
 
-    const markdownFile = getMarkdownImportFile(files)
-    if (markdownFile) {
-      const reader = new FileReader()
-      reader.onload = (event) => {
-        const content = event.target?.result
-        if (typeof content === 'string') {
-          markdown = content
-        }
-      }
-      reader.readAsText(markdownFile)
-      return
-    }
-
-    const imageFile = getImageDropFile(files)
-    if (imageFile) {
-      void editorPane?.insertImageFile(imageFile)
-    }
+    // Same two paths as the Upload button, prompt included.
+    const file = getMarkdownImportFile(files) ?? getImageDropFile(files)
+    if (file) void openFile(file)
   }
 
   async function handlePaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items
-    if (!items) return
+    if (!items || readOnly) return
 
     for (const item of items) {
       if (!item.type.startsWith('image/')) continue
@@ -762,7 +866,16 @@
   {#if isDragging}
     <div class="drop-overlay">
       <div class="drop-overlay-content">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          width="48"
+          height="48"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
           <polyline points="17 8 12 3 7 8"></polyline>
           <line x1="12" y1="3" x2="12" y2="15"></line>
@@ -775,7 +888,7 @@
   <!-- File Input (Hidden) -->
   <input
     type="file"
-    accept=".md,.markdown,.txt"
+    accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif,.md,.markdown,.txt"
     style="display: none;"
     bind:this={fileInputEl}
     onchange={onFileSelected}
@@ -787,129 +900,279 @@
       <a href="/" class="logo-link">
         <img src="/logo.png" alt="md2pdf" class="logo-img" />
       </a>
-      <DocumentMenu
-        mode="pdf"
-        templates={PDF_TEMPLATES}
-        currentContent={markdown}
-        {documentAssets}
-        onDocumentLoad={(doc) => { applyLoadedDocument(doc) }}
-      />
+      {#if readOnly}
+        <span class="doc-title">Reference</span>
+      {:else}
+        <DocumentMenu
+          bind:this={documentMenu}
+          currentContent={markdown}
+          {documentAssets}
+          onDocumentLoad={(doc) => {
+            applyLoadedDocument(doc)
+          }}
+        />
+      {/if}
     </div>
+
+    <!-- Centred, so a long document name never shifts it. -->
+    <div class="view-switch layout-switch" role="group" aria-label="Layout">
+      {#each VIEW_MODES as mode}
+        <button
+          class:active={viewMode === mode}
+          aria-pressed={viewMode === mode}
+          onclick={() => setViewMode(mode)}
+          title={mode === 'edit' ? 'Editor only' : mode === 'view' ? 'Document only' : 'Split'}
+        >
+          <!-- Which half is filled is which pane you get. -->
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+          >
+            {#if mode !== 'view'}
+              <rect x="3" y="5" width="9" height="14" fill="currentColor" stroke="none"></rect>
+            {/if}
+            {#if mode !== 'edit'}
+              <rect x="12" y="5" width="9" height="14" fill="currentColor" stroke="none"></rect>
+            {/if}
+            <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+            <path d="M12 5v14"></path>
+          </svg>
+        </button>
+      {/each}
+    </div>
+
     <div class="navbar-right">
+      {#if $needRefresh}
+        <button class="tool-btn update-btn" onclick={() => updateServiceWorker(true)}>
+          Update available
+        </button>
+      {/if}
+      <button
+        class="tool-btn tool-btn-icon"
+        onclick={() => settingsStore.setTheme(settingsStore.theme === 'dark' ? 'light' : 'dark')}
+        title={settingsStore.theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+        aria-label={settingsStore.theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+      >
+        {#if settingsStore.theme === 'dark'}
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="4"></circle>
+            <path
+              d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+            ></path>
+          </svg>
+        {:else}
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>
+          </svg>
+        {/if}
+      </button>
+
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="menu-container" onclick={(e) => e.stopPropagation()}>
         <button
-          class="btn btn-ghost btn-sm btn-icon"
-          class:active={isMenuOpen}
-          onclick={toggleMenu}
-          aria-label="Menu"
-          style="color: var(--color-gray-900);"
+          class="btn btn-sm export-btn"
+          onclick={() => (isExportOpen = !isExportOpen)}
+          aria-expanded={isExportOpen}
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"></circle>
-            <circle cx="19" cy="12" r="2" fill="currentColor" stroke="none"></circle>
-            <circle cx="5" cy="12" r="2" fill="currentColor" stroke="none"></circle>
+          Export
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <path
+              d="M3 4.5L6 7.5L9 4.5"
+              stroke="currentColor"
+              stroke-width="1.5"
+              fill="none"
+              stroke-linecap="round"
+            />
           </svg>
         </button>
-
-        {#if isMenuOpen}
+        {#if isExportOpen}
           <div class="dropdown-menu">
             <button
               class="menu-item"
-              onclick={() => { handleOpenFile(); closeMenu() }}
+              onclick={() => {
+                isExportOpen = false
+                void downloadPdf()
+              }}
+              disabled={!previewDoc}>PDF</button
             >
-              <span class="menu-icon">📂</span>
-              Open Local File
-            </button>
-
             <button
               class="menu-item"
-              onclick={() => { handleHelp(); closeMenu() }}
+              onclick={() => {
+                isExportOpen = false
+                downloadMarkdown()
+              }}>Markdown</button
             >
-              <span class="menu-icon">❓</span>
-              Help & Guide
-            </button>
-
-            <div class="menu-divider"></div>
-
-            <button
-              class="menu-item menu-toggle"
-              onclick={(e) => { e.stopPropagation(); settingsStore.setPageNumbers(!settingsStore.pageNumbers) }}
-              title="Frontmatter `pageNumbers:` overrides this setting"
-            >
-              <span class="menu-toggle-label">Page numbers</span>
-              <span class="switch" class:on={settingsStore.pageNumbers} aria-hidden="true">
-                <span class="switch-thumb"></span>
-              </span>
-            </button>
-
             <button
               class="menu-item"
-              onclick={openCorsModal}
-              title="Optional CORS proxy for fetching images blocked by CORS"
+              onclick={() => {
+                isExportOpen = false
+                void downloadHtml()
+              }}>HTML</button
             >
-              <span class="menu-icon">🔗</span>
-              CORS proxy{settingsStore.corsProxy ? ' ✓' : '…'}
-            </button>
-
-            <div class="menu-divider"></div>
-
-            <a
-              href="https://github.com/libnewton/markdown2pdf"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="menu-item"
-            >
-              <span class="menu-icon">🐙</span>
-              GitHub
-            </a>
-            {#if $needRefresh}
-              <div class="menu-divider"></div>
-              <button
-                class="menu-item"
-                onclick={() => updateServiceWorker(true)}
-                style="color: var(--color-green-600);"
-              >
-                <span class="menu-icon">⚡</span>
-                Update Available
-              </button>
-            {/if}
           </div>
         {/if}
       </div>
     </div>
   </nav>
 
+  <!-- The document tools, in the strip above the editor. -->
+  {#snippet tools()}
+    <div class="toolbar">
+      {#if !readOnly}
+        <button
+          class="tool-btn"
+          onclick={() => editorPane?.insertMarkdownSnippet(`\n\n${PAGEBREAK_TOKEN}\n\n`)}
+          title="Insert page break"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <line x1="2" y1="12" x2="6" y2="12"></line>
+            <line x1="18" y1="12" x2="22" y2="12"></line>
+            <path d="M6 8V4h12v4"></path>
+            <path d="M6 16v4h12v-4"></path>
+          </svg>
+          <span class="tool-label">Break</span>
+        </button>
+        <button
+          class="tool-btn"
+          onclick={handleUpload}
+          title="Insert an image, or open a Markdown file"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <span class="tool-label">Upload</span>
+        </button>
+      {/if}
+
+      {#if !readOnly}
+        <a
+          class="tool-btn tool-btn-icon"
+          href="/reference"
+          target="_blank"
+          rel="noopener"
+          title="Reference — every feature, source next to result"
+          aria-label="Reference">?</a
+        >
+      {/if}
+
+      <button
+        class="tool-btn tool-btn-icon"
+        onclick={() => (isShortcutsOpen = true)}
+        title="Keyboard shortcuts (?)"
+        aria-label="Keyboard shortcuts"
+      >
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <rect
+            x="0.75"
+            y="3.25"
+            width="14.5"
+            height="9.5"
+            rx="1.75"
+            stroke="currentColor"
+            stroke-width="1.3"
+          />
+          <path
+            d="M4 6h.01M6.5 6h.01M9 6h.01M11.5 6h.01M4.5 9.5h6"
+            stroke="currentColor"
+            stroke-width="1.4"
+            stroke-linecap="round"
+          />
+        </svg>
+      </button>
+
+      <button
+        class="tool-btn tool-btn-icon"
+        onclick={() => (isAboutOpen = true)}
+        title="About md2pdf"
+        aria-label="About md2pdf"
+      >
+        <svg class="gh-icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+          />
+        </svg>
+      </button>
+    </div>
+  {/snippet}
+
   <!-- Workspace -->
   <main class="workspace">
     <!-- Editor Pane -->
     <section
       class="pane editor-pane"
+      class:hidden={!showEditor}
       class:mobile-hidden={activeMobileTab !== 'editor'}
-      style="width: {leftPaneWidth}%"
+      style="width: {showPreview ? leftPaneWidth : 100}%"
     >
+      {@render tools()}
       <EditorPane
         bind:this={editorPane}
         bind:markdown
-        placeholder={t('placeholder')}
+        placeholder="Type Markdown here..."
         {errorMessage}
-        pageBreakToken={PAGEBREAK_TOKEN}
-        pageBreakLabel="Break"
-        pageBreakTitle="Insert page break"
+        {readOnly}
         onImageSaved={handleImageSaved}
+        onNewDocument={() => void documentMenu?.newBlank()}
       />
     </section>
 
-    <!-- Resizer -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="resizer hidden-mobile"
+      class:hidden={viewMode !== 'both'}
       class:active={isResizing}
       onmousedown={startResize}
+      onkeydown={resizeKey}
       role="separator"
+      aria-label="Editor width"
       aria-orientation="vertical"
+      aria-valuemin={20}
+      aria-valuemax={80}
+      aria-valuenow={Math.round(leftPaneWidth)}
       tabindex="0"
     ></div>
 
@@ -934,64 +1197,98 @@
     <!-- Preview Pane -->
     <section
       class="pane preview-pane"
+      class:hidden={!showPreview}
       class:mobile-hidden={activeMobileTab !== 'preview'}
-      style="width: {100 - leftPaneWidth}%"
     >
-      <div class="preview-toolbar">
-        <div class="preview-status-wrapper">
-          <button
-            class="live-toggle"
-            class:on={settingsStore.liveUpdate}
-            onclick={() => settingsStore.setLiveUpdate(!settingsStore.liveUpdate)}
-            title={settingsStore.liveUpdate ? 'Pause live preview' : 'Enable live preview'}
-          >
-            <span class="live-dot" aria-hidden="true"></span>
-            {settingsStore.liveUpdate ? 'Live' : 'Paused'}
-          </button>
-          <span class="page-info">{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span>
-          {#if status === 'error'}
-            <div class="error-badge">
-              <span>⚠️ Failed</span>
-            </div>
-          {/if}
-        </div>
-        <div class="preview-toolbar-right">
-          {#if !settingsStore.liveUpdate}
-            <button
-              class="btn-icon-sm"
-              onclick={compileNow}
-              disabled={status === 'compiling'}
-              title="Compile now"
-              style="padding: 4px 10px; font-size: 0.75rem;"
-            >
-              Update
-            </button>
-          {/if}
-          <div class="zoom">
-            <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
-            <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
-            <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
-            <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
+      <!-- View mode leaves nothing for this bar to hold, so it goes away. -->
+      {#if viewMode !== 'view' || status === 'error'}
+        <div class="preview-toolbar">
+          <div class="preview-status-wrapper">
+            <!-- View mode is for reading: no editing tools, no paged/pageless
+               switch, just the document. -->
+            {#if viewMode !== 'view'}
+              <div class="view-switch" role="group" aria-label="Preview mode">
+                <button
+                  class:active={previewMode === 'pages'}
+                  aria-pressed={previewMode === 'pages'}
+                  onclick={() => (previewMode = 'pages')}
+                >
+                  Pages
+                </button>
+                <button
+                  class:active={previewMode === 'document'}
+                  aria-pressed={previewMode === 'document'}
+                  onclick={() => {
+                    previewMode = 'document'
+                    if (!htmlDoc) void renderHtml(markdown)
+                  }}
+                >
+                  Web
+                </button>
+              </div>
+            {/if}
+            {#if previewMode === 'pages'}
+              <span class="page-info"
+                >{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span
+              >
+            {/if}
+            {#if status === 'error'}
+              <div class="error-badge">
+                <span>⚠️ Failed</span>
+              </div>
+            {:else if warnings.length > 0}
+              <button
+                class="warning-badge"
+                onclick={() => (isWarningsOpen = !isWarningsOpen)}
+                aria-expanded={isWarningsOpen}
+                title="Content the preview could not render"
+              >
+                {warnings.length}
+                {warnings.length === 1 ? 'warning' : 'warnings'}
+              </button>
+            {/if}
           </div>
-          <button
-            class="btn btn-primary btn-sm"
-            onclick={downloadPdf}
-            disabled={!previewDoc || status === 'compiling'}
-          >
-            {status === 'compiling' ? t('generating') : t('export')}
-          </button>
+          <div class="preview-toolbar-right">
+            {#if previewMode === 'pages'}
+              <div class="zoom">
+                <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
+                <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
+                <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
+                <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
+              </div>
+            {/if}
+          </div>
         </div>
-      </div>
+      {/if}
       <div class="preview-container" bind:this={previewContainerEl}>
         {#if showPreviewCompilingHint}
           <StatusHint label="Updating preview" />
         {/if}
         <div
           class="svg-preview-container"
+          class:hidden={previewMode !== 'pages'}
           style="--svg-scale: {svgScale}"
           bind:this={svgContainerEl}
         ></div>
-        {#if status === 'compiling' && !previewDoc}
+        {#if previewMode === 'document'}
+          {#if isWarningsOpen && warnings.length > 0}
+            <ul class="warning-list">
+              {#each warnings as warning (warning)}
+                <li>{warning}</li>
+              {/each}
+            </ul>
+          {/if}
+          <div class="html-preview-container">
+            <HtmlPreview
+              bind:this={htmlPreview}
+              html={htmlDoc}
+              theme={settingsStore.theme}
+              onnavigate={setHash}
+              ontasktoggle={(line, checked) => editorPane?.setTaskMarker(line, checked)}
+            />
+          </div>
+        {/if}
+        {#if previewMode === 'pages' && status === 'compiling' && !previewDoc}
           <div class="preview-placeholder">
             <div class="loading-spinner"></div>
           </div>
@@ -1000,34 +1297,69 @@
     </section>
   </main>
 
+  {#if isShortcutsOpen}
+    <ShortcutOverlay onClose={() => (isShortcutsOpen = false)} />
+  {/if}
 
-  {#if isCorsModalOpen}
+  {#if isAboutOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal-backdrop" onclick={cancelCorsProxy}>
-      <div class="modal-dialog" onclick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h3 class="modal-title">CORS proxy</h3>
+    <div class="modal-backdrop" onclick={() => (isAboutOpen = false)}>
+      <div
+        class="modal-dialog"
+        onclick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="about-title"
+        tabindex="-1"
+      >
+        <h3 class="modal-title" id="about-title">About md2pdf</h3>
         <p class="modal-help">
-          Used as a fallback when an image URL is blocked by CORS. The proxy is called with
-          the image URL appended as <code>url=</code>:
+          Markdown in, typeset PDF or a self-contained HTML page out. Everything — the Markdown
+          engine, the Typst typesetter, the fonts — runs in this browser tab: no account, no upload,
+          and it keeps working offline.
         </p>
-        <ul class="modal-help-list">
-          <li><code>https://proxy.example.com/fetch</code> → <code>?url=&lt;image-url&gt;</code></li>
-          <li><code>https://proxy.example.com/?key=ABC</code> → <code>&amp;url=&lt;image-url&gt;</code></li>
-        </ul>
         <p class="modal-help">
-          The proxy must return the raw image bytes. Leave empty to disable.
+          Your documents live in this browser's storage only. <strong>Export</strong> is how you get them
+          out.
         </p>
-        <input
-          type="url"
-          class="modal-input"
-          placeholder="https://your-proxy.example.com/fetch"
-          bind:value={corsModalDraft}
-          onkeydown={(e) => { if (e.key === 'Enter') saveCorsProxy(); if (e.key === 'Escape') cancelCorsProxy() }}
-        />
         <div class="modal-actions">
-          <button class="btn btn-ghost btn-sm" onclick={cancelCorsProxy}>Cancel</button>
-          <button class="btn btn-primary btn-sm" onclick={saveCorsProxy}>Save</button>
+          <a
+            class="btn btn-secondary btn-sm"
+            href="https://github.com/libnewton/markdown2pdf"
+            target="_blank"
+            rel="noopener noreferrer">Source on GitHub</a
+          >
+          <button class="btn btn-primary btn-sm" onclick={() => (isAboutOpen = false)}>Close</button
+          >
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if replacePrompt}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal-backdrop" onclick={() => replacePrompt?.answer(false)}>
+      <div
+        class="modal-dialog"
+        onclick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="replace-title"
+        tabindex="-1"
+      >
+        <h3 class="modal-title" id="replace-title">Replace this document?</h3>
+        <p class="modal-help">
+          Opening <strong>{replacePrompt.name}</strong> discards what is in the editor now.
+        </p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary btn-sm" onclick={() => replacePrompt?.answer(false)}>
+            Cancel
+          </button>
+          <button class="btn btn-primary btn-sm" onclick={() => replacePrompt?.answer(true)}>
+            Replace
+          </button>
         </div>
       </div>
     </div>
@@ -1035,9 +1367,6 @@
 </div>
 
 <style>
-  /* ========================================
-     App Container
-     ======================================== */
   .app {
     display: flex;
     flex-direction: column;
@@ -1049,7 +1378,7 @@
     position: fixed;
     inset: 0;
     z-index: 999;
-    background: rgba(255, 255, 255, 0.85);
+    background: light-dark(rgba(255, 255, 255, 0.85), rgba(20, 20, 20, 0.85));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1061,22 +1390,21 @@
     flex-direction: column;
     align-items: center;
     gap: 12px;
-    color: var(--color-gray-500, #6b7280);
+    color: var(--color-gray-500);
     font-size: 1rem;
     font-weight: 500;
     padding: 40px 60px;
-    border: 2px dashed var(--color-gray-300, #d1d5db);
+    border: 2px dashed var(--color-gray-300);
     border-radius: 16px;
-    background: var(--color-gray-50, #f9fafb);
+    background: var(--color-gray-50);
   }
 
-  /* ========================================
-     Navbar
-     ======================================== */
+  /* Three columns, so the middle one sits dead centre no matter how wide the
+     document name in the first one gets. */
   .navbar {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
     height: var(--navbar-height);
     padding: 0 var(--space-md);
     background: var(--color-white);
@@ -1097,8 +1425,25 @@
   }
 
   .navbar-right {
-    flex: 0 0 auto;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+  }
+
+  /* The document tools, in the strip above the editor. In view mode the same
+     strip is rendered into the preview toolbar instead, so it goes wherever
+     the content is. */
+  .toolbar {
+    display: flex;
+    align-items: center;
     gap: var(--space-xs);
+    flex-shrink: 0;
+  }
+
+  .editor-pane > .toolbar {
+    height: var(--pane-toolbar-height);
+    padding: 0 var(--space-sm);
+    background: var(--color-gray-50);
+    border-bottom: 1px solid var(--color-gray-200);
   }
 
   .logo-link {
@@ -1114,41 +1459,110 @@
     display: block;
   }
 
-  /* Live update toggle */
-  .live-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5em;
-    padding: calc(0.5rem - 1px) 0.875rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    font-family: var(--font-mono);
-    line-height: 1;
-    background: var(--color-gray-50);
-    border: 1px solid var(--color-gray-200);
-    border-radius: var(--radius-sm);
-    color: var(--color-gray-700);
-    cursor: pointer;
-  }
-  .live-toggle:hover {
-    background: var(--color-gray-100);
-    border-color: var(--color-gray-300);
-  }
-  .live-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--color-gray-400);
-  }
-  .live-toggle.on .live-dot {
-    background: #16a34a;
-    box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.18);
+  /* The wordmark is dark ink on transparent. Inverting and rotating the hue
+     back keeps the mark's colour while the letters turn light. */
+  :global([data-theme='dark']) .logo-img {
+    filter: invert(1) hue-rotate(180deg);
   }
 
-  /* ========================================
-     Workspace
-     ======================================== */
+  .doc-title {
+    padding: 4px 8px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-gray-700);
+    white-space: nowrap;
+  }
+
+  /* The layout switch is its own grid column, so the document name beside it
+     can grow to any length without pushing it around. */
+  .layout-switch {
+    justify-self: center;
+  }
+
+  /* Every control in the chrome is the same typeface, weight and size — only
+     the height changes between the navbar row and the pane strips. */
+  .navbar :is(.btn, .tool-btn, .view-switch button),
+  .toolbar :is(.tool-btn, .view-switch button),
+  .preview-toolbar :is(.tool-btn, .view-switch button, .zoom button, .page-info, .zoom-level) {
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1;
+  }
+
+  /* Toolbar buttons: one shape, label optional. */
+  .tool-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: var(--control);
+    padding: 0 8px;
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--color-white);
+    color: var(--color-gray-600);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .tool-btn:hover {
+    background: var(--color-gray-100);
+    border-color: var(--color-gray-300);
+    color: var(--color-gray-900);
+  }
+
+  .tool-btn-icon {
+    width: var(--control);
+    padding: 0;
+  }
+
+  .export-btn {
+    gap: 4px;
+    height: var(--control-lg);
+    padding: 0 0.75rem;
+    background: var(--color-gray-100);
+    color: var(--color-gray-900);
+    border: 1px solid var(--color-gray-300);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .export-btn:hover {
+    background: var(--color-gray-200);
+    border-color: var(--color-gray-400);
+  }
+
+  /* In the navbar the controls are one size up from the pane strips. */
+  .navbar :is(.tool-btn, .view-switch) {
+    height: var(--control-lg);
+  }
+
+  .navbar .tool-btn-icon {
+    width: var(--control-lg);
+  }
+
+  /* The Typst preview's own SVG carries a stylesheet, and an inline `<svg>`
+     stylesheet is document-wide — its `svg { fill: none }` outranks any fill
+     *attribute*. The stroke icons don't care; a solid one has to say it here. */
+  .gh-icon {
+    fill: currentColor;
+  }
+
+  .update-btn {
+    color: var(--color-success);
+    border-color: var(--color-success);
+  }
+
+  @media (max-width: 1100px) {
+    .tool-label {
+      display: none;
+    }
+    .tool-btn {
+      width: var(--control);
+      padding: 0;
+    }
+  }
+
   .workspace {
     flex: 1;
     display: flex;
@@ -1156,9 +1570,6 @@
     background-color: var(--color-gray-100);
   }
 
-  /* ========================================
-     Panes
-     ======================================== */
   .pane {
     flex-shrink: 0;
     height: 100%;
@@ -1166,7 +1577,15 @@
     display: flex;
     flex-direction: column;
     position: relative;
-    background: #fff;
+    background: var(--color-white);
+  }
+
+  /* A hidden pane stays mounted: CodeMirror keeps its state and the preview
+     keeps its measured pages, so switching layout is a style recalc, not a
+     rebuild. */
+  .pane.hidden,
+  .resizer.hidden {
+    display: none;
   }
 
   /* Editor Pane */
@@ -1175,7 +1594,6 @@
     position: relative;
   }
 
-  /* Resizer */
   .resizer {
     width: var(--divider-width);
     background: var(--color-gray-200);
@@ -1185,23 +1603,57 @@
     transition: background var(--transition-fast);
   }
 
+  .resizer::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 4px;
+    height: 40px;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--color-gray-400) 0px,
+      var(--color-gray-400) 2px,
+      transparent 2px,
+      transparent 6px
+    );
+    border-radius: 2px;
+    opacity: 0.5;
+  }
+
   .resizer:hover,
+  .resizer:focus-visible,
   .resizer.active {
     background: var(--color-gray-400);
   }
 
-  /* Preview Pane */
+  .resizer:hover::after,
+  .resizer:focus-visible::after,
+  .resizer.active::after {
+    opacity: 1;
+  }
+
+  /* Preview Pane. It takes whatever the editor and the divider leave, rather
+     than a percentage of its own — three widths adding up to 100% plus a
+     6px divider is 6px too many, and the overflow shows at the right edge. */
   .preview-pane {
+    flex: 1 1 auto;
+    min-width: 0;
     background: var(--preview-bg);
   }
 
+  /* Same height as the editor's strip, so the two line up across the divider. */
   .preview-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--space-sm) var(--space-md);
-    background: var(--color-white);
+    height: var(--pane-toolbar-height);
+    /* The right edge lines up with Export's, one bar above. */
+    padding: 0 var(--space-md) 0 var(--space-sm);
+    background: var(--color-gray-50);
     border-bottom: 1px solid var(--color-gray-200);
+    flex-shrink: 0;
   }
 
   .preview-toolbar-right {
@@ -1210,9 +1662,41 @@
     gap: var(--space-sm);
   }
 
-  .preview-toolbar-right > .btn {
-    padding: calc(0.5rem - 1px) 0.875rem;
-    font-size: 0.8125rem;
+  /* Segmented controls: the paged/pageless switch and the layout switch. Both
+     are built to the same height as a toolbar button. */
+  .view-switch {
+    display: flex;
+    align-items: center;
+    height: var(--control);
+    background: var(--color-gray-100);
+    border: 1px solid var(--color-gray-200);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .view-switch button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-width: 30px;
+    padding: 0 10px;
+    color: var(--color-gray-500);
+    background: transparent;
+    border: 0;
+    border-radius: calc(var(--radius-sm) - 1px);
+    cursor: pointer;
+  }
+
+  .view-switch button.active {
+    background: var(--color-white);
+    color: var(--color-gray-900);
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+  }
+
+  .view-switch button svg {
+    display: block;
   }
 
   .zoom {
@@ -1222,12 +1706,20 @@
   }
 
   .zoom button {
-    padding: var(--space-xs) var(--space-sm);
-    font-size: 0.75rem;
-    background: var(--color-gray-100);
+    height: var(--control);
+    min-width: var(--control);
+    padding: 0 var(--space-sm);
+    color: var(--color-gray-600);
+    background: var(--color-white);
     border: 1px solid var(--color-gray-200);
     border-radius: var(--radius-sm);
     cursor: pointer;
+  }
+
+  .zoom button:hover:not(:disabled) {
+    background: var(--color-gray-100);
+    border-color: var(--color-gray-300);
+    color: var(--color-gray-900);
   }
 
   .zoom button:disabled {
@@ -1237,29 +1729,11 @@
 
   .page-info,
   .zoom-level {
-    font-size: 0.75rem;
     color: var(--color-gray-500);
-    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
   }
 
-  .btn-icon-sm {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px;
-    background: var(--color-gray-100);
-    border: 1px solid var(--color-gray-200);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    color: var(--color-gray-500);
-  }
-
-  .btn-icon-sm:hover {
-    color: var(--color-gray-900);
-    background: var(--color-gray-200);
-  }
-
-  .btn-icon-sm:disabled {
+  .tool-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
@@ -1281,6 +1755,40 @@
     gap: var(--space-md);
   }
 
+  /* A degraded render, not a failed one: the document is on screen and
+     something in it is a placeholder. Amber rather than red. */
+  .warning-badge {
+    height: var(--control);
+    padding: 0 8px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-gray-800);
+    background: light-dark(#fef3c7, #4a3a10);
+    border: 1px solid light-dark(#fcd34d, #7c6218);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .warning-list {
+    position: absolute;
+    z-index: 5;
+    top: var(--pane-toolbar-height);
+    left: var(--space-sm);
+    right: var(--space-sm);
+    max-height: 40%;
+    overflow: auto;
+    margin: 0;
+    padding: var(--space-sm) var(--space-md) var(--space-sm) var(--space-xl);
+    font-size: 0.75rem;
+    line-height: 1.7;
+    color: var(--color-gray-800);
+    background: var(--color-white);
+    border: 1px solid light-dark(#fcd34d, #7c6218);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    overflow-wrap: anywhere;
+  }
+
   .error-badge {
     display: flex;
     align-items: center;
@@ -1290,17 +1798,8 @@
     padding: 2px 8px;
     border-radius: 12px;
     animation: fadeIn 0.2s ease-out;
-  }
-
-  .error-badge {
-    background: #fef2f2;
-    color: #ef4444;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
   }
 
   @keyframes fadeIn {
@@ -1332,6 +1831,20 @@
     background: var(--preview-bg);
   }
 
+  /* Kept mounted while the document view is showing, so switching back does
+     not have to re-mount and re-measure every page. */
+  .svg-preview-container.hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .html-preview-container {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
   /* One box per page. It keeps the page's footprint whether or not the page
      itself is currently mounted, so scrolling and document height stay put. */
   .svg-preview-container :global(.page-slot) {
@@ -1354,28 +1867,16 @@
     overflow: hidden;
   }
 
-  /* ========================================
-     Menu
-     ======================================== */
   .menu-container {
     position: relative;
     display: inline-block;
-  }
-
-  .btn-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
   }
 
   .dropdown-menu {
     position: absolute;
     top: calc(100% + 4px);
     right: 0;
-    width: 200px;
+    width: 150px;
     background: var(--color-white);
     border: 1px solid var(--color-gray-200);
     border-radius: var(--radius-sm);
@@ -1411,123 +1912,6 @@
     cursor: not-allowed;
   }
 
-  .menu-icon {
-    margin-right: var(--space-sm);
-    font-size: 1rem;
-    line-height: 1;
-  }
-
-  .menu-divider {
-    height: 1px;
-    background: var(--color-gray-100);
-    margin: var(--space-xs) 0;
-  }
-
-  /* Menu toggle with sliding switch */
-  .menu-toggle {
-    justify-content: space-between;
-  }
-  .menu-toggle-label {
-    flex: 1;
-    text-align: left;
-  }
-  .switch {
-    display: inline-block;
-    position: relative;
-    width: 30px;
-    height: 16px;
-    background: var(--color-gray-300);
-    border-radius: 999px;
-    transition: background var(--transition-fast);
-    flex-shrink: 0;
-  }
-  .switch.on {
-    background: #16a34a;
-  }
-  .switch-thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--color-white);
-    transition: transform var(--transition-fast);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  }
-  .switch.on .switch-thumb {
-    transform: translateX(14px);
-  }
-
-  .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, 0.45);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000;
-  }
-  .modal-dialog {
-    background: var(--color-white);
-    border-radius: 8px;
-    padding: 1.25rem 1.5rem 1rem;
-    width: min(420px, calc(100vw - 2rem));
-    box-shadow: 0 10px 32px rgba(15, 23, 42, 0.25);
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  .modal-title {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--color-gray-900);
-  }
-  .modal-help {
-    margin: 0;
-    font-size: 0.8125rem;
-    color: var(--color-gray-600);
-    line-height: 1.45;
-  }
-  .modal-help code,
-  .modal-help-list code {
-    background: var(--color-gray-100);
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-  }
-  .modal-help-list {
-    margin: 0;
-    padding-left: 1.1em;
-    font-size: 0.8125rem;
-    color: var(--color-gray-600);
-    line-height: 1.6;
-  }
-  .modal-input {
-    width: 100%;
-    padding: 8px 10px;
-    font-size: 0.875rem;
-    font-family: var(--font-mono);
-    border: 1px solid var(--color-gray-300);
-    border-radius: var(--radius-sm);
-    box-sizing: border-box;
-  }
-  .modal-input:focus {
-    outline: none;
-    border-color: var(--color-gray-500);
-  }
-  .modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    margin-top: 0.25rem;
-  }
-
-  /* ========================================
-     Mobile Layout
-     ======================================== */
   .mobile-tabs {
     display: none;
   }
@@ -1552,7 +1936,7 @@
       position: absolute;
       inset: 0;
       z-index: 1;
-      padding-bottom: 50px;
+      padding-bottom: calc(50px + env(safe-area-inset-bottom));
     }
 
     .pane.mobile-hidden {
@@ -1560,18 +1944,23 @@
       z-index: 0;
     }
 
-    .resizer {
+    .resizer,
+    /* The bottom Editor|Preview tabs already do this job on a phone. */
+    .layout-switch {
       display: none;
     }
 
-    /* Mobile Tabs */
+    /* The bar is fixed to the bottom edge, which on a phone with a home
+       indicator is under it — the inset moves the buttons clear while the
+       background still runs to the edge. */
     .mobile-tabs {
       display: flex;
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      height: 50px;
+      height: calc(50px + env(safe-area-inset-bottom));
+      padding-bottom: env(safe-area-inset-bottom);
       background: var(--color-white);
       border-top: 1px solid var(--color-gray-200);
       z-index: 100;
@@ -1609,7 +1998,5 @@
     .hidden-mobile {
       display: none !important;
     }
-
   }
-
 </style>

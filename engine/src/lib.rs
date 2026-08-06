@@ -5,6 +5,8 @@
 //! `==mark==`) is handled by a pre-parse pass and post-parse text scanning.
 //! This module is the Rust port of the former `src/pipeline/*` TypeScript.
 
+mod html;
+
 use comrak::nodes::{AstNode, ListType, NodeValue, TableAlignment};
 use comrak::{parse_document, Arena, Options};
 use std::collections::{HashMap, HashSet};
@@ -80,6 +82,108 @@ pub fn twemojis(markdown: &[u8]) -> Result<Vec<u8>, String> {
     Ok(collect_twemoji_codepoints(src).join("\n").into_bytes())
 }
 
+/// The shared design tokens as TOML: callout colours and labels, plus the base
+/// palette. The stylesheet bakes the same table in, so the Typst templates and
+/// the HTML output cannot drift apart.
+#[wasm_func]
+pub fn tokens() -> Result<Vec<u8>, String> {
+    Ok(html::tokens_toml().into_bytes())
+}
+
+/// List the local (non-remote) image paths the document references, one per
+/// line — the HTML output embeds them, so the host has to supply the bytes.
+#[wasm_func]
+pub fn html_images(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    Ok(html::local_images(src).join("\n").into_bytes())
+}
+
+/// The font files a standalone HTML export needs, one key per line — empty
+/// unless the document has math. MathML laid out without a MATH-table font
+/// looks nothing like the PDF, so the export embeds one.
+#[wasm_func]
+pub fn html_fonts(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    if !has_math(src) {
+        return Ok(Vec::new());
+    }
+    Ok(b"fonts/math.woff2\nfonts/math-alpha.woff2\n".to_vec())
+}
+
+/// List the Mermaid diagram sources, one `key<TAB>source` pair per line with
+/// newlines in the source escaped as `\n`. The host renders each to SVG and
+/// returns it under `key`.
+#[wasm_func]
+pub fn html_mermaid(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    let mut out = String::new();
+    for code in collect_mermaid_sources(src) {
+        out.push_str(&html::mermaid_key(&code));
+        out.push('\t');
+        out.push_str(&code.replace('\\', "\\\\").replace('\n', "\\n"));
+        out.push('\n');
+    }
+    Ok(out.into_bytes())
+}
+
+/// Everything an HTML render needs the host to fetch, from one parse.
+///
+/// One `kind<TAB>value…` line per asset, where `kind` is `image`, `remote`
+/// (`url<TAB>alias`), `emoji`, `font` or `mermaid` (`key<TAB>escaped-source`).
+/// The individual `html_images` / `remotes` / `twemojis` / `html_fonts` /
+/// `html_mermaid` calls each re-parse the document; asking for all five at
+/// once is the difference between five parses per keystroke and one.
+#[wasm_func]
+pub fn html_assets(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    let mut out = String::new();
+    for path in html::local_images(src) {
+        out.push_str("image\t");
+        out.push_str(&path);
+        out.push('\n');
+    }
+    for (url, alias) in collect_remote_images(src) {
+        out.push_str("remote\t");
+        out.push_str(&url);
+        out.push('\t');
+        out.push_str(&alias);
+        out.push('\n');
+    }
+    for cp in collect_twemoji_codepoints(src) {
+        out.push_str("emoji\t");
+        out.push_str(&cp);
+        out.push('\n');
+    }
+    if has_math(src) {
+        out.push_str("font\tfonts/math.woff2\nfont\tfonts/math-alpha.woff2\n");
+    }
+    for code in collect_mermaid_sources(src) {
+        out.push_str("mermaid\t");
+        out.push_str(&html::mermaid_key(&code));
+        out.push('\t');
+        out.push_str(&code.replace('\\', "\\\\").replace('\n', "\\n"));
+        out.push('\n');
+    }
+    Ok(out.into_bytes())
+}
+
+/// Render Markdown to HTML.
+///
+/// `options` is a `key=value` line block (`standalone=1` wraps the fragment in
+/// a full document). `manifest` is `key<TAB>byte-length` lines describing how
+/// to slice `assets`, the concatenated bytes of every image, Twemoji SVG and
+/// rendered Mermaid diagram the host resolved for us.
+#[wasm_func]
+pub fn render_html(
+    markdown: &[u8],
+    options: &[u8],
+    manifest: &[u8],
+    assets: &[u8],
+) -> Result<Vec<u8>, String> {
+    let utf8 = |b| std::str::from_utf8(b).map_err(|e: std::str::Utf8Error| e.to_string());
+    Ok(html::render(utf8(markdown)?, utf8(options)?, utf8(manifest)?, assets).into_bytes())
+}
+
 /// Full Markdown -> Typst markup pipeline. Recursive: admonition and spoiler
 /// bodies are re-run through it so nested custom syntax works.
 #[cfg(test)]
@@ -111,6 +215,7 @@ fn convert_str_aligned(
         spoilers: pre.spoilers,
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
+        rendering_notes: std::cell::RefCell::new(HashSet::new()),
         alignment,
         citations,
     };
@@ -168,19 +273,54 @@ fn build_options() -> Options<'static> {
 // Pre-parse pass — extract custom block syntax comrak cannot parse
 // ==========================================================================
 
+/// One line of Markdown plus the 1-based line of the source it came from, or
+/// 0 for a line a pass invented.
+///
+/// The passes below rewrite whole blocks — a `:::info` of any length becomes
+/// three lines, a run of blank lines becomes three — so comrak's line numbers
+/// describe the text it was handed and not the text the author wrote.
+/// Carrying the origin along is what lets a rendered element point back at
+/// the line that produced it.
+type Line = (String, u32);
+
+fn as_lines(src: &str) -> Vec<Line> {
+    src.split('\n')
+        .enumerate()
+        .map(|(i, l)| (l.to_string(), i as u32 + 1))
+        .collect()
+}
+
+fn join_lines(lines: &[Line]) -> (String, Vec<u32>) {
+    let text = lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join("\n");
+    (text, lines.iter().map(|(_, o)| *o).collect())
+}
+
+/// Map origins expressed in `base`'s coordinates into `base`'s own, for the
+/// passes that re-run over a block's extracted body.
+pub(crate) fn rebase(local: &[u32], base: &[u32]) -> Vec<u32> {
+    local
+        .iter()
+        .map(|&l| if l == 0 { 0 } else { base.get(l as usize - 1).copied().unwrap_or(0) })
+        .collect()
+}
+
 struct Admonition {
     kind: String,
     title: String,
     source: String,
+    origin: Vec<u32>,
 }
 
 struct Spoiler {
     summary: String,
     source: String,
+    origin: Vec<u32>,
 }
 
 struct Preprocessed {
     markdown: String,
+    /// One entry per line of `markdown`, naming its line in the original source.
+    origin: Vec<u32>,
     admonitions: Vec<Admonition>,
     spoilers: Vec<Spoiler>,
     /// Per-table column-width multipliers, indexed by `<!--tablewidths:N-->`.
@@ -288,12 +428,14 @@ const ADMONITION_KINDS: &[&str] = &[
 /// placeholder that comrak parses as a standalone `HtmlBlock`.
 fn preprocess(src: &str) -> Preprocessed {
     let normalized = src.replace("\r\n", "\n");
-    let md0 = preprocess_blank_lines(&normalized);
-    let (md1, admonitions) = preprocess_admonitions(&md0);
-    let (md2, spoilers) = preprocess_spoilers(&md1);
-    let (md3, table_widths) = preprocess_table_widths(&md2);
+    let l0 = preprocess_blank_lines(as_lines(&normalized));
+    let (l1, admonitions) = preprocess_admonitions(l0);
+    let (l2, spoilers) = preprocess_spoilers(l1);
+    let (l3, table_widths) = preprocess_table_widths(l2);
+    let (markdown, origin) = join_lines(&l3);
     Preprocessed {
-        markdown: md3,
+        markdown,
+        origin,
         admonitions,
         spoilers,
         table_widths,
@@ -303,57 +445,56 @@ fn preprocess(src: &str) -> Preprocessed {
 /// Collapse a run of 3+ blank lines into a `[[md2pdf-blank-line]]` token so the
 /// extra vertical space survives parsing. Skips fenced code; only fires between
 /// two "preservable" lines (not list/quote/table/rule/fence/pagebreak).
-fn preprocess_blank_lines(src: &str) -> String {
-    if !src.contains("\n\n\n") {
-        return src.to_string();
+fn preprocess_blank_lines(lines: Vec<Line>) -> Vec<Line> {
+    if !lines.windows(3).any(|w| w.iter().all(|(l, _)| l.trim().is_empty())) {
+        return lines;
     }
-    let lines: Vec<&str> = src.split('\n').collect();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Line> = Vec::new();
     let mut fence: Option<(char, usize)> = None;
     let mut i = 0;
     while i < lines.len() {
-        let line = lines[i];
-        if let Some((fc, fl)) = fence_marker(line) {
+        let line = &lines[i];
+        if let Some((fc, fl)) = fence_marker(&line.0) {
             match fence {
                 None => fence = Some((fc, fl)),
                 Some((c, l)) if c == fc && fl >= l => fence = None,
                 _ => {}
             }
-            out.push(line.to_string());
+            out.push(line.clone());
             i += 1;
             continue;
         }
         if fence.is_some() {
-            out.push(line.to_string());
+            out.push(line.clone());
             i += 1;
             continue;
         }
-        if line.trim().is_empty() {
+        if line.0.trim().is_empty() {
             let start = i;
-            while i < lines.len() && lines[i].trim().is_empty() {
+            while i < lines.len() && lines[i].0.trim().is_empty() {
                 i += 1;
             }
             let blank_count = i - start;
-            let prev = out.iter().rev().find(|l| !l.trim().is_empty());
+            let prev = out.iter().rev().find(|(l, _)| !l.trim().is_empty());
             let next = lines.get(i);
             if blank_count >= 2
-                && prev.is_some_and(|l| should_preserve_blank(l))
-                && next.is_some_and(|l| should_preserve_blank(l))
+                && prev.is_some_and(|(l, _)| should_preserve_blank(l))
+                && next.is_some_and(|(l, _)| should_preserve_blank(l))
             {
-                out.push(String::new());
-                out.push(EXTRA_BLANK_LINE_TOKEN.to_string());
-                out.push(String::new());
+                // Three lines stand in for the whole run; the token belongs to
+                // no line of the source, so it carries no origin.
+                out.push((String::new(), 0));
+                out.push((EXTRA_BLANK_LINE_TOKEN.to_string(), 0));
+                out.push((String::new(), 0));
             } else {
-                for _ in 0..blank_count {
-                    out.push(String::new());
-                }
+                out.extend(lines[start..i].iter().cloned());
             }
             continue;
         }
-        out.push(line.to_string());
+        out.push(line.clone());
         i += 1;
     }
-    out.join("\n")
+    out
 }
 
 /// Whether a blank gap next to this line should be preserved as vertical space.
@@ -408,25 +549,25 @@ fn fence_marker(line: &str) -> Option<(char, usize)> {
 /// widen that column (`---` = 1fr, `---+` = 2fr, `---++` = 3fr). comrak rejects
 /// `+` in delimiter rows, so the `+`s are stripped here and the widths recorded
 /// behind a `<!--tablewidths:N-->` placeholder before the header row.
-fn preprocess_table_widths(src: &str) -> (String, Vec<Vec<usize>>) {
-    let lines: Vec<&str> = src.split('\n').collect();
+fn preprocess_table_widths(lines: Vec<Line>) -> (Vec<Line>, Vec<Vec<usize>>) {
     if !lines
         .iter()
-        .any(|l| l.contains('+') && l.contains('-') && l.contains('|'))
+        .any(|(l, _)| l.contains('+') && l.contains('-') && l.contains('|'))
     {
-        return (src.to_string(), Vec::new());
+        return (lines, Vec::new());
     }
-    let code = code_block_lines(src);
+    let (text, _) = join_lines(&lines);
+    let code = code_block_lines(&text);
     let mut blocks: Vec<Vec<usize>> = Vec::new();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Line> = Vec::new();
     for i in 0..lines.len() {
-        let line = lines[i];
+        let line = &lines[i];
         if code.contains(&(i + 1)) {
-            out.push(line.to_string());
+            out.push(line.clone());
             continue;
         }
-        let prev = i.checked_sub(1).map(|p| lines[p]);
-        if let Some((widths, stripped)) = parse_separator_widths(line, prev) {
+        let prev = i.checked_sub(1).map(|p| lines[p].0.as_str());
+        if let Some((widths, stripped)) = parse_separator_widths(&line.0, prev) {
             let id = blocks.len();
             blocks.push(widths);
             let header = out.pop().unwrap_or_default();
@@ -434,15 +575,16 @@ fn preprocess_table_widths(src: &str) -> (String, Vec<Vec<usize>>) {
             // inside a list item or a blockquote stays inside it. No blank lines
             // around it: an HTML comment is a block on its own and can interrupt
             // a paragraph, and blank lines would loosen an enclosing list.
-            let (prefix, _) = split_prefix(&header);
-            out.push(format!("{prefix}<!--tablewidths:{id}-->"));
+            let (prefix, _) = split_prefix(&header.0);
+            out.push((format!("{prefix}<!--tablewidths:{id}-->"), 0));
             out.push(header);
-            out.push(stripped);
+            // The separator row keeps its own line: only its `+` markers went.
+            out.push((stripped, line.1));
             continue;
         }
-        out.push(line.to_string());
+        out.push(line.clone());
     }
-    (out.join("\n"), blocks)
+    (out, blocks)
 }
 
 /// 1-based line numbers comrak reads as code, fenced or indented. The width
@@ -543,86 +685,83 @@ fn rebuild_row(original: &str, cells: &[String]) -> String {
 
 /// `:::kind ... :::` — CommonMark fence style. A fence of N colons closes only
 /// on a line of N or more colons, so longer fences may nest shorter ones.
-fn preprocess_admonitions(src: &str) -> (String, Vec<Admonition>) {
+fn preprocess_admonitions(lines: Vec<Line>) -> (Vec<Line>, Vec<Admonition>) {
     let mut blocks: Vec<Admonition> = Vec::new();
-    let lines: Vec<&str> = src.split('\n').collect();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Line> = Vec::new();
     let mut i = 0;
     let mut fence: Option<(char, usize)> = None;
     while i < lines.len() {
         // `:::` inside a code fence is literal, not an admonition.
-        if let Some((fc, fl)) = fence_marker(lines[i]) {
+        if let Some((fc, fl)) = fence_marker(&lines[i].0) {
             match fence {
                 None => fence = Some((fc, fl)),
                 Some((c, l)) if c == fc && fl >= l => fence = None,
                 _ => {}
             }
-            out.push(lines[i].to_string());
+            out.push(lines[i].clone());
             i += 1;
             continue;
         }
         if let Some((fence_len, kind, title)) =
-            fence.is_none().then(|| parse_admonition_open(lines[i])).flatten()
+            fence.is_none().then(|| parse_admonition_open(&lines[i].0)).flatten()
         {
-            let mut body: Vec<&str> = Vec::new();
+            let mut body: Vec<Line> = Vec::new();
             i += 1;
-            while i < lines.len() && !is_colon_closer(lines[i], fence_len) {
-                body.push(lines[i]);
+            while i < lines.len() && !is_colon_closer(&lines[i].0, fence_len) {
+                body.push(lines[i].clone());
                 i += 1;
             }
             i += 1; // skip closing fence
             let id = blocks.len();
-            blocks.push(Admonition {
-                kind,
-                title,
-                source: body.join("\n"),
-            });
-            out.push(String::new());
-            out.push(format!("<!--admonition:{id}-->"));
-            out.push(String::new());
+            let (source, origin) = join_lines(&body);
+            // The body is re-parsed as its own document, so it keeps its own
+            // origins to be rebased against these when it is rendered.
+            blocks.push(Admonition { kind, title, source, origin });
+            out.push((String::new(), 0));
+            out.push((format!("<!--admonition:{id}-->"), 0));
+            out.push((String::new(), 0));
             continue;
         }
-        out.push(lines[i].to_string());
+        out.push(lines[i].clone());
         i += 1;
     }
-    (out.join("\n"), blocks)
+    (out, blocks)
 }
 
 /// `+++++ ... +++++` — first non-blank inner line (or trailing text on the
 /// opener) is the summary; the rest is the spoiler body.
-fn preprocess_spoilers(src: &str) -> (String, Vec<Spoiler>) {
+fn preprocess_spoilers(lines: Vec<Line>) -> (Vec<Line>, Vec<Spoiler>) {
     let mut blocks: Vec<Spoiler> = Vec::new();
-    let lines: Vec<&str> = src.split('\n').collect();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Line> = Vec::new();
     let mut i = 0;
     let mut fence: Option<(char, usize)> = None;
     while i < lines.len() {
         // `+++++` inside a code fence is literal, not a spoiler.
-        if let Some((fc, fl)) = fence_marker(lines[i]) {
+        if let Some((fc, fl)) = fence_marker(&lines[i].0) {
             match fence {
                 None => fence = Some((fc, fl)),
                 Some((c, l)) if c == fc && fl >= l => fence = None,
                 _ => {}
             }
-            out.push(lines[i].to_string());
+            out.push(lines[i].clone());
             i += 1;
             continue;
         }
         if let Some(inline) =
-            fence.is_none().then(|| parse_spoiler_open(lines[i])).flatten()
+            fence.is_none().then(|| parse_spoiler_open(&lines[i].0)).flatten()
         {
-            let close = ((i + 1)..lines.len()).find(|&j| is_spoiler_closer(lines[j]));
+            let close = ((i + 1)..lines.len()).find(|&j| is_spoiler_closer(&lines[j].0));
             if let Some(close) = close {
-                let mut body: Vec<&str> = lines[(i + 1)..close].to_vec();
+                let mut body: Vec<Line> = lines[(i + 1)..close].to_vec();
                 let summary = if !inline.is_empty() {
                     inline
                 } else {
                     let mut k = 0;
-                    while k < body.len() && body[k].trim().is_empty() {
+                    while k < body.len() && body[k].0.trim().is_empty() {
                         k += 1;
                     }
                     if k < body.len() {
-                        let s = body[k].trim().to_string();
+                        let s = body[k].0.trim().to_string();
                         body = body[(k + 1)..].to_vec();
                         s
                     } else {
@@ -630,25 +769,27 @@ fn preprocess_spoilers(src: &str) -> (String, Vec<Spoiler>) {
                     }
                 };
                 let id = blocks.len();
+                let (source, origin) = join_lines(&body);
                 blocks.push(Spoiler {
                     summary: if summary.is_empty() {
                         "spoiler".to_string()
                     } else {
                         summary
                     },
-                    source: body.join("\n"),
+                    source,
+                    origin,
                 });
-                out.push(String::new());
-                out.push(format!("<!--spoiler:{id}-->"));
-                out.push(String::new());
+                out.push((String::new(), 0));
+                out.push((format!("<!--spoiler:{id}-->"), 0));
+                out.push((String::new(), 0));
                 i = close + 1;
                 continue;
             }
         }
-        out.push(lines[i].to_string());
+        out.push(lines[i].clone());
         i += 1;
     }
-    (out.join("\n"), blocks)
+    (out, blocks)
 }
 
 /// Parse a `:::kind title` opener -> (fence length, kind, title).
@@ -757,6 +898,9 @@ struct Ctx<'a> {
     table_widths: Vec<Vec<usize>>,
     /// Width id set by a `tablewidths` placeholder, consumed by the next table.
     pending_widths: std::cell::Cell<Option<usize>>,
+    /// Footnotes currently being rendered. A note that references itself would
+    /// otherwise recurse until the plugin's stack is exhausted.
+    rendering_notes: std::cell::RefCell<HashSet<String>>,
     alignment: Option<Alignment>,
     citations: bool,
 }
@@ -1079,10 +1223,9 @@ impl<'a> Ctx<'a> {
             NodeValue::Code(c) => render_inline_code(&c.literal),
             NodeValue::Math(m) => render_math(m.display_math, &m.literal, self.visual_alignment()),
             NodeValue::HtmlInline(h) => match h.trim().to_ascii_lowercase().as_str() {
-                "<u>" => "#underline[".to_string(),
-                "</u>" => "]".to_string(),
                 // Table cells hold inline content only, so `<br>` is the one
-                // way to get a second line into one.
+                // way to get a second line into one. It is also the only raw
+                // tag either renderer honours; everything else is text.
                 "<br>" | "<br/>" | "<br />" => "#linebreak()".to_string(),
                 _ => esc_text(&h),
             },
@@ -1101,18 +1244,22 @@ impl<'a> Ctx<'a> {
     }
 
     fn render_footnote(&self, name: &str) -> String {
-        match self.footnotes.get(name) {
-            None => String::new(),
-            Some(def) => {
-                let content = def
-                    .children()
-                    .map(|c| self.render_block(c, 0))
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                format!("#footnote[{}]", content.trim())
-            }
+        let Some(def) = self.footnotes.get(name) else {
+            return String::new();
+        };
+        if !self.rendering_notes.borrow_mut().insert(name.to_string()) {
+            // Already inside this note: drop the back-reference rather than
+            // recurse into it forever.
+            return String::new();
         }
+        let content = def
+            .children()
+            .map(|c| self.render_block(c, 0))
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        self.rendering_notes.borrow_mut().remove(name);
+        format!("#footnote[{}]", content.trim())
     }
 
     fn visual_alignment(&self) -> Alignment {
@@ -1134,6 +1281,7 @@ fn render_row(source: &str, alignment: Option<Alignment>, citations: bool) -> St
         spoilers: pre.spoilers,
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
+        rendering_notes: std::cell::RefCell::new(HashSet::new()),
         alignment,
         citations,
     };
@@ -1348,13 +1496,41 @@ fn render_math(display: bool, latex: &str, alignment: Alignment) -> String {
     }
 }
 
+/// Reject schemes that execute. Relative paths and fragments pass through.
+///
+/// An allowlist, not a blocklist: comrak has already decoded entities in the
+/// destination, so the usual `&#106;avascript:` and case tricks arrive
+/// normalised, and anything unrecognised is refused rather than guessed at.
+pub(crate) fn safe_url(url: &str) -> Option<&str> {
+    let trimmed = url.trim();
+    let scheme: String = trimmed
+        .chars()
+        .take_while(|c| *c != ':' && *c != '/' && *c != '?' && *c != '#')
+        .collect();
+    let has_scheme = trimmed.len() > scheme.len() && trimmed[scheme.len()..].starts_with(':');
+    if has_scheme {
+        let s = scheme.trim().to_ascii_lowercase();
+        if !matches!(s.as_str(), "http" | "https" | "mailto" | "tel" | "ftp") {
+            return None;
+        }
+    }
+    Some(trimmed)
+}
+
 fn render_link(url: &str, label: &str) -> String {
     let label = if label.trim().is_empty() {
         esc_text(url)
     } else {
         label.to_string()
     };
-    format!("#link(\"{}\")[{}]", esc_string(url), label)
+    // A rejected scheme keeps its text and loses its link, exactly as in the
+    // HTML renderer. Typst turns a link into a PDF annotation and typst.ts
+    // into an `<a>` in the preview SVG, which the editor adopts into the page
+    // itself — so `javascript:` must not reach either.
+    match safe_url(url) {
+        Some(href) => format!("#link(\"{}\")[{}]", esc_string(href), label),
+        None => label,
+    }
 }
 
 /// Port of `renderImage`: HackMD `=WxH` dimension syntax + remote-URL aliasing.
@@ -1451,39 +1627,96 @@ fn hash_url(url: &str) -> String {
     format!("{h:08x}")
 }
 
-/// Scan raw Markdown for `![...](http(s)://...)` image URLs. Runs on the
-/// unprocessed source, so it also catches images inside admonitions/spoilers.
+/// Every image target in the document, in source order and deduplicated, with
+/// any `=WxH` size hint stripped. Descends into admonition and spoiler bodies.
+///
+/// Both hosts read this: the CLI prefetches the remote ones, the HTML renderer
+/// embeds the local ones. Parsed rather than string-scanned, so a URL that only
+/// appears as an example inside a code span is not fetched over the network.
+fn image_targets(src: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    walk_document(src, &mut |value| {
+        if let NodeValue::Image(link) = value {
+            let (path, _) = html::split_dims(&link.url, &link.title);
+            if !path.is_empty() && seen.insert(path.clone()) {
+                found.push(path);
+            }
+        }
+    });
+    found
+}
+
+/// Remote image URLs paired with the `remote/<hash>` alias the host prefetches
+/// them to — Typst's sandbox cannot fetch them itself.
 fn collect_remote_images(src: &str) -> Vec<(String, String)> {
-    let mut found: Vec<(String, String)> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let bytes = src.as_bytes();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'!' && bytes[i + 1] == b'[' {
-            if let Some(rel_close) = src[i + 2..].find(']') {
-                let after = i + 2 + rel_close + 1;
-                if after < bytes.len() && bytes[after] == b'(' {
-                    let raw = src[after + 1..].trim_start();
-                    let raw = raw.strip_prefix('<').unwrap_or(raw);
-                    if is_remote(raw) {
-                        let url: String = raw
-                            .chars()
-                            .take_while(|&c| {
-                                !c.is_whitespace()
-                                    && !matches!(c, ')' | '>' | '"' | '\'')
-                            })
-                            .collect();
-                        if seen.insert(url.clone()) {
-                            let alias = format!("remote/{}", hash_url(&url));
-                            found.push((url, alias));
-                        }
-                    }
+    image_targets(src)
+        .into_iter()
+        .filter(|u| is_remote(u))
+        .map(|u| {
+            let alias = format!("remote/{}", hash_url(&u));
+            (u, alias)
+        })
+        .collect()
+}
+
+/// Visit every node of the document in source order, descending into the
+/// admonition, spoiler and row bodies that were lifted out before parsing.
+///
+/// Parsing rather than string-scanning is what keeps an example fence inside a
+/// wider fence, or an image path inside a code span, from being mistaken for
+/// the real thing.
+fn walk_document(src: &str, visit: &mut impl FnMut(&NodeValue)) {
+    let pre = preprocess(src);
+    let arena = Arena::new();
+    let root = parse_document(&arena, &pre.markdown, &build_options());
+    let mut stack: Vec<&AstNode> = vec![root];
+    let mut nested: Vec<String> = Vec::new();
+    while let Some(node) = stack.pop() {
+        let value = &node.data.borrow().value;
+        if let NodeValue::HtmlBlock(hb) = value {
+            if let Some(id) = parse_placeholder(&hb.literal, "admonition") {
+                if let Some(a) = pre.admonitions.get(id) {
+                    nested.push(a.source.clone());
+                }
+            } else if let Some(id) = parse_placeholder(&hb.literal, "spoiler") {
+                if let Some(s) = pre.spoilers.get(id) {
+                    nested.push(s.source.clone());
                 }
             }
         }
-        i += 1;
+        visit(value);
+        let kids: Vec<&AstNode> = node.children().collect();
+        stack.extend(kids.into_iter().rev());
     }
+    for source in nested {
+        walk_document(&source, visit);
+    }
+}
+
+/// Every ```` ```mermaid ```` fence in the document, deduplicated.
+fn has_math(src: &str) -> bool {
+    let mut found = false;
+    walk_document(src, &mut |value| {
+        found |= matches!(value, NodeValue::Math(_));
+    });
     found
+}
+
+fn collect_mermaid_sources(src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    walk_document(src, &mut |value| {
+        if let NodeValue::CodeBlock(cb) = value {
+            if cb.info.trim().eq_ignore_ascii_case("mermaid") {
+                let code = cb.literal.strip_suffix('\n').unwrap_or(&cb.literal).to_string();
+                if seen.insert(code.clone()) {
+                    out.push(code);
+                }
+            }
+        }
+    });
+    out
 }
 
 // ==========================================================================
@@ -1576,12 +1809,18 @@ fn indent_lines(text: &str, indent: usize) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_self_referencing_footnote_does_not_recurse_forever() {
+        let out = convert_str("a[^n]\n\n[^n]: see[^n]", false);
+        assert!(out.contains("#footnote[see]"), "{out}");
+    }
+
     fn widths(md: &str) -> Vec<Vec<usize>> {
-        preprocess_table_widths(md).1
+        preprocess_table_widths(as_lines(md)).1
     }
 
     fn stripped(md: &str) -> String {
-        preprocess_table_widths(md).0
+        join_lines(&preprocess_table_widths(as_lines(md)).0).0
     }
 
     #[test]
@@ -1638,6 +1877,50 @@ mod tests {
         assert!(out.contains("`[@inline]`"), "{out}");
         assert!(out.contains("[@fenced]"), "{out}");
         assert!(!out.contains("#cite"), "{out}");
+    }
+
+    /// Both renderers refuse the same schemes. They used to disagree: only the
+    /// HTML side checked, so `javascript:` reached Typst's link annotation —
+    /// and, through typst.ts, an `<a>` the editor adopts into the page itself.
+    #[test]
+    fn both_renderers_refuse_the_same_link_schemes() {
+        for url in [
+            "javascript:alert(1)",
+            "JaVaScRiPt:alert(1)",
+            " javascript:alert(1)",
+            "vbscript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "file:///etc/passwd",
+        ] {
+            assert_eq!(safe_url(url), None, "{url} was allowed");
+            let out = convert_str(&format!("[label]({url})"), false);
+            assert!(!out.contains("#link("), "{url} became a link:\n{out}");
+            assert!(out.contains("label"), "{url} lost its text:\n{out}");
+        }
+        for url in ["https://e.com/x", "mailto:a@e.com", "./rel.md", "#frag"] {
+            assert!(safe_url(url).is_some(), "{url} was refused");
+            let out = convert_str(&format!("[label]({url})"), false);
+            assert!(out.contains("#link("), "{url} lost its link:\n{out}");
+        }
+    }
+
+    /// A URL reaches Typst inside a string literal, and Typst can `read()`.
+    /// A breakout there would be worse than an XSS.
+    #[test]
+    fn a_link_url_cannot_break_out_of_the_typst_string() {
+        let out = convert_str(r#"[x](https://e.com/a"+read("/etc/passwd")+")"#, false);
+        assert_eq!(
+            out.trim(),
+            r#"#link("https://e.com/a\"+read(\"/etc/passwd\")+\"")[x]"#
+        );
+        // Every quote inside the argument is escaped, so the literal ends
+        // exactly where the renderer put its closing delimiter.
+        let arg = out.trim().trim_start_matches("#link(\"");
+        let unescaped = arg
+            .char_indices()
+            .filter(|&(i, c)| c == '"' && !arg[..i].ends_with('\\'))
+            .count();
+        assert_eq!(unescaped, 1, "extra unescaped quote in {arg}");
     }
 
     #[test]

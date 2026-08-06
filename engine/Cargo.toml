@@ -17,6 +17,7 @@ comrak = { version = "0.41", default-features = false, features = ["shortcodes"]
 # Emoji detection -> Twemoji codepoints.
 unic-emoji-char = "0.9"
 emojis = "0.6"
+math-core = "0.7"
 
 [profile.release]
 opt-level = "z"

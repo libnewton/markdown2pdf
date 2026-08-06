@@ -1,181 +1,144 @@
----
-status: draft
-owner: md2pdf
-last_reviewed: 2026-05-16
-product_name: md2pdf
-tech_route: typst_wasm_client_only
-tags: [prd, markdown, export, pdf, client-only, typst, wasm, sveltekit]
----
-
 # md2pdf — Design
 
-## 0. One-liner
+## What it is
 
-md2pdf is a fully static site: in the browser, it converts Markdown to Typst, compiles to a vector IR with Typst WASM in a Web Worker, renders that IR to per-page SVGs for live preview, and produces a PDF on demand.
+Markdown in, a typeset PDF or a self-contained HTML page out. Everything runs
+where the document already is: the browser tab, or the machine holding the
+file. No account, no upload, no server.
 
-> This document distinguishes *what's implemented* from *what's planned*. The code is the source of truth; this doc lags it.
+The claim the whole design serves is **one document, two artefacts, no
+divergence**. A `.md` file rendered to PDF and the same file rendered to HTML
+must say the same thing — same headings, same tables, same admonitions, same
+footnote numbering — even though one is set by Typst and the other is a
+stylesheet in someone else's browser.
 
----
+## The shape that follows from it
 
-## 1. Current scope
-
-### 1.1 Implemented
-
-- **Editor & export**: left-pane Markdown editor (WYSIWYG via Milkdown or CodeMirror plain mode), right-pane SVG preview, one-click PDF download (`src/lib/components/PdfEditor.svelte`).
-- **Three modes**: PDF (`/`), Cards (`/cards/`), Slides (`/slides/`). All English-only.
-- **Single PDF style** (`modern-tech`); cards and slides each ship multiple themes.
-- **Mermaid**: fenced ```` ```mermaid ```` blocks are rendered to SVG client-side, then injected into the Typst VFS as images.
-- **Twemoji** for emoji rendering — bundled locally at `static/twemoji/`. Both unicode emoji (😀) and shortcodes (`:innocent:`) are recognized.
-- **Remote images**: `![](https://...)` URLs are fetched and injected into the VFS. CORS failures fall back to an optional user-configured proxy.
-- **Pipeline**: Markdown (mdast) → Typst source → Typst(WASM) → vector IR / PDF (`src/lib/pipeline/markdownToTypst.ts`, `src/lib/workers/*`).
-
-### 1.2 Intentionally out of scope (right now)
-
-- Preflight (lint + one-click fixes for shaky AI markdown)
-- A stable Document IR layer above mdast
-- Generic asset import beyond images (audio, video, etc.)
-
----
-
-## 2. Markdown profile
-
-### 2.1 Frontmatter (YAML)
-
-Parsed by hand in `src/lib/pipeline/markdownToTypst.ts` (`parseFrontmatter*`).
-
-- `title: string`
-- `author: string` or `authors: string[]` (inline `[a, b]` or YAML list form)
-- `lang: zh | en` (PDF `lang` attribute only; UI is English-only)
-- `pageNumbers: bool` — overrides the menu toggle when present
-
-Title precedence: `options.title` → `frontmatter.title` → first leading H1.
-
-### 2.2 Block syntax
-
-- Headings H1–H6
-- Paragraphs
-- Ordered and unordered lists, **nested with marker cycles**:
-  - Unordered: `•` → `▪` → `◦`
-  - Ordered: `1.` → `a)` → `i)`
-- Task lists `- [ ]` / `- [x]` render as real checkboxes (no bullet)
-- Blockquotes
-- Fenced code blocks **with line numbers in the gutter**
-- Tables (GFM)
-- Math blocks (`$$ … $$`)
-- Themed admonitions: `:::success`, `:::warning`, `:::tip`, `:::info`, `:::danger`, `:::note`
-- Spoilers: `+++++ … +++++` (always-expanded ▶-marker block)
-- Thematic break (`---`)
-- Page break: `[[pagebreak]]`
-- TOC: a paragraph whose entire content is `[toc]` (case-insensitive) becomes `#outline()`
-
-### 2.3 Inline syntax
-
-- Bold, italic, strikethrough (GFM)
-- Inline code (subtly sized to match surrounding text)
-- `==highlight==` (yellow background)
-- Links (inline and reference)
-- Inline math (`$…$`)
-- Footnote references
-- Super- and subscript (`^x^`, `~y~`)
-- Unicode emoji & `:shortcode:` emoji (Twemoji)
-
-### 2.4 Images
-
-- `![alt](url)` — alt becomes a small centered caption beneath the image
-- `![alt](url =200x200)` and `![alt](url "=200x200")` — explicit dimensions (HackMD style)
-- Local images: pasted/dropped into the editor are stored in IndexedDB and injected into the VFS at compile time
-- Remote images: fetched live; on CORS failure the optional proxy is consulted
-
----
-
-## 3. System architecture
-
-### 3.1 Data flow
+One parser, two renderers, both in the same Rust crate:
 
 ```
-Markdown (string)
-  ├─ Mermaid pre-pass     ```mermaid → SVG bytes → ![](id.svg)
-  ├─ Twemoji pre-scan     emoji + shortcodes → image bytes in VFS
-  ├─ Remote image pre-fetch  http(s) → image bytes in VFS
-  ├─ markdownToTypst        mdast → main.typ string
-  └─ TypstWorkerClient.compileVector / compilePdf(main.typ, images)
-        └─ typst.worker
-            - Lazy WASM init (compiler + renderer)
-            - Lazy font upgrades (CJK, emoji)
-            - Inject /main.typ, /admonitions.typ, /styles/* and images into the VFS
-            - compile → bytes + diagnostics
-
-Vector IR
-  ├─ typst.ts renderer → SVG, split by page for preview
-  └─ Export: on-demand PDF compile → Blob URL → download
+              ┌──────────────────────────────┐
+  .md ───────▶│  engine/  (comrak → AST)     │
+              │    lib.rs   ──▶ Typst markup │──▶ Typst ──▶ PDF / page SVG
+              │    html/    ──▶ HTML         │──▶ a page, or a download
+              └──────────────────────────────┘
 ```
 
-### 3.2 Module map
+Not "an HTML renderer and, separately, a PDF renderer". The preprocessing —
+admonitions, spoilers, `+`-width tables, citations, blank-line normalisation —
+happens once, before either renderer runs, so neither can quietly disagree
+about what the document *is*. Where they must differ (Typst needs `#link(…)`,
+HTML needs `<a href>`) they differ at the last step only.
 
-- UI
-  - `src/lib/components/PdfEditor.svelte` — main editor, debounced compile, Mermaid preprocess, SVG rendering, settings (live update / page numbers / CORS proxy modal).
-  - `src/lib/components/CardsEditor.svelte` — cards mode, page-by-page compile.
-  - `src/lib/components/SlidesEditor.svelte` — slides mode, page-by-page compile.
-- Pipeline
-  - `src/lib/pipeline/markdownToTypst.ts` — unified parse + render. `markdownToTypstPages()` returns one Typst source per page (for cards/slides).
-  - `src/lib/pipeline/plugins/` — custom remark plugins: `remark-mark` (==highlight==), `remark-admonitions`, `remark-spoiler`, `remark-twemoji`, `remark-emoji-shortcodes`, `remark-pagebreak-token`, `remark-simple-supersub`.
-- Worker
-  - `src/lib/workers/typstClient.ts` — main-thread wrapper (`compilePdf`, `compileVector`).
-  - `src/lib/workers/typst.worker.ts` — Typst init, font loading, VFS, compile queue.
-- Preview
-  - `src/lib/typst/renderer.ts` — typst.ts SVG renderer (lazy WASM load).
-  - `src/lib/typst/svg-utils.ts` — per-page SVG extraction.
-- Typst templates
-  - `src/lib/typst/styles/*.typ` — one `article(...)` entry per style.
-  - `src/lib/typst/admonitions.typ` — shared helpers (`admonition`, `spoiler`, `task-item`, `md2pdf-list-markers`, `md2pdf-enum-numbering`).
+That property is load-bearing, and it is the one that has actually failed:
+`title:` in frontmatter used to make the HTML renderer drop the leading `# H1`
+while the PDF kept it. Both sides were individually tested; nothing compared
+them. `engine/src/html/tests.rs` now runs a cross-renderer parity suite and a
+"nothing silently disappears" sweep over every fixture in `tests/`, because a
+divergence is the failure mode this architecture is uniquely exposed to.
 
----
+## Why Typst, and why in the browser
 
-## 4. Typst template system
+Typst compiles to WASM, which is what makes a client-only PDF pipeline
+possible at all. The alternative — LaTeX, or a headless browser's print path —
+means a server, which means uploads, which means the document leaves the
+machine. It does not.
 
-### 4.1 Contract: styling lives in templates
+The cost is paid in bytes: the compiler, the engine and the fonts are a few MB
+that have to arrive before the first PDF. They are cached by the service
+worker, so that is a once-per-version cost, and the HTML preview does not wait
+for any of it — it needs the engine only.
 
-`markdownToTypst` is allowed to:
+## Two previews, deliberately different
 
-1. `#import "styles/<style>.typ": article`
-2. `#import "/admonitions.typ": admonition, spoiler, task-item`
-3. `#show: article.with(title:, authors:, lang:, page-numbers:, …)`
-4. Emit content nodes (headings, lists, tables, raw, …).
+- **Pages** is Typst's own output, page by page, as SVG. It is a proof of the
+  printed artefact: what you see is what the PDF has. Text in it is drawn
+  glyphs, so there is no element identity and nothing in it is interactive.
+- **Web** is the HTML renderer's output, mounted in a shadow root. Pageless,
+  instant, and the mode in which the document is a *document* rather than a
+  proof — outline navigation, copyable code blocks, checkboxes you can tick.
 
-All visual rules (font stack, paragraph spacing, table look, code-block gutter, etc.) live in `src/lib/typst/styles/*` and `admonitions.typ`.
+Neither is a lesser version of the other. The split is why the Web view can
+update on every keystroke while the paged view compiles only when it is on
+screen — which it now does, having previously run a full Typst compile per
+keystroke for a pane nobody was looking at.
 
-### 4.2 Adding a new style
+## The one place the view writes back
 
-1. Create `src/lib/typst/styles/<new-style>.typ` exposing `#let article(...) = { ... }`.
-2. Extend `src/lib/pipeline/markdownToTypst.ts`:
-   - Add the id to the `TypstStyleId` union.
-   - Register `{ path, entry }` in `STYLE_TO_TEMPLATE`.
-3. Extend `src/lib/workers/typst.worker.ts`:
-   - `import xxxTyp from '../typst/styles/<new-style>.typ?raw'`
-   - `compiler.addSource('/styles/<new-style>.typ', xxxTyp)` in both init paths.
+Ticking a checkbox in the Web preview edits the source. That is the single
+exception to "the view does not change the document", and it is scoped to be
+honest about it:
 
----
+- The engine emits `data-md-line` on the item, carrying the line **the author
+  wrote** — the preprocess passes shift lines around, so the origin is
+  threaded through them rather than reconstructed afterwards.
+- The app, not the engine's script, owns the write. The engine's script ships
+  inside every downloaded HTML file, where there is no source to write to.
+- A click against a stale render is a no-op, not a corruption: the write is
+  refused unless that line still carries a task marker in the state being
+  asked about.
+- Pages, the PDF and the export keep inert checkboxes. A printed checkbox is
+  not clickable, and pretending otherwise would be the lie.
 
-## 5. Fonts & offline guarantee
+Editor↔preview scroll sync was built on the same line origins and then
+removed: following the reader's scroll in the other pane fought them more
+often than it helped. The origins stay because the checkbox write needs them,
+and because a better attempt at sync would not have to rebuild them.
 
-All fonts are bundled into `static/fonts/` at build time by the `md2pdf-bundle-fonts` Vite plugin (`vite.config.ts`). It downloads them once from upstream on first dev/build, then never again. The Typst worker loads them from `/fonts/*` with `assets: false` passed to `loadFonts()` to suppress typst.ts's default CDN asset bundle.
+## Trust boundaries
 
-CJK fonts (Noto Sans CJK SC, Noto Serif SC) and Noto Color Emoji are lazy-loaded only when the worker detects CJK/emoji in the source.
+A `.md` file is untrusted input — pasted, dropped, or opened from a link
+someone sent. Two blast radii matter: the exported HTML file, opened by
+whoever received it, and the app itself, where script execution reaches every
+document in IndexedDB.
 
-Twemoji SVGs are similarly bundled into `static/twemoji/` (copied from the `twemoji-emojis` npm package by another Vite plugin). The PdfEditor's compile path pre-scans the markdown, fetches the needed SVGs, and injects them into the VFS keyed as `twemoji/<codepoint>.svg`.
+There is no CSP. That is a deliberate call, and it means the escaping and the
+allowlists *are* the control rather than a second line of defence:
 
-The only network calls during a compile are user-supplied remote image URLs (and optionally the user-configured CORS proxy).
+- Every string reaching markup goes through `esc_text` or `esc_attr`; every
+  attribute is quoted. The test suite asserts structurally — no tag outside a
+  known set, no attribute outside a known set, no `on*`, no scheme outside
+  `http(s)`/`data:image/` — over every fixture, not over a hand-picked few.
+- Link schemes are allowlisted in **both** renderers. They used to be checked
+  on the HTML side only, which let a `javascript:` URL reach Typst's link
+  annotation and, from there, the SVG preview — which lives in the live
+  document, not a shadow root.
+- Third-party markup is not inlined. Mermaid's SVG is embedded as an `<img>`
+  data URI, where it can neither script nor fetch. `math-core`'s MathML is the
+  one exception left, and it is held to the same tag/attribute guards.
+- Nothing is hoisted out of the shadow root. The preview implements code
+  copying and anchor scrolling itself; the engine emits a script only for the
+  standalone export, where there is no shadow root to escape.
+- `<br>` is the only raw HTML tag either renderer honours — the one way to
+  break a line inside a table cell. Everything else is text.
 
----
+## Three front-ends, one engine
 
-## 6. Roadmap
+| | Markdown | Typesetting | Notes |
+|---|---|---|---|
+| Web app | `engine.wasm` | Typst-in-WASM | Offline after first load |
+| CLI (`bin/md2pdf`) | `engine.wasm` via the Typst package | system `typst` | Python stdlib only |
+| HTML export | `engine.wasm` | none | One file, no external requests |
 
-- Preflight: typed lint rules + autofixes for common markdown problems (broken tables, code-fence mismatches, very long URLs, lone footnote refs, …).
-- Asset manager UI: list, rename, delete IndexedDB-stored images.
-- Optional font subsetting to shrink the bundle for mobile.
+The CLI is a shim, not a second implementation: it resolves the remote images
+Typst cannot fetch itself, then hands the document to `typst`. Everything about
+what Markdown *means* lives in `engine/`, so a fix lands in all three at once.
 
----
+Type is the one thing that cannot be shared. The web app fetches a CJK face on
+demand, the CLI consults installed system fonts, and the HTML export asks for
+the reader's system stack — three answers to the same problem, because the
+three environments have nothing in common about where a font comes from.
 
-## 7. Testing
+## What is knowingly not solved
 
-No framework yet. The recommended pattern is golden-file regression: drop fixtures into `tests/fixtures/*.md` and assert `compilePdf` returns bytes with empty (or whitelisted) diagnostics.
+- **The HTML export does not look like the PDF.** The markup matches; the type
+  does not. The PDF sets IBM Plex Sans, the export asks for the reader's system
+  stack. Closing it means embedding a subsetted face per file — worth an
+  opt-in, not a default.
+- **`package/engine.wasm` is committed and nothing checks it is current.** A
+  change to `engine/` without `./build.sh` ships a stale engine to the web app
+  while `cargo test` stays green.
+- **Twemoji is 3689 files and 17 MB** copied into the deploy artefact, fetched
+  one glyph at a time at runtime. Excluded from the precache; still in the
+  build.
+- **`bin/md2pdf` has no tests.** It is the whole CLI.
