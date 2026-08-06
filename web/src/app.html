@@ -13,6 +13,14 @@
 		<link rel="manifest" href="/manifest.webmanifest" />
 		<meta name="theme-color" content="#ffffff" />
 		<script>
+			// The GitLab Pages copy is retired; send it to the canonical host
+			// before anything else loads. `replace` keeps it out of history.
+			if (location.hostname === 'markdown2pdf.gitlab.io')
+				location.replace(
+					'https://markdown2pdf.github.io' + location.pathname + location.search + location.hash,
+				);
+		</script>
+		<script>
 			// Before first paint, so a dark session never flashes white.
 			try {
 				var t = localStorage.getItem('md2pdf-theme');
