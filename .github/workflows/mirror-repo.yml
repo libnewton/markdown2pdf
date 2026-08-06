@@ -1,4 +1,5 @@
-name: Mirror to GitHub Pages Repo
+# GitLab hosts the live site, so main has to land there on every push.
+name: Mirror to GitLab
 
 on:
   push:
@@ -6,25 +7,33 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: mirror-gitlab
+  cancel-in-progress: false
+
 jobs:
   mirror:
-    if: github.repository != 'markdown2pdf/markdown2pdf.github.io'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Mirror main to GitHub Pages repo branch
-        uses: yesolutions/mirror-action@v0.7.0
-        with:
-          REMOTE: "https://github.com/markdown2pdf/markdown2pdf.github.io.git"
-          GIT_USERNAME: libnewton
-          GIT_PASSWORD: ${{ secrets.OTHER_REPO_TOKEN }}
-          PUSH_ALL_REFS: "false"
-          GIT_REF: "HEAD:refs/heads/main"
-          GIT_PUSH_ARGS: "--force"
+      - name: Load deploy key
+        env:
+          GITLAB_SSH_KEY: ${{ secrets.GITLAB_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$GITLAB_SSH_KEY" > ~/.ssh/id_gitlab
+          chmod 600 ~/.ssh/id_gitlab
+          ssh-keyscan -t rsa,ecdsa,ed25519 gitlab.com >> ~/.ssh/known_hosts
+
+      - name: Push main to GitLab
+        run: |
+          git -c core.sshCommand='ssh -i ~/.ssh/id_gitlab -o IdentitiesOnly=yes' \
+            push --force \
+            git@gitlab.com:markdown2pdf/markdown2pdf.gitlab.io.git \
+            HEAD:refs/heads/main
