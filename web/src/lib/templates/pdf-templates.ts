@@ -154,6 +154,20 @@ $$
 \\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}
 $$
 
+\`\\boxed\` frames a result, and amsmath environments line equations up on their
+relation:
+
+$$
+\\boxed{X\\to Y\\to Z \\;\\Rightarrow\\; I(X;Y)\\ \\ge\\ I(X;Z)}
+$$
+
+$$
+\\begin{aligned}
+\\nabla \\cdot \\mathbf{E} &= \\frac{\\rho}{\\varepsilon_0} \\\\
+\\nabla \\times \\mathbf{B} &= \\mu_0\\mathbf{J}
+\\end{aligned}
+$$
+
 ---
 
 ## Quotes & callouts

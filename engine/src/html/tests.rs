@@ -1341,6 +1341,31 @@ fn no_fixture_loses_a_heading_a_task_or_a_code_block() {
     }
 }
 
+/// Math in a fixture renders as math.
+///
+/// `math-core` accepts less LaTeX than mitex does, and it reports the gap by
+/// leaving an `<merror>` *inside* an otherwise-fine formula — so a document
+/// that is perfect in the PDF can render wrongly here with nothing failing.
+/// A fixture is the PDF's spec, so it has to survive this renderer too.
+#[test]
+fn no_fixture_loses_a_formula_to_the_html_math_renderer() {
+    for (name, md) in FIXTURES {
+        let out = html(md);
+        assert!(
+            !out.contains("math-core-unknown-cmd"),
+            "{name}: a formula rendered with a command dropped out of it"
+        );
+        // `html-edge.md` carries malformed LaTeX on purpose; falling back to
+        // the source is the right answer there, and the only one.
+        if *name != "html-edge.md" {
+            assert!(
+                !out.contains("md2pdf-math-error"),
+                "{name}: a formula fell back to its source"
+            );
+        }
+    }
+}
+
 /// Every fixture, through both guards. Opting individual tests in is how the
 /// mermaid path went years without the tag check ever running over it.
 #[test]
@@ -1355,4 +1380,5 @@ fn no_fixture_can_inject_a_tag_or_an_attribute() {
         }
     }
 }
+
 

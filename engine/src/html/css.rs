@@ -369,6 +369,21 @@ const REST: &str = r#"}
    scrollable and clipped. Overflow stays visible instead. */
 .md2pdf-math-block { display: block; margin: 1.4em 0; text-align: center; }
 .md2pdf-math-error { color: var(--md-adm-danger); }
+/* `\boxed`. MathML Core has no boxing element and math-core emits no
+   equivalent, so the border is drawn here, around the whole formula.
+   `display` is deliberately untouched: a <math> element lays its children out
+   as maths only while it keeps its `block math` / `inline math` display, and
+   overriding it to `inline-block` stacks every glyph vertically instead.
+   `fit-content` tightens the box without going near that. */
+.md2pdf-math-boxed math {
+  width: fit-content;
+  margin-inline: auto;
+  /* Wider on the right: a formula's last glyph carries italic correction that
+     `fit-content` does not measure, so equal padding looks lopsided. */
+  padding: .45em .85em .45em .7em;
+  border: 1px solid var(--md-rule);
+  border-radius: 4px;
+}
 /* Same face the PDF typesets math with. Without a font carrying a MATH table
    the browser lays MathML out with the body font — stretched braces, wrong
    radicals, flat fractions — so the export embeds it and the app serves it. */

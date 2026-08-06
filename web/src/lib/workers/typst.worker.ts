@@ -412,6 +412,15 @@ async function renderHtml(
 			blob,
 		),
 	);
+	// The engine shows a formula it cannot render as its own source. That is
+	// legible but easy to scroll past, and it is the one place the web preview
+	// is allowed to differ from the PDF — so it is worth naming.
+	const badMath = html.match(/md2pdf-math-error/g)?.length ?? 0;
+	if (badMath > 0) {
+		diagnostics.push(
+			`${badMath} formula(s) could not be rendered here — showing the LaTeX instead`,
+		);
+	}
 	return { html, diagnostics };
 }
 
