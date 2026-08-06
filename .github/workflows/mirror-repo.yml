@@ -1,0 +1,30 @@
+name: Mirror to GitHub Pages Repo
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    if: github.repository != 'markdown2pdf/markdown2pdf.github.io'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Mirror main to GitHub Pages repo branch
+        uses: yesolutions/mirror-action@v0.7.0
+        with:
+          REMOTE: "https://github.com/markdown2pdf/markdown2pdf.github.io.git"
+          GIT_USERNAME: libnewton
+          GIT_PASSWORD: ${{ secrets.OTHER_REPO_TOKEN }}
+          PUSH_ALL_REFS: "false"
+          GIT_REF: "HEAD:refs/heads/main"
+          GIT_PUSH_ARGS: "--force"
