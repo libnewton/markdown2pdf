@@ -55,7 +55,10 @@ npm run build        # static build → web/build/
 
 The preview pane has two tabs: **Pages** is the paged SVG preview of the PDF,
 **Web** is the pageless HTML view. The HTML view needs no Typst compile,
-so it updates as you type.
+so it updates as you type — and it is where a document opens. Switch a
+document to Pages, or drag the divider between editor and preview, and that
+document opens that way next time: both are remembered per document, in this
+browser's local storage.
 
 The `web/vite.config.ts` plugins copy `package/` and `fonts/` into
 `web/static/` at build time — the app is fully offline, no CDN calls.

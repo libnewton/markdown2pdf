@@ -58,6 +58,12 @@ for any of it — it needs the engine only.
   instant, and the mode in which the document is a *document* rather than a
   proof — outline navigation, copyable code blocks, checkboxes you can tick.
 
+A document opens in Web, because that is the view you work in; Pages answers a
+question you ask at the end. But the choice is the document's, not the app's —
+a document switched to Pages, or with the divider dragged wide, opens that way
+again. Both live in `localStorage` under the document's id, next to the
+documents themselves in IndexedDB, and are dropped when the document is.
+
 Neither is a lesser version of the other. The split is why the Web view can
 update on every keystroke while the paged view compiles only when it is on
 screen — which it now does, having previously run a full Typst compile per

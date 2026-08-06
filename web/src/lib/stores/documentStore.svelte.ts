@@ -7,6 +7,7 @@ import {
 	type SavedDocumentAsset,
 	type DocumentCreationSource,
 } from '$lib/storage/documents';
+import { forgetDocViewState } from '$lib/storage/docViewState';
 
 export type SaveStatus = 'saved' | 'saving';
 
@@ -242,6 +243,7 @@ export const documentStore = {
 		pendingSave = null;
 		await deleteDocFromDB(id);
 		docMeta.delete(id);
+		forgetDocViewState(id);
 		if (currentDocId === id) {
 			setCurrentDocument(null, true);
 		}

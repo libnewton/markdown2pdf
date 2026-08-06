@@ -2,7 +2,7 @@
   import { browser } from '$app/environment'
   import { page } from '$app/state'
   import { replaceState } from '$app/navigation'
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { pageSlots } from '$lib/preview/page-slots'
   import type { SvgDocument } from '$lib/typst/svg-split'
   import { getSharedTypstWorkerClient, TypstWorkerClient } from '$lib/workers/typstClient'
@@ -27,6 +27,13 @@
     isLegacyImplicitBlankDocument,
   } from '$lib/stores/documentStore.svelte'
   import { settingsStore } from '$lib/stores/settingsStore.svelte'
+  import {
+    pruneDocViewState,
+    readDocViewState,
+    updateDocViewState,
+    type DocViewState,
+    type PreviewMode,
+  } from '$lib/storage/docViewState'
   import { SOCIAL_IMAGE } from '$lib/seo'
 
   import type { SavedDocument, SavedDocumentAsset } from '$lib/storage/documents'
@@ -113,6 +120,9 @@
       const usableDocs = documentStore.recentDocuments.filter(
         (doc) => !isLegacyImplicitBlankDocument(doc) && !isBrokenTemplateDocument(doc),
       )
+      // Remembered layouts outlive the documents they belong to if a document
+      // went away without this app watching — another tab, or cleared storage.
+      pruneDocViewState(usableDocs.map((doc) => doc.id))
       if (documentStore.currentDocId) {
         const currentDoc = documentStore.recentDocuments.find(
           (d) => d.id === documentStore.currentDocId,
@@ -141,8 +151,15 @@
     })()
   })
 
-  // Layout state
-  let leftPaneWidth = $state(50)
+  // Layout state. The divider stops short of either edge — a 2% pane is a
+  // sliver nobody meant to drag to.
+  const MIN_PANE_WIDTH = 20
+  const MAX_PANE_WIDTH = 80
+  const DEFAULT_PANE_WIDTH = 50
+  const clampPaneWidth = (value: number) =>
+    Math.min(Math.max(value, MIN_PANE_WIDTH), MAX_PANE_WIDTH)
+
+  let leftPaneWidth = $state(DEFAULT_PANE_WIDTH)
   let isResizing = $state(false)
   let isDragging = $state(false)
 
@@ -230,8 +247,12 @@
 
   // Pageless HTML view. The engine renders it without a Typst compile, so it
   // updates on its own short debounce instead of the adaptive compile one.
-  type PreviewMode = 'pages' | 'document'
-  let previewMode = $state<PreviewMode>('pages')
+  // It is also where a document opens: reading and editing is what this view
+  // is for, and it costs milliseconds rather than a full typeset. A document
+  // the reader switched to Pages opens there instead — see the layout memory
+  // further down.
+  const DEFAULT_PREVIEW_MODE: PreviewMode = 'document'
+  let previewMode = $state<PreviewMode>(DEFAULT_PREVIEW_MODE)
   let htmlDoc = $state('')
   // Content the render had to degrade — an image it could not fetch, a diagram
   // it could not draw. The document still renders, which is why these would
@@ -401,6 +422,7 @@
     // tab goes away.
     const handleHide = () => {
       editorPane?.flushPendingEdit()
+      flushViewState()
       void documentStore.flushPendingSave()
     }
     document.addEventListener('visibilitychange', handleHide)
@@ -412,6 +434,7 @@
       document.removeEventListener('visibilitychange', handleHide)
       window.removeEventListener('pagehide', handleHide)
       window.removeEventListener('keydown', handleKey, true)
+      flushViewState()
       if (resizeTimer) clearTimeout(resizeTimer)
       if (swUpdateTimer) clearInterval(swUpdateTimer)
     }
@@ -720,7 +743,7 @@
 
   function onResize(e: MouseEvent) {
     if (!isResizing) return
-    pendingPaneWidth = Math.min(Math.max((e.clientX / window.innerWidth) * 100, 20), 80)
+    pendingPaneWidth = clampPaneWidth((e.clientX / window.innerWidth) * 100)
     if (resizeRaf !== null) return
     resizeRaf = requestAnimationFrame(() => {
       resizeRaf = null
@@ -747,13 +770,90 @@
     const to = {
       ArrowLeft: leftPaneWidth - step,
       ArrowRight: leftPaneWidth + step,
-      Home: 20,
-      End: 80,
+      Home: MIN_PANE_WIDTH,
+      End: MAX_PANE_WIDTH,
     }[e.key]
     if (to === undefined) return
     e.preventDefault()
-    leftPaneWidth = Math.min(Math.max(to, 20), 80)
+    leftPaneWidth = clampPaneWidth(to)
   }
+
+  // ---------------------------------------------------------------------
+  // Remembered layout, per document.
+  //
+  // Which preview was open and where the divider sat are answers about the
+  // document being worked on, not about the app, so they are stored against
+  // its id and restored when it is opened again. The reference view owns no
+  // document and remembers nothing.
+  // ---------------------------------------------------------------------
+
+  /**
+   * The document whose stored layout is on screen. Until it matches the open
+   * document, a save would write one document's layout under another's id —
+   * loading a document changes the id before the layout has caught up.
+   */
+  let appliedViewStateDocId = $state<string | null>(null)
+
+  $effect(() => {
+    const id = documentStore.currentDocId
+    if (!browser || readOnly) return
+    if (untrack(() => appliedViewStateDocId) === id) return
+    // Whatever the document being left still owed the store, it owes now: the
+    // pending write is keyed to it, and the next one will be keyed to this.
+    flushViewState()
+    appliedViewStateDocId = id
+    if (!id) return
+
+    // A document with nothing remembered gets the defaults rather than the
+    // layout of whatever was open before it — the layout belongs to the
+    // document, and a new one has made no choices yet.
+    const saved = readDocViewState(id)
+    leftPaneWidth = clampPaneWidth(saved.leftPaneWidth ?? DEFAULT_PANE_WIDTH)
+    // `?view` and a `#heading` link have both already chosen the preview:
+    // neither has a Pages/Web switch to disagree with.
+    if (viewMode !== 'view' && !pendingHash) {
+      previewMode = saved.previewMode ?? DEFAULT_PREVIEW_MODE
+    }
+  })
+
+  // A drag produces a width per frame, and localStorage writes synchronously,
+  // so the save waits for the divider to come to rest.
+  const VIEW_STATE_DEBOUNCE_MS = 250
+  let viewStateTimer: number | null = null
+  let pendingViewState: (() => void) | null = null
+
+  function flushViewState() {
+    if (viewStateTimer !== null) {
+      window.clearTimeout(viewStateTimer)
+      viewStateTimer = null
+    }
+    pendingViewState?.()
+    pendingViewState = null
+  }
+
+  $effect(() => {
+    const id = documentStore.currentDocId
+    const mode = previewMode
+    const width = leftPaneWidth
+    const layout = viewMode
+    if (!browser || readOnly || !id) return
+    if (appliedViewStateDocId !== id) return
+
+    // View mode has no Pages/Web switch and forces the pageless one, so what
+    // it leaves in `previewMode` is not a choice anyone made — only the width
+    // is worth keeping from there.
+    const patch: DocViewState =
+      layout === 'view' ? { leftPaneWidth: width } : { previewMode: mode, leftPaneWidth: width }
+    pendingViewState = () => updateDocViewState(id, patch)
+    viewStateTimer = window.setTimeout(flushViewState, VIEW_STATE_DEBOUNCE_MS)
+
+    return () => {
+      if (viewStateTimer !== null) {
+        window.clearTimeout(viewStateTimer)
+        viewStateTimer = null
+      }
+    }
+  })
 
   function hasFiles(e: DragEvent): boolean {
     return e.dataTransfer?.types?.includes('Files') ?? false
