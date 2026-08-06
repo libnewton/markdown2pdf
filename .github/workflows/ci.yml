@@ -10,8 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  # The engine holds both renderers (Typst markup and HTML) plus their parity
-  # guard, so its unit tests are the ones that matter most for regressions.
   engine:
     runs-on: ubuntu-latest
     steps:
