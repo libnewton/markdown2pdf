@@ -1,6 +1,5 @@
 # GitHub Pages deploy for md2pdf. Build only — tests live in ci.yml.
 # The web app lives in web/ (static SvelteKit, adapter-static); web/build is
-# what gets published.
 name: Deploy static content to Pages
 
 on:
