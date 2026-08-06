@@ -1,64 +1,35 @@
-# GitLab Pages deploy for md2pdf.
-# The web app lives in web/ (static SvelteKit, adapter-static). Its build
-# output (web/build) is renamed to public/ so GitLab Pages picks it up.
-
-stages:
-  - test
-  - build
-
-# Cache node_modules across runs to keep builds fast.
-# Tied to the lockfile hash so dep changes invalidate it automatically.
-.node_cache: &node_cache
-  key:
-    files:
-      - web/package-lock.json
-  paths:
-    - web/.npm/
-    - web/node_modules/
-  policy: pull-push
-
-# The engine holds both renderers (Typst markup and HTML) plus their parity
-# guard, so its unit tests are the ones that matter most for regressions.
-engine:
-  stage: test
-  image: rust:1-alpine
-  script:
-    - apk add --no-cache musl-dev
-    - cd engine
-    - cargo test
-
-web:
-  stage: test
-  image: node:20-alpine
-  cache:
-    <<: *node_cache
-  script:
-    - cd web
-    - npm ci --cache .npm --prefer-offline
-    - npm run format:check
-    - npm run check
-    - npm test
-    # The browser tests cover what unit tests structurally cannot: the
-    # document the app actually renders.
-    - npx playwright install --with-deps chromium
-    - npm run test:e2e
+# GitLab Pages is retired: it now serves nothing but a redirect to
+# markdown2pdf.github.io. No build, no tests — those run on GitHub Actions.
 
 pages:
-  stage: build
-  image: node:20-alpine
-  cache:
-    <<: *node_cache
+  stage: deploy
+  image: alpine:latest
   script:
-    # The Vite plugins copy the md2pdf package + fonts from the repo (no
-    # network, no Rust) — engine.wasm is committed, so a plain npm build works.
-    - cd web
-    - npm ci --cache .npm --prefer-offline
-    - npm run build
-    - mv build ../public
+    - mkdir -p public
+    # _redirects gives real 301s; the HTML is the fallback for clients that
+    # land on a cached page or ignore it.
+    - echo '/* https://markdown2pdf.github.io/:splat 301' > public/_redirects
+    - |
+      cat > public/index.html <<'HTML'
+      <!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="utf-8" />
+          <meta http-equiv="refresh" content="0; url=https://markdown2pdf.github.io/" />
+          <link rel="canonical" href="https://markdown2pdf.github.io/" />
+          <title>md2pdf has moved</title>
+          <script>
+            location.replace('https://markdown2pdf.github.io' + location.pathname + location.search + location.hash);
+          </script>
+        </head>
+        <body>
+          <p>md2pdf has moved to <a href="https://markdown2pdf.github.io/">markdown2pdf.github.io</a>.</p>
+        </body>
+      </html>
+      HTML
+    - cp public/index.html public/404.html
   artifacts:
     paths:
       - public
-    expire_in: 1 week
   rules:
-    # Only publish from the default branch.
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
