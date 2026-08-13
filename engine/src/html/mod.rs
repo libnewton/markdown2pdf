@@ -956,15 +956,32 @@ fn text_run(doc: &mut Doc, s: &str) -> String {
         if next.1 {
             let after = &rest[next.0 + CITATION_OPEN_TOKEN.len()..];
             if let Some(end) = after.find(CITATION_CLOSE_TOKEN) {
-                let key = &after[..end];
-                out.push_str(&emoji_run(doc, &rest[..next.0]));
-                let n = doc.cite_number(key);
-                out.push_str(&format!(
-                    "<a class=\"md2pdf-cite\" href=\"#md2pdf-ref-{}\">[{n}]</a>",
-                    esc_attr(key)
-                ));
-                rest = &after[end + CITATION_CLOSE_TOKEN.len()..];
-                continue;
+                if let Some(keys) = crate::citation_keys(&after[..end]) {
+                    out.push_str(&emoji_run(doc, &rest[..next.0]));
+                    if keys.len() == 1 {
+                        let key = keys[0];
+                        let n = doc.cite_number(key);
+                        out.push_str(&format!(
+                            "<a class=\"md2pdf-cite\" href=\"#md2pdf-ref-{}\">[{n}]</a>",
+                            esc_attr(key)
+                        ));
+                    } else {
+                        out.push_str("<span class=\"md2pdf-cite\">[");
+                        for (i, key) in keys.iter().enumerate() {
+                            if i > 0 {
+                                out.push_str(", ");
+                            }
+                            let n = doc.cite_number(key);
+                            out.push_str(&format!(
+                                "<a href=\"#md2pdf-ref-{}\">{n}</a>",
+                                esc_attr(key)
+                            ));
+                        }
+                        out.push_str("]</span>");
+                    }
+                    rest = &after[end + CITATION_CLOSE_TOKEN.len()..];
+                    continue;
+                }
             }
         }
 

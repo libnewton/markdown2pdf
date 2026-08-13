@@ -6,7 +6,7 @@ bibliography-style: ieee
 ---
 
 Ein wiederholter Beleg [@example] und noch einmal [@example].
-Zwei Belege nebeneinander [@example][@second] sowie ein Zusatz nach dem Beleg [@example], S. 7.
+Zwei Belege als Gruppe [@example, @second] sowie ein Zusatz nach dem Beleg [@example], S. 7.
 
 :::success
 Erfolgsmeldung.

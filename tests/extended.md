@@ -371,7 +371,7 @@ Setting `footer-center` yourself replaces the number entirely.
 
 ## Running header & footer
 
-Six optional slots — `header-left`, `header-center`, `header-right` and the same three for `footer-`. They are small, grey, have no separating rule, and start on the **second** page, so a cover or title page stays clean. This document uses four of them:
+Six optional slots — `header-left`, `header-center`, `header-right` and the same three for `footer-`. They are small, grey, have no separating rule, and start on the **second** page. The default page number also appears on page one when there is no cover. This document uses four slots:
 
 ```yaml
 ---
@@ -491,7 +491,7 @@ Anything after the token continues on the next page. Combine with sections to ke
 
 ## Inline bibliography
 
-Set `bibliography: inline` to cite a trailing BibTeX entry as `[@md2pdf]`. This sentence contains an actual citation [@md2pdf]. Numeric citation content is always blue while brackets and punctuation stay black, including under non-IEEE styles. The bibliography is generated automatically, headed “Referenzen” for `lang: de` and “References” otherwise. `bibliography-style` selects a Typst style and defaults to `ieee`. BibTeX-looking examples inside fenced code remain ordinary content.
+Set `bibliography: inline` to cite a trailing BibTeX entry as `[@md2pdf]`; write `[@first, @second]` to put several references in one citation group. This sentence contains an actual citation [@md2pdf]. Numeric citation content is always blue while brackets and punctuation stay black, including under non-IEEE styles. The bibliography is generated automatically, headed “Referenzen” for `lang: de` and “References” otherwise. `bibliography-style` selects a Typst style and defaults to `ieee`. BibTeX-looking examples inside fenced code remain ordinary content.
 
 @misc{md2pdf,
   author = {md2pdf contributors},
