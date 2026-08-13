@@ -53,9 +53,10 @@
   }
   let slot-of(name, fallback: none) = args.at(name, default: fallback)
   let header-slots = (slot-of("header-left"), slot-of("header-center"), slot-of("header-right"))
+  let custom-footer-center = slot-of("footer-center")
   let footer-slots = (
     slot-of("footer-left"),
-    slot-of("footer-center", fallback: number-template),
+    if custom-footer-center == none { number-template } else { custom-footer-center },
     slot-of("footer-right"),
   )
   let author-line = if authors.len() > 0 { authors.join(", ") } else { "" }
@@ -87,13 +88,17 @@
     numbering: if page-numbers != false { "1" } else { none },
     header-ascent: 6mm,
     footer-descent: 6mm,
-    // Page furniture starts on the second page: page one is either the cover
-    // or the title page, and neither wants a running head.
+    // A cover stays clean. Without one, the document starts on page one and
+    // its page number belongs there even though the running head starts later.
     header: context {
       if here().page() > 1 { bar(..header-slots, vars, remotes, asset, height: header-height) }
     },
     footer: context {
-      if here().page() > 1 { bar(..footer-slots, vars, remotes, asset, height: footer-height) }
+      if here().page() > 1 {
+        bar(..footer-slots, vars, remotes, asset, height: footer-height)
+      } else if not cover-mode and custom-footer-center == none {
+        bar(none, number-template, none, vars, remotes, asset, height: footer-height)
+      }
     },
   )
   set document(title: title, author: authors, date: none)
@@ -387,11 +392,12 @@
 
   // Title area (optional) — the cover already carries the title when present.
   if title != "" and not cover-mode {
+    let byline = authors + if date == none or date == "" { () } else { (date,) }
     align(center)[
       #text(1.8em, weight: "black", title)
-      #if authors.len() > 0 [
+      #if byline.len() > 0 [
         #v(0.35em)
-        #text(0.95em, fill: rgb("#555555"), authors.join(", "))
+        #text(0.95em, fill: rgb("#555555"), byline.join(" · "))
       ]
     ]
     v(1em)

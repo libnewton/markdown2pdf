@@ -19,6 +19,17 @@
 // Helpers handed to the engine output via `eval` scope.
 #let _md-math(display, src) = if display { mitex(src) } else { mi(src) }
 #let _md-mermaid(code) = mermaid(code)
+// Typst accepts one label per cite, so adjacent IEEE cites own separate
+// brackets. Keep CSL's numbering and punctuation, but let Markdown own these.
+#let _md-cite-group(keys) = {
+  show cite: it => {
+    show regex("[\\[\\]]"): none
+    it
+  }
+  [\[]
+  for key in keys { cite(key) }
+  [\]]
+}
 
 // Emoji are rendered as bundled Twemoji SVGs (package-relative, so they work
 // in the CLI and — once the worker maps them into the VFS — in the browser).
@@ -312,6 +323,7 @@
         task-item: task-item,
         md-math: _md-math,
         md-mermaid: _md-mermaid,
+        md-cite-group: _md-cite-group,
         twemoji: _twemoji,
         md-bibliography: () => bibliography(
           bytes(bib),

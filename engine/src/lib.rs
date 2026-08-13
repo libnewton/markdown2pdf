@@ -398,14 +398,10 @@ fn replace_citations_outside_code_spans(line: &str) -> String {
         }
         if code_ticks == 0 && rest.starts_with("[@") {
             if let Some(end) = rest.find(']') {
-                let key = &rest[2..end];
-                if !key.is_empty()
-                    && key
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || "_:.+-".contains(c))
-                {
+                let group = &rest[1..end];
+                if citation_keys(group).is_some() {
                     out.push_str(CITATION_OPEN_TOKEN);
-                    out.push_str(key);
+                    out.push_str(group);
                     out.push_str(CITATION_CLOSE_TOKEN);
                     rest = &rest[end + 1..];
                     continue;
@@ -417,6 +413,22 @@ fn replace_citations_outside_code_spans(line: &str) -> String {
         rest = &rest[char_len..];
     }
     out
+}
+
+fn citation_keys(group: &str) -> Option<Vec<&str>> {
+    let mut keys = Vec::new();
+    for part in group.split(',') {
+        let key = part.trim().strip_prefix('@')?;
+        if key.is_empty()
+            || !key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_:.+-".contains(c))
+        {
+            return None;
+        }
+        keys.push(key);
+    }
+    (!keys.is_empty()).then_some(keys)
 }
 
 const ADMONITION_KINDS: &[&str] = &[
@@ -1329,11 +1341,21 @@ fn render_text(s: &str, citations: bool) -> String {
         if next.1 {
             let after = &rest[next.0 + CITATION_OPEN_TOKEN.len()..];
             if let Some(end) = after.find(CITATION_CLOSE_TOKEN) {
-                let key = &after[..end];
-                out.push_str(&emit_text(&rest[..next.0]));
-                out.push_str(&format!("#cite(label(\"{}\"))", esc_string(key)));
-                rest = &after[end + CITATION_CLOSE_TOKEN.len()..];
-                continue;
+                if let Some(keys) = citation_keys(&after[..end]) {
+                    let labels = keys
+                        .iter()
+                        .map(|key| format!("label(\"{}\")", esc_string(key)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    out.push_str(&emit_text(&rest[..next.0]));
+                    if keys.len() == 1 {
+                        out.push_str(&format!("#cite({labels})"));
+                    } else {
+                        out.push_str(&format!("#md-cite-group(({labels}))"));
+                    }
+                    rest = &after[end + CITATION_CLOSE_TOKEN.len()..];
+                    continue;
+                }
             }
         }
 
@@ -1518,8 +1540,9 @@ pub(crate) fn safe_url(url: &str) -> Option<&str> {
 }
 
 fn render_link(url: &str, label: &str) -> String {
-    let label = if label.trim().is_empty() {
-        esc_text(url)
+    let escaped_url = esc_text(url);
+    let label = if label.trim().is_empty() || label == escaped_url {
+        format!("#text(\"{}\")", esc_string(url))
     } else {
         label.to_string()
     };
@@ -1865,6 +1888,16 @@ mod tests {
     }
 
     #[test]
+    fn grouped_citations_become_one_typst_citation() {
+        let out = convert_str_with_citations("See [@first, @second].", false, true);
+        assert!(
+            out.contains("#md-cite-group((label(\"first\"), label(\"second\")))"),
+            "{out}"
+        );
+        assert_eq!(out.matches("#md-cite-group(").count(), 1, "{out}");
+    }
+
+    #[test]
     fn malformed_citation_syntax_remains_text() {
         let out = convert_str_with_citations("See [@two keys] and [@].", false, true);
         assert!(out.contains(r"\[\@two keys\]"), "{out}");
@@ -1901,6 +1934,21 @@ mod tests {
             assert!(safe_url(url).is_some(), "{url} was refused");
             let out = convert_str(&format!("[label]({url})"), false);
             assert!(out.contains("#link("), "{url} lost its link:\n{out}");
+        }
+    }
+
+    #[test]
+    fn autolink_labels_are_literal_typst_text() {
+        for (markdown, url) in [
+            ("https://a.com/post_1.html", "https://a.com/post_1.html"),
+            ("<https://a.com/post_2.html>", "https://a.com/post_2.html"),
+        ] {
+            let out = convert_str(markdown, false);
+            assert_eq!(
+                out.trim(),
+                format!("#link(\"{url}\")[#text(\"{url}\")]"),
+                "URL label can be reparsed as a nested Typst autolink"
+            );
         }
     }
 

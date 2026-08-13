@@ -450,6 +450,7 @@ const REST: &str = r#"}
 .md2pdf-notes p { margin: 0; }
 .md2pdf-backref { text-decoration: none; margin-left: .35em; }
 .md2pdf-cite { text-decoration: none; font-variant-numeric: tabular-nums; }
+.md2pdf-cite a { text-decoration: none; }
 
 /* ---- table of contents ------------------------------------------------ */
 

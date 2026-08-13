@@ -804,12 +804,15 @@ fn an_undefined_footnote_reference_is_dropped() {
 
 #[test]
 fn inline_citations_number_by_first_use_and_build_a_reference_list() {
-    let md = "---\nbibliography: inline\n---\n\nSee [@b] and [@a], then [@b].\n\n\
+    let md = "---\nbibliography: inline\n---\n\nSee [@b, @a], then [@b].\n\n\
         @article{a, author = {Ada Lovelace}, title = {Notes}, journal = {Memoirs}, year = {1843}}\n\
         @book{b, author = {Grace Hopper and Jean Bartik}, title = {Compilers}, publisher = {ACM}, year = {1952}}\n";
     let out = html(md);
+    assert!(
+        out.contains("<span class=\"md2pdf-cite\">[<a href=\"#md2pdf-ref-b\">1</a>, <a href=\"#md2pdf-ref-a\">2</a>]</span>"),
+        "{out}"
+    );
     assert!(out.contains("href=\"#md2pdf-ref-b\">[1]</a>"), "{out}");
-    assert!(out.contains("href=\"#md2pdf-ref-a\">[2]</a>"), "{out}");
     assert!(out.contains("<li id=\"md2pdf-ref-b\">G. Hopper, J. Bartik"), "{out}");
     assert!(out.contains("\u{201c}Compilers\u{201d}"), "{out}");
     assert!(out.contains("<em>ACM</em>"), "{out}");
@@ -1380,5 +1383,4 @@ fn no_fixture_can_inject_a_tag_or_an_attribute() {
         }
     }
 }
-
 
