@@ -278,6 +278,7 @@
       // frames, so buy the space back sideways.
       let cols = if type(it.columns) == array { it.columns.len() } else { 1 }
       set table(inset: (x: if cols > 6 { 4pt } else { 8pt }, y: 8pt))
+      set table.cell(breakable: false)
       set text(hyphenate: true)
       // The span goes in as plain mono text, not as `raw`: the rule above also
       // matches `raw`, and a nested match would tint the span twice.

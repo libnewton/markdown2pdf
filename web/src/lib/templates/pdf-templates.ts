@@ -37,7 +37,7 @@ md2pdf turns Markdown into a typeset PDF, 100% in your browser. This document is
 
 [^demo]: Footnotes render as numbered notes at the foot of the page.
 
-Line breaks are kept: every newline in the source is a line break in the PDF. Write each paragraph as one long line — as this document does — and it is justified and wrapped for you; hard-wrap the source and those wraps show up in the output. A blank line starts a new paragraph; three or more blank lines leave extra vertical space.
+Line breaks are kept in PDF and HTML: every newline in the source is a visible line break. Write each paragraph as one long line — as this document does — and it is justified and wrapped for you; hard-wrap the source and those wraps show up in the output. A blank line starts a new paragraph; three or more blank lines leave extra vertical space.
 
 ---
 
@@ -94,6 +94,8 @@ The first \`#\` heading of a document becomes its title if the frontmatter has n
 ## Tables
 
 Column alignment comes from the \`:\` markers in the separator row. A column grows by appending \`+\` to its separator cell: \`---\` is one share of the width, \`---+\` two, \`---++\` three.
+
+PDF tables may span as many pages as needed, but each row stays together and moves to the next page when it does not fit.
 
 | Feature       | Supported | Notes                                     |
 | ------------- | --------- | --------------------------------------++  |
@@ -288,6 +290,12 @@ Sequences are handled as one glyph — flags 🇩🇪 🇯🇵 and families 👨
 
 ## Links & references
 
+Every body heading gets an automatic Unicode-aware anchor. This section is reachable as [Links & references](#links-references). Add a stable invisible ID with \`## Heading {#custom-id}\`, then link to it with \`[jump](#custom-id)\`. A leading H1 promoted to the document title is not a body anchor.
+
+### Stable anchor example {#custom-id}
+
+The \`{#custom-id}\` suffix above is not printed, and [this link](#custom-id) returns to it.
+
 Inline: [md2pdf README](https://github.com/libnewton/markdown2pdf).
 
 Reference style: [SvelteKit][sk] and [Typst][typst] power the rendering.
@@ -338,6 +346,7 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | \`date\`                                       | text or a YAML date                           | none                |
 | \`lang\`                                       | \`en\`, \`de\`, \`de-AT\`, …                        | \`en\`                |
 | \`hide-toc-button\`                            | \`true\` to drop the HTML outline drawer        | \`false\`             |
+| \`hide-theme-toggle\`                          | \`true\` to drop the exported HTML theme toggle | \`false\`             |
 | \`pageNumbers\` or \`page-numbers\`              | \`true\`, \`false\`, \`"1"\`, \`"1/1"\`, or a template | \`true\`              |
 | \`header-left\` \`header-center\` \`header-right\` | text or an image                              | empty               |
 | \`header-height\`                              | positive \`pt\`, \`mm\`, \`cm\`, or \`in\` length     | automatic           |
@@ -383,7 +392,7 @@ Setting \`footer-center\` yourself replaces the number entirely.
 
 ## Running header & footer
 
-Six optional slots — \`header-left\`, \`header-center\`, \`header-right\` and the same three for \`footer-\`. They are small, grey, have no separating rule, and start on the **second** page, so a cover or title page stays clean. This document uses four of them:
+Six optional slots — \`header-left\`, \`header-center\`, \`header-right\` and the same three for \`footer-\`. They are small, grey, have no separating rule, and start on the **second** page. The default page number also appears on page one when there is no cover. This document uses four slots:
 
 \`\`\`yaml
 ---
@@ -503,7 +512,7 @@ Anything after the token continues on the next page. Combine with sections to ke
 
 ## Inline bibliography
 
-Set \`bibliography: inline\` to cite a trailing BibTeX entry as \`[@md2pdf]\`. This sentence contains an actual citation [@md2pdf]. Numeric citation content is always blue while brackets and punctuation stay black, including under non-IEEE styles. The bibliography is generated automatically, headed “Referenzen” for \`lang: de\` and “References” otherwise. \`bibliography-style\` selects a Typst style and defaults to \`ieee\`. BibTeX-looking examples inside fenced code remain ordinary content.
+Set \`bibliography: inline\` to cite a trailing BibTeX entry as \`[@md2pdf]\`; write \`[@first, @second]\` to put several references in one citation group. This sentence contains an actual citation [@md2pdf]. Numeric citation content is always blue while brackets and punctuation stay black, including under non-IEEE styles. The bibliography is generated automatically, headed “Referenzen” for \`lang: de\` and “References” otherwise. \`bibliography-style\` selects a Typst style and defaults to \`ieee\`. BibTeX-looking examples inside fenced code remain ordinary content.
 
 @misc{md2pdf,
   author = {md2pdf contributors},

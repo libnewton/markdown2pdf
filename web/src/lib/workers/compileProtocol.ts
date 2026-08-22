@@ -15,6 +15,7 @@ export type HtmlRequest = {
 	images?: Record<string, Uint8Array<ArrayBuffer>>;
 	/** Wrap the fragment in a full document, for a download. */
 	standalone?: boolean;
+	theme?: 'system' | 'light' | 'dark';
 	/**
 	 * The fragment is backed by a source the reader can edit: blocks carry
 	 * their source line and task checkboxes are live. Never set for a

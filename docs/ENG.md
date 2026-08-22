@@ -36,7 +36,7 @@ package/                    the `md2pdf` Typst package
   vendor/                   mitex (math), mmdr (mermaid)
   twemoji/                  3689 SVGs
 
-bin/md2pdf                  the CLI; Python stdlib only
+bin/md2pdf                  the CLI and local stdio MCP server; Python stdlib only
 tests/                      Markdown fixtures + check_html.py
 
 web/src/
@@ -103,7 +103,13 @@ single-purpose functions remain for `lib.typ`.
 
 `render_html` options are a `key=value` list: `standalone` wraps the fragment
 in a full document (the download), `editable` adds `data-md-line` and live
-checkboxes (the preview only — never a download).
+checkboxes (the preview only — never a download), and `theme` fixes the initial
+standalone colour scheme to `light` or `dark` (`system` leaves it automatic).
+
+`md2pdf mcp --root PATH` is a newline-delimited JSON-RPC stdio server. It keeps
+the wire isolated by running normal renders as captured child CLI processes,
+restricts file paths to the configured root, and exposes the canonical syntax
+and example documents as fixed resources.
 
 ## Line origins
 

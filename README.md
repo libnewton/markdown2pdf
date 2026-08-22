@@ -72,6 +72,8 @@ and, to rebuild the engine, Rust with the `wasm32-unknown-unknown` target
 python3 bin/md2pdf tests/sample.md             # → tests/sample.pdf
 python3 bin/md2pdf tests/sample.md out.html    # → HTML (the extension picks the format)
 ./bin/md2pdf --html tests/sample.md            # → tests/sample.html
+./bin/md2pdf --html-theme dark tests/sample.md out.html
+./bin/md2pdf mcp --root /path/to/workspace     # local stdio MCP server
 cd engine && cargo test                        # engine unit tests
 python3 tests/check_html.py out.html           # assert the rendered artefact
 ```
@@ -108,10 +110,17 @@ cover page (`cover-*`); opt-in inline BibTeX citations (`bibliography: inline`,
 `[@key]`, blue citation numerals, and `bibliography-style`, default `ieee`);
 DIN 5008 letter mode (`letter-*` fields);
 `[toc]` → `#outline()`; `hide-toc-button: true` to drop the HTML outline
-drawer without touching an explicit `[toc]`.
+drawer without touching an explicit `[toc]`; automatic heading jump links and
+stable `## Heading {#custom-id}` anchors; a standalone HTML light/dark toggle,
+hidden with `hide-theme-toggle: true`.
 
-`<br>` is the only raw HTML tag either renderer honours — it is the one way to
-break a line inside a table cell. Everything else is shown as text.
+The MCP server exposes the file-only `render_file` tool plus
+`md2pdf://syntax` and `md2pdf://example` resources. Configure its command as
+the absolute path to `bin/md2pdf` with arguments `mcp --root <workspace>`.
+
+Every source newline is a visible line break in both outputs. `<br>` is the
+only raw HTML tag either renderer honours and is useful inside table cells;
+everything else is shown as text.
 
 ## Non-Latin scripts
 

@@ -452,6 +452,68 @@ const REST: &str = r#"}
 .md2pdf-cite { text-decoration: none; font-variant-numeric: tabular-nums; }
 .md2pdf-cite a { text-decoration: none; }
 
+.md2pdf-theme-toggle {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 3;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: 1px solid var(--md-rule);
+  border-radius: 50%;
+  background: var(--md-bg);
+  color: var(--md-muted);
+  box-shadow: var(--md-shadow);
+  cursor: pointer;
+}
+.md2pdf-theme-toggle:hover { color: var(--md-fg); }
+.md2pdf-theme-toggle:focus-visible { outline: 2px solid var(--md-accent); outline-offset: 2px; }
+.md2pdf-theme-moon, .md2pdf-theme-sun {
+  position: relative;
+  box-sizing: border-box;
+  width: 1rem;
+  height: 1rem;
+  margin: auto;
+}
+.md2pdf-theme-moon {
+  border: 1.6px solid currentColor;
+  border-radius: 50%;
+}
+.md2pdf-theme-moon::after {
+  content: "";
+  position: absolute;
+  width: .8rem;
+  height: .8rem;
+  left: .28rem;
+  top: -.12rem;
+  border-radius: 50%;
+  background: var(--md-bg);
+}
+.md2pdf-theme-sun {
+  width: .65rem;
+  height: .65rem;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+.md2pdf-theme-sun::before, .md2pdf-theme-sun::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.15rem;
+  height: 1.5px;
+  background: linear-gradient(to right, currentColor 0 .22rem, transparent .22rem .93rem, currentColor .93rem);
+  transform: translate(-50%, -50%);
+}
+.md2pdf-theme-sun::after { rotate: 90deg; }
+.md2pdf-theme-sun { display: none; }
+[data-theme="dark"] .md2pdf-theme-moon { display: none; }
+[data-theme="dark"] .md2pdf-theme-sun { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .md2pdf-theme-moon { display: none; }
+  :root:not([data-theme]) .md2pdf-theme-sun { display: block; }
+}
+
 /* ---- table of contents ------------------------------------------------ */
 
 .md2pdf-toc-state { position: absolute; opacity: 0; pointer-events: none; }
@@ -560,7 +622,8 @@ const REST: &str = r#"}
 }
 
 @media print {
-  .md2pdf-toc, .md2pdf-toc-btn, .md2pdf-toc-scrim, .md2pdf-copy { display: none !important; }
+  .md2pdf-toc, .md2pdf-toc-btn, .md2pdf-toc-scrim, .md2pdf-copy,
+  .md2pdf-theme-toggle { display: none !important; }
   .md2pdf { background: #fff; color: #000; }
   .md2pdf-doc { max-width: none; padding: 0; }
   .md2pdf-code, .md2pdf-adm, .md2pdf table { break-inside: avoid; }
@@ -592,6 +655,17 @@ pub(crate) const SCRIPT: &str = r#"
         btn.textContent = btn.dataset.done;
         setTimeout(function () { btn.textContent = was; }, 1200);
       });
+      return;
+    }
+
+    var theme = el.closest('.md2pdf-theme-toggle');
+    if (theme) {
+      var html = document.documentElement;
+      var current = html.dataset.theme;
+      if (current !== 'light' && current !== 'dark') {
+        current = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      html.dataset.theme = current === 'dark' ? 'light' : 'dark';
       return;
     }
 

@@ -141,8 +141,30 @@
     })()
   })
 
+  const PANE_WIDTH_KEY = 'md2pdf-pane-width'
+  const clampPaneWidth = (value: number) => Math.min(Math.max(value, 20), 80)
+
+  function initialPaneWidth() {
+    if (!browser) return 50
+    try {
+      const value = Number(localStorage.getItem(PANE_WIDTH_KEY))
+      return Number.isFinite(value) && value >= 20 && value <= 80 ? value : 50
+    } catch {
+      return 50
+    }
+  }
+
+  function storePaneWidth() {
+    if (!browser) return
+    try {
+      localStorage.setItem(PANE_WIDTH_KEY, String(leftPaneWidth))
+    } catch {
+      // A blocked preference store should not make the divider unusable.
+    }
+  }
+
   // Layout state
-  let leftPaneWidth = $state(50)
+  let leftPaneWidth = $state(initialPaneWidth())
   let isResizing = $state(false)
   let isDragging = $state(false)
 
@@ -231,7 +253,31 @@
   // Pageless HTML view. The engine renders it without a Typst compile, so it
   // updates on its own short debounce instead of the adaptive compile one.
   type PreviewMode = 'pages' | 'document'
-  let previewMode = $state<PreviewMode>('pages')
+  const PREVIEW_MODE_KEY = 'md2pdf-preview-mode'
+
+  function initialPreviewMode(): PreviewMode {
+    if (!browser) return 'pages'
+    try {
+      const stored = localStorage.getItem(PREVIEW_MODE_KEY)
+      if (stored === 'web') return 'document'
+      if (stored === 'pages') return 'pages'
+    } catch {
+      // A blocked preference store should not prevent either preview from working.
+    }
+    return 'pages'
+  }
+
+  function selectPreviewMode(next: PreviewMode) {
+    previewMode = next
+    if (!browser) return
+    try {
+      localStorage.setItem(PREVIEW_MODE_KEY, next === 'document' ? 'web' : 'pages')
+    } catch {
+      // A blocked preference store should not prevent either preview from working.
+    }
+  }
+
+  let previewMode = $state<PreviewMode>(initialPreviewMode())
   let htmlDoc = $state('')
   // Content the render had to degrade — an image it could not fetch, a diagram
   // it could not draw. The document still renders, which is why these would
@@ -241,6 +287,10 @@
   const unreachable = (url: string) => `could not fetch: ${url}`
   let htmlTimer: number | null = null
   const HTML_DEBOUNCE_MS = 120
+
+  $effect(() => {
+    if (previewMode === 'pages') isWarningsOpen = false
+  })
 
   // Auto-compile
   let compileSeq = 0
@@ -372,11 +422,11 @@
           return
         case '\\':
           claim()
-          if (viewMode !== 'view') previewMode = previewMode === 'pages' ? 'document' : 'pages'
+          if (viewMode !== 'view') selectPreviewMode(previewMode === 'pages' ? 'document' : 'pages')
           return
         case 'o':
           claim()
-          previewMode = 'document'
+          selectPreviewMode('document')
           htmlPreview?.toggleOutline()
           return
         case '/':
@@ -638,7 +688,13 @@
     editorPane?.flushPendingEdit()
     if (!client) return
     const md = markdown
-    const { html } = await client.renderHtml(md, imagesToSend(documentImages(md)), true)
+    const { html } = await client.renderHtml(
+      md,
+      imagesToSend(documentImages(md)),
+      true,
+      false,
+      settingsStore.theme,
+    )
     download(new Blob([html], { type: 'text/html;charset=utf-8' }), '.html')
   }
 
@@ -708,6 +764,7 @@
 
   function startResize(e: MouseEvent) {
     e.preventDefault()
+    pendingPaneWidth = leftPaneWidth
     isResizing = true
     document.addEventListener('mousemove', onResize)
     document.addEventListener('mouseup', stopResize)
@@ -735,6 +792,7 @@
       resizeRaf = null
       leftPaneWidth = pendingPaneWidth
     }
+    storePaneWidth()
     document.removeEventListener('mousemove', onResize)
     document.removeEventListener('mouseup', stopResize)
   }
@@ -752,7 +810,8 @@
     }[e.key]
     if (to === undefined) return
     e.preventDefault()
-    leftPaneWidth = Math.min(Math.max(to, 20), 80)
+    leftPaneWidth = clampPaneWidth(to)
+    storePaneWidth()
   }
 
   function hasFiles(e: DragEvent): boolean {
@@ -1211,7 +1270,7 @@
                 <button
                   class:active={previewMode === 'pages'}
                   aria-pressed={previewMode === 'pages'}
-                  onclick={() => (previewMode = 'pages')}
+                  onclick={() => selectPreviewMode('pages')}
                 >
                   Pages
                 </button>
@@ -1219,7 +1278,7 @@
                   class:active={previewMode === 'document'}
                   aria-pressed={previewMode === 'document'}
                   onclick={() => {
-                    previewMode = 'document'
+                    selectPreviewMode('document')
                     if (!htmlDoc) void renderHtml(markdown)
                   }}
                 >
@@ -1236,7 +1295,7 @@
               <div class="error-badge">
                 <span>⚠️ Failed</span>
               </div>
-            {:else if warnings.length > 0}
+            {:else if previewMode === 'document' && warnings.length > 0}
               <button
                 class="warning-badge"
                 onclick={() => (isWarningsOpen = !isWarningsOpen)}

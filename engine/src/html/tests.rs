@@ -468,8 +468,8 @@ fn inline_marks_map_to_semantic_elements() {
 }
 
 #[test]
-fn html_reflows_soft_breaks_but_keeps_hard_ones() {
-    assert_eq!(body("one\ntwo"), "<p>one two</p>");
+fn html_preserves_soft_and_hard_line_breaks() {
+    assert_eq!(body("one\ntwo"), "<p>one<br>two</p>");
     assert!(body("one  \ntwo").contains("one<br>two"));
 }
 
@@ -480,6 +480,40 @@ fn headings_get_stable_unique_ids_and_an_anchor() {
     assert!(out.contains("<h3 id=\"same-2\">"), "{out}");
     assert!(out.contains("id=\"ünï-cödé\""), "{out}");
     assert!(out.contains("<a class=\"md2pdf-anchor\" href=\"#same\""), "{out}");
+}
+
+#[test]
+fn headings_accept_invisible_custom_ids_and_disambiguate_duplicates() {
+    let out = body("## Visible {#overview}\n\n### Again {#overview}\n\n#### Plain {text}");
+    assert!(out.contains("<h2 id=\"overview\">"), "{out}");
+    assert!(out.contains("<h3 id=\"overview-2\">"), "{out}");
+    assert!(!out.contains("{#overview}"), "{out}");
+    assert!(out.contains("Plain {text}"), "{out}");
+}
+
+#[test]
+fn invalid_custom_ids_remain_visible() {
+    for heading in ["Bad {#two words}", "Bad {#-start}", "Bad {#md2pdf-root}"] {
+        assert!(body(&format!("## {heading}")).contains(heading), "{heading}");
+    }
+}
+
+#[test]
+fn standalone_theme_and_toggle_are_export_only() {
+    let fragment = render("## A", "theme=dark\n", "", b"");
+    assert!(!fragment.contains("md2pdf-theme-toggle\" type"), "{fragment}");
+    let exported = render("## A", "standalone=1\ntheme=dark\n", "", b"");
+    assert!(exported.contains("<html lang=\"en\" data-theme=\"dark\">"), "{exported}");
+    assert!(exported.contains("md2pdf-theme-toggle\" type"), "{exported}");
+    assert!(exported.contains("md2pdf-theme-moon"), "{exported}");
+    assert!(exported.contains("md2pdf-theme-sun"), "{exported}");
+    let hidden = render(
+        "---\nhide-theme-toggle: true\n---\n\n## A",
+        "standalone=1\ntheme=light\n",
+        "",
+        b"",
+    );
+    assert!(!hidden.contains("md2pdf-theme-toggle\" type"), "{hidden}");
 }
 
 #[test]

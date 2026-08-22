@@ -101,9 +101,18 @@ export class TypstWorkerClient {
 		images: Record<string, Uint8Array<ArrayBuffer>> = {},
 		standalone = false,
 		editable = false,
+		theme: 'system' | 'light' | 'dark' = 'system',
 	): Promise<{ html: string; diagnostics: string[] }> {
 		const id = this.#nextId();
-		const request: HtmlRequest = { type: 'html', id, markdown, images, standalone, editable };
+		const request: HtmlRequest = {
+			type: 'html',
+			id,
+			markdown,
+			images,
+			standalone,
+			editable,
+			theme,
+		};
 		return new Promise<CompileResult>((resolve, reject) => {
 			this.#pending.set(id, { resolve, reject });
 			this.#worker.postMessage(request);

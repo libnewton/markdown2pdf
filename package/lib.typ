@@ -18,6 +18,10 @@
 
 // Helpers handed to the engine output via `eval` scope.
 #let _md-math(display, src) = if display { mitex(src) } else { mi(src) }
+#let _md-jump(id, body) = context {
+  let targets = query(label(id))
+  if targets.len() > 0 { link(targets.first().location(), body) } else { body }
+}
 #let _md-mermaid(code) = mermaid(code)
 // Typst accepts one label per cite, so adjacent IEEE cites own separate
 // brackets. Keep CSL's numbering and punctuation, but let Markdown own these.
@@ -232,11 +236,14 @@
 // a package resolves against the package root, not the document root, exactly
 // like `asset` in `prepare()`. It should return `none` for a path it cannot
 // read, so a missing image does not fail the whole document.
-#let prepare-html(markdown, read-asset: p => none, standalone: true) = {
+#let prepare-html(markdown, read-asset: p => none, standalone: true, theme: "system") = {
   let assets = _html-assets(markdown, read-asset)
   str(_engine.render_html(
     bytes(markdown),
-    bytes("standalone=" + if standalone { "1" } else { "0" }),
+    bytes(
+      "standalone=" + if standalone { "1" } else { "0" }
+        + "\ntheme=" + theme,
+    ),
     bytes(assets.manifest),
     assets.blob,
   ))
@@ -322,6 +329,7 @@
         spoiler: spoiler,
         task-item: task-item,
         md-math: _md-math,
+        md-jump: _md-jump,
         md-mermaid: _md-mermaid,
         md-cite-group: _md-cite-group,
         twemoji: _twemoji,

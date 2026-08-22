@@ -10,6 +10,7 @@ mod html;
 use comrak::nodes::{AstNode, ListType, NodeValue, TableAlignment};
 use comrak::{parse_document, Arena, Options};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use unic_emoji_char::is_emoji;
 use wasm_minimal_protocol::*;
 
@@ -52,7 +53,7 @@ pub fn leading_h1(markdown: &[u8]) -> Result<Vec<u8>, String> {
     let root = parse_document(&arena, &pre.markdown, &build_options());
     let children: Vec<&AstNode> = root.children().collect();
     let text = match leading_h1_index(&children) {
-        Some(i) => plain_text(children[i]).trim().to_string(),
+        Some(i) => heading_parts(&plain_text(children[i])).0,
         None => String::new(),
     };
     Ok(text.into_bytes())
@@ -201,6 +202,22 @@ fn convert_str_aligned(
     alignment: Option<Alignment>,
     citations: bool,
 ) -> String {
+    convert_str_aligned_with(
+        src,
+        strip_h1,
+        alignment,
+        citations,
+        Rc::new(std::cell::RefCell::new(HashMap::new())),
+    )
+}
+
+fn convert_str_aligned_with(
+    src: &str,
+    strip_h1: bool,
+    alignment: Option<Alignment>,
+    citations: bool,
+    slugs: Rc<std::cell::RefCell<HashMap<String, usize>>>,
+) -> String {
     let citation_source = if citations {
         preprocess_citations(src)
     } else {
@@ -216,6 +233,7 @@ fn convert_str_aligned(
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
         rendering_notes: std::cell::RefCell::new(HashSet::new()),
+        slugs,
         alignment,
         citations,
     };
@@ -913,6 +931,8 @@ struct Ctx<'a> {
     /// Footnotes currently being rendered. A note that references itself would
     /// otherwise recurse until the plugin's stack is exhausted.
     rendering_notes: std::cell::RefCell<HashSet<String>>,
+    /// Heading ids already emitted, for stable duplicate suffixes.
+    slugs: Rc<std::cell::RefCell<HashMap<String, usize>>>,
     alignment: Option<Alignment>,
     citations: bool,
 }
@@ -950,7 +970,14 @@ impl<'a> Ctx<'a> {
             NodeValue::Document => self.render_block_children(node),
             NodeValue::Heading(h) => {
                 let level = h.level.clamp(1, 6) as usize;
-                format!("{} {}", "=".repeat(level), self.render_inlines(node))
+                let (text, custom) = heading_parts(&plain_text(node));
+                let id = unique_heading_id(&mut self.slugs.borrow_mut(), &text, custom.as_deref());
+                format!(
+                    "{} {} <{}>",
+                    "=".repeat(level),
+                    self.render_heading_inlines(node),
+                    id
+                )
             }
             NodeValue::Paragraph => self.render_paragraph(node),
             NodeValue::ThematicBreak => "#line(length: 100%, stroke: 0.6pt)".to_string(),
@@ -1006,7 +1033,13 @@ impl<'a> Ctx<'a> {
             // Layout directives render to plain Typst primitives.
             "left" | "center" | "right" => {
                 let alignment = Alignment::from_kind(&a.kind).unwrap();
-                let inner = convert_str_aligned(&a.source, false, Some(alignment), self.citations);
+                let inner = convert_str_aligned_with(
+                    &a.source,
+                    false,
+                    Some(alignment),
+                    self.citations,
+                    self.slugs.clone(),
+                );
                 if inner.trim().is_empty() {
                     String::new()
                 } else {
@@ -1017,10 +1050,16 @@ impl<'a> Ctx<'a> {
                     )
                 }
             }
-            "row" => render_row(&a.source, self.alignment, self.citations),
+            "row" => render_row(&a.source, self.alignment, self.citations, self.slugs.clone()),
             // Styled callout box.
             _ => {
-                let inner = convert_str_aligned(&a.source, false, self.alignment, self.citations);
+                let inner = convert_str_aligned_with(
+                    &a.source,
+                    false,
+                    self.alignment,
+                    self.citations,
+                    self.slugs.clone(),
+                );
                 let title = if a.title.is_empty() {
                     String::new()
                 } else {
@@ -1041,7 +1080,13 @@ impl<'a> Ctx<'a> {
             Some(s) => s,
             None => return String::new(),
         };
-        let inner = convert_str_aligned(&s.source, false, self.alignment, self.citations);
+        let inner = convert_str_aligned_with(
+            &s.source,
+            false,
+            self.alignment,
+            self.citations,
+            self.slugs.clone(),
+        );
         format!(
             "#spoiler(summary: \"{}\")[\n{}\n]",
             esc_string(&s.summary),
@@ -1217,6 +1262,25 @@ impl<'a> Ctx<'a> {
         node.children().map(|c| self.render_inline(c)).collect()
     }
 
+    fn render_heading_inlines(&self, node: &'a AstNode<'a>) -> String {
+        let children: Vec<&AstNode> = node.children().collect();
+        children
+            .iter()
+            .enumerate()
+            .map(|(i, child)| {
+                if i + 1 == children.len() {
+                    if let NodeValue::Text(text) = &child.data.borrow().value {
+                        let (visible, custom) = heading_parts(text);
+                        if custom.is_some() {
+                            return render_text(&visible, self.citations);
+                        }
+                    }
+                }
+                self.render_inline(child)
+            })
+            .collect()
+    }
+
     fn render_inline(&self, node: &'a AstNode<'a>) -> String {
         let value = node.data.borrow().value.clone();
         match value {
@@ -1280,7 +1344,12 @@ impl<'a> Ctx<'a> {
 }
 
 /// Render a `:::row` block: each top-level child block becomes a grid column.
-fn render_row(source: &str, alignment: Option<Alignment>, citations: bool) -> String {
+fn render_row(
+    source: &str,
+    alignment: Option<Alignment>,
+    citations: bool,
+    slugs: Rc<std::cell::RefCell<HashMap<String, usize>>>,
+) -> String {
     if source.trim().is_empty() {
         return String::new();
     }
@@ -1294,6 +1363,7 @@ fn render_row(source: &str, alignment: Option<Alignment>, citations: bool) -> St
         table_widths: pre.table_widths,
         pending_widths: std::cell::Cell::new(None),
         rendering_notes: std::cell::RefCell::new(HashSet::new()),
+        slugs,
         alignment,
         citations,
     };
@@ -1518,6 +1588,60 @@ fn render_math(display: bool, latex: &str, alignment: Alignment) -> String {
     }
 }
 
+pub(crate) fn heading_parts(text: &str) -> (String, Option<String>) {
+    let trimmed = text.trim();
+    let Some(open) = trimmed.rfind(" {#") else {
+        return (trimmed.to_string(), None);
+    };
+    if !trimmed.ends_with('}') {
+        return (trimmed.to_string(), None);
+    }
+    let id = &trimmed[open + 3..trimmed.len() - 1];
+    let mut chars = id.chars();
+    let valid = chars.next().is_some_and(char::is_alphanumeric)
+        && chars.all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+        && !id.to_ascii_lowercase().starts_with("md2pdf-");
+    if !valid {
+        return (trimmed.to_string(), None);
+    }
+    (trimmed[..open].trim_end().to_string(), Some(id.to_string()))
+}
+
+pub(crate) fn unique_heading_id(
+    slugs: &mut HashMap<String, usize>,
+    text: &str,
+    custom: Option<&str>,
+) -> String {
+    let mut base = custom.map(str::to_string).unwrap_or_else(|| {
+        text.chars()
+            .flat_map(|c| {
+                if c.is_alphanumeric() {
+                    c.to_lowercase().collect::<Vec<_>>()
+                } else {
+                    vec!['-']
+                }
+            })
+            .collect::<String>()
+            .split('-')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("-")
+    });
+    while let Some(rest) = base.strip_prefix("md2pdf-") {
+        base = rest.to_string();
+    }
+    if base.is_empty() {
+        base = "section".to_string();
+    }
+    let n = slugs.entry(base.clone()).or_insert(0);
+    *n += 1;
+    if *n == 1 {
+        base
+    } else {
+        format!("{base}-{n}")
+    }
+}
+
 /// Reject schemes that execute. Relative paths and fragments pass through.
 ///
 /// An allowlist, not a blocklist: comrak has already decoded entities in the
@@ -1551,6 +1675,9 @@ fn render_link(url: &str, label: &str) -> String {
     // into an `<a>` in the preview SVG, which the editor adopts into the page
     // itself — so `javascript:` must not reach either.
     match safe_url(url) {
+        Some(href) if href.starts_with('#') && href.len() > 1 => {
+            format!("#md-jump(\"{}\")[{}]", esc_string(&href[1..]), label)
+        }
         Some(href) => format!("#link(\"{}\")[{}]", esc_string(href), label),
         None => label,
     }
@@ -1993,7 +2120,10 @@ mod tests {
         for url in ["https://e.com/x", "mailto:a@e.com", "./rel.md", "#frag"] {
             assert!(safe_url(url).is_some(), "{url} was refused");
             let out = convert_str(&format!("[label]({url})"), false);
-            assert!(out.contains("#link("), "{url} lost its link:\n{out}");
+            assert!(
+                out.contains("#link(") || out.contains("#md-jump("),
+                "{url} lost its link:\n{out}"
+            );
         }
     }
 
@@ -2010,6 +2140,32 @@ mod tests {
                 "URL label can be reparsed as a nested Typst autolink"
             );
         }
+    }
+
+    #[test]
+    fn headings_and_fragment_links_share_ids() {
+        let out = convert_str(
+            "[forward](#overview)\n\n## Visible {#overview}\n\n### Visible {#overview}",
+            false,
+        );
+        assert!(out.contains("#md-jump(\"overview\")[forward]"), "{out}");
+        assert!(out.contains("== Visible <overview>"), "{out}");
+        assert!(out.contains("=== Visible <overview-2>"), "{out}");
+        assert!(!out.contains("{#overview}"), "{out}");
+    }
+
+    #[test]
+    fn invalid_heading_ids_stay_visible() {
+        for heading in ["Bad {#two words}", "Bad {#-start}", "Bad {#md2pdf-root}"] {
+            let out = convert_str(&format!("## {heading}"), false);
+            assert!(out.contains("Bad {\\#"), "{out}");
+        }
+    }
+
+    #[test]
+    fn the_pdf_style_breaks_tables_only_between_rows() {
+        let style = include_str!("../../package/styles/modern-tech.typ");
+        assert!(style.contains("set table.cell(breakable: false)"));
     }
 
     /// A URL reaches Typst inside a string literal, and Typst can `read()`.

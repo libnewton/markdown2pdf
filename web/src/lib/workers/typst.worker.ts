@@ -350,6 +350,7 @@ async function renderHtml(
 	standalone: boolean,
 	id = '',
 	editable = false,
+	theme: 'system' | 'light' | 'dark' = 'system',
 ): Promise<{ html: string; diagnostics: string[] }> {
 	const superseded = () => !standalone && id !== '' && id !== latestHtmlId;
 	const engine = await getEngine();
@@ -407,7 +408,7 @@ async function renderHtml(
 		engine(
 			'render_html',
 			md,
-			encode(`standalone=${standalone ? 1 : 0}\neditable=${editable ? 1 : 0}`),
+			encode(`standalone=${standalone ? 1 : 0}\neditable=${editable ? 1 : 0}\ntheme=${theme}`),
 			encode(manifest),
 			blob,
 		),
@@ -415,7 +416,7 @@ async function renderHtml(
 	// The engine shows a formula it cannot render as its own source. That is
 	// legible but easy to scroll past, and it is the one place the web preview
 	// is allowed to differ from the PDF — so it is worth naming.
-	const badMath = html.match(/md2pdf-math-error/g)?.length ?? 0;
+	const badMath = html.match(/<code class="md2pdf-math-error"/g)?.length ?? 0;
 	if (badMath > 0) {
 		diagnostics.push(
 			`${badMath} formula(s) could not be rendered here — showing the LaTeX instead`,
@@ -545,7 +546,13 @@ ctx.onmessage = (event: MessageEvent<CompileRequest | HtmlRequest | CancelReques
 		// render is one of a stream, so the newest wins and the rest can stop
 		// as soon as they notice — before paying for diagrams and fonts.
 		if (!message.standalone) latestHtmlId = message.id;
-		renderHtml(message.markdown, message.standalone ?? false, message.id, message.editable ?? false)
+		renderHtml(
+			message.markdown,
+			message.standalone ?? false,
+			message.id,
+			message.editable ?? false,
+			message.theme ?? 'system',
+		)
 			.then(({ html, diagnostics }) =>
 				ctx.postMessage({
 					type: 'compile-result',

@@ -84,6 +84,112 @@ test('the exported document keeps its checkboxes inert', async ({ page }) => {
 	expect(html).not.toContain('data-md-line');
 });
 
+test('the divider restores mouse and keyboard widths after reload', async ({ page }) => {
+	const divider = page.getByRole('separator', { name: 'Editor width' });
+	const box = (await divider.boundingBox())!;
+	const viewport = page.viewportSize()!;
+	await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+	await page.mouse.down();
+	await page.mouse.move(viewport.width * 0.64, box.y + box.height / 2);
+	await page.mouse.up();
+	await expect
+		.poll(() => page.evaluate(() => localStorage.getItem('md2pdf-pane-width')))
+		.not.toBeNull();
+	await page.reload();
+	await expect(page.getByRole('separator', { name: 'Editor width' })).toHaveAttribute(
+		'aria-valuenow',
+		/6[0-8]/,
+	);
+
+	await page.getByRole('separator', { name: 'Editor width' }).press('End');
+	await expect
+		.poll(() => page.evaluate(() => localStorage.getItem('md2pdf-pane-width')))
+		.toBe('80');
+	await page.reload();
+	await expect(page.getByRole('separator', { name: 'Editor width' })).toHaveAttribute(
+		'aria-valuenow',
+		'80',
+	);
+});
+
+test('a malformed stored divider width falls back to half', async ({ page }) => {
+	await page.evaluate(() => localStorage.setItem('md2pdf-pane-width', 'not-a-number'));
+	await page.reload();
+	await expect(page.getByRole('separator', { name: 'Editor width' })).toHaveAttribute(
+		'aria-valuenow',
+		'50',
+	);
+});
+
+test('the selected preview mode survives reloads', async ({ page }) => {
+	await page.getByRole('button', { name: 'Pages', exact: true }).click();
+	await expect
+		.poll(() => page.evaluate(() => localStorage.getItem('md2pdf-preview-mode')))
+		.toBe('pages');
+	await page.reload();
+	await expect(page.getByRole('button', { name: 'Pages', exact: true })).toHaveAttribute(
+		'aria-pressed',
+		'true',
+	);
+
+	await page.getByRole('button', { name: 'Web', exact: true }).click();
+	await expect
+		.poll(() => page.evaluate(() => localStorage.getItem('md2pdf-preview-mode')))
+		.toBe('web');
+	await page.reload();
+	await expect(page.getByRole('button', { name: 'Web', exact: true })).toHaveAttribute(
+		'aria-pressed',
+		'true',
+	);
+});
+
+test('an invalid stored preview mode falls back to Pages', async ({ page }) => {
+	await page.evaluate(() => localStorage.setItem('md2pdf-preview-mode', 'invalid'));
+	await page.reload();
+	await expect(page.getByRole('button', { name: 'Pages', exact: true })).toHaveAttribute(
+		'aria-pressed',
+		'true',
+	);
+});
+
+test('Web warnings are scoped to the Web preview', async ({ page }) => {
+	await type(page, '$\\rule{1em}{1pt}$\n', '');
+	await expect(page.locator('.warning-badge')).toBeVisible();
+	await page.getByRole('button', { name: 'Pages', exact: true }).click();
+	await expect(page.locator('.warning-badge')).toBeHidden();
+	await page.getByRole('button', { name: 'Web', exact: true }).click();
+	await expect(page.locator('.warning-badge')).toBeVisible();
+});
+
+test('plain Web documents have no formula warning', async ({ page }) => {
+	await type(page, 'No formulas here.\nStill no formulas.\n', 'No formulas');
+	await expect(page.locator('.warning-badge')).toBeHidden();
+});
+
+test('HTML export captures the selected theme and owns the only theme toggle', async ({ page }) => {
+	await type(page, '## Theme export\n', 'Theme export');
+	const current = await page.evaluate(() => document.documentElement.dataset.theme);
+	if (current !== 'dark') await page.getByRole('button', { name: 'Switch to dark' }).click();
+	const previewToggle = await page.evaluate(
+		() =>
+			document.querySelector('.html-preview')?.shadowRoot?.querySelectorAll('.md2pdf-theme-toggle')
+				.length ?? -1,
+	);
+	expect(previewToggle).toBe(0);
+
+	const download = page.waitForEvent('download');
+	await page.getByRole('button', { name: 'Export' }).click();
+	await page.getByRole('button', { name: /HTML/ }).click();
+	const stream = await (await download).createReadStream();
+	const html = await new Promise<string>((resolve) => {
+		let out = '';
+		stream.on('data', (chunk) => (out += chunk));
+		stream.on('end', () => resolve(out));
+	});
+	expect(html).toContain('<html lang="en" data-theme="dark">');
+	expect(html).toContain('class="md2pdf-theme-toggle"');
+});
+
 test('outline navigation reaches the URL', async ({ page }) => {
 	// Two headings *in the body*: a leading H1 with no frontmatter title
 	// becomes the title and leaves, and the drawer needs two to appear.

@@ -40,10 +40,15 @@ PLACEHOLDER = b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></s
 MAIN_TEMPLATE = """#import "@local/md2pdf:0.1.0": prepare, prepare-html
 #let _src = read("{docname}")
 #let _html = sys.inputs.at("md2pdf-target", default: "") == "html"
+#let _html-theme = sys.inputs.at("md2pdf-html-theme", default: "system")
 #let _d = prepare(_src, asset: (p, ..a) => image(p, ..a))
 #metadata(_d.remotes) <md2pdf-remote-images>
 #if _html [
-  #metadata(prepare-html(_src, read-asset: p => read(p, encoding: none))) <md2pdf-html>
+  #metadata(prepare-html(
+    _src,
+    read-asset: p => read(p, encoding: none),
+    theme: _html-theme,
+  )) <md2pdf-html>
 ] else if not _d.skip {{
   show: _d.template
   eval(_d.body, mode: "markup", scope: _d.scope)
@@ -288,6 +293,10 @@ def parse_args(argv):
         "--no-system-fonts", dest="system_fonts", action="store_false",
         help="use only the bundled fonts, for output that cannot vary by machine",
     )
+    p.add_argument(
+        "--html-theme", choices=("system", "light", "dark"), default="system",
+        help="initial standalone HTML theme, default system",
+    )
     args = p.parse_args(argv)
 
     if not args.input.is_file():
@@ -301,8 +310,234 @@ def parse_args(argv):
     return args
 
 
+MCP_VERSION = "2026-07-28"
+MCP_LEGACY_VERSION = "2025-06-18"
+MCP_INFO = {"name": "md2pdf", "version": "0.1.0"}
+MCP_INSTRUCTIONS = (
+    "md2pdf extends CommonMark with preserved source line breaks, width-marked tables, "
+    "admonitions, layout blocks, spoilers, math, Mermaid, page controls, citations, "
+    "custom heading anchors, and YAML frontmatter. Read md2pdf://syntax before editing "
+    "a document, then use render_file on a file below the configured root."
+)
+
+
+def mcp_result(request_id, result, modern=False):
+    if modern:
+        result.setdefault("resultType", "complete")
+        result.setdefault("_meta", {})["io.modelcontextprotocol/serverInfo"] = MCP_INFO
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+
+
+def mcp_error(request_id, code, message, modern=False):
+    response = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {"code": code, "message": message},
+    }
+    if modern:
+        response["error"]["data"] = {
+            "_meta": {"io.modelcontextprotocol/serverInfo": MCP_INFO}
+        }
+    return response
+
+
+def mcp_cache(result, modern):
+    if modern:
+        result.update({"ttlMs": 3600000, "cacheScope": "public"})
+    return result
+
+
+def mcp_tools():
+    return [
+        {
+            "name": "render_file",
+            "description": (
+                "Render an existing md2pdf Markdown file to PDF or standalone HTML. "
+                "Read md2pdf://syntax before authoring: md2pdf syntax intentionally "
+                "differs from ordinary Markdown. The output file is overwritten if it exists."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "input_path": {"type": "string", "description": "Markdown path below the server root."},
+                    "output_path": {"type": "string", "description": "Optional output path below the server root."},
+                    "format": {"type": "string", "enum": ["pdf", "html"]},
+                    "html_theme": {
+                        "type": "string",
+                        "enum": ["system", "light", "dark"],
+                        "default": "system",
+                    },
+                },
+                "required": ["input_path"],
+                "additionalProperties": False,
+            },
+            "outputSchema": {
+                "type": "object",
+                "properties": {
+                    "output_path": {"type": "string"},
+                    "format": {"type": "string"},
+                    "mime_type": {"type": "string"},
+                    "warnings": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["output_path", "format", "mime_type", "warnings"],
+            },
+        }
+    ]
+
+
+def mcp_path(root, value, must_exist=False):
+    path = Path(value)
+    if not path.is_absolute():
+        path = root / path
+    path = path.resolve(strict=must_exist)
+    if path != root and root not in path.parents:
+        raise ValueError("path is outside the configured root")
+    return path
+
+
+def mcp_render(root, arguments):
+    source = mcp_path(root, arguments.get("input_path", ""), must_exist=True)
+    if not source.is_file():
+        raise ValueError("input_path is not a file")
+    output_value = arguments.get("output_path")
+    fmt = arguments.get("format")
+    if fmt not in (None, "pdf", "html"):
+        raise ValueError("format must be pdf or html")
+    if fmt is None and output_value:
+        fmt = "html" if Path(output_value).suffix.lower() in (".html", ".htm") else "pdf"
+    fmt = fmt or "pdf"
+    output = mcp_path(root, output_value or str(source.with_suffix("." + fmt)))
+    if output == source:
+        raise ValueError("input and output paths must differ")
+    theme = arguments.get("html_theme", "system")
+    if theme not in ("system", "light", "dark"):
+        raise ValueError("html_theme must be system, light, or dark")
+
+    cmd = [sys.executable, str(Path(__file__).resolve())]
+    cmd.append("--html" if fmt == "html" else "--pdf")
+    if fmt == "html":
+        cmd.extend(["--html-theme", theme])
+    cmd.extend([str(source), str(output)])
+    done = subprocess.run(cmd, capture_output=True, text=True)
+    if done.returncode != 0:
+        message = done.stderr.strip() or done.stdout.strip() or "render failed"
+        raise RuntimeError(message)
+    warnings = [
+        line.split("WARN ", 1)[1]
+        for line in done.stderr.splitlines()
+        if "WARN " in line
+    ]
+    mime = "text/html" if fmt == "html" else "application/pdf"
+    return {
+        "output_path": str(output),
+        "format": fmt,
+        "mime_type": mime,
+        "warnings": warnings,
+    }
+
+
+def mcp_dispatch(message, root, modern):
+    request_id = message.get("id")
+    method = message.get("method")
+    params = message.get("params") or {}
+    if method == "server/discover":
+        result = {
+            "supportedVersions": [MCP_VERSION],
+            "capabilities": {"tools": {}, "resources": {}},
+            "instructions": MCP_INSTRUCTIONS,
+            "ttlMs": 3600000,
+            "cacheScope": "public",
+        }
+        return mcp_result(request_id, result, True), True
+    if method == "initialize":
+        result = {
+            "protocolVersion": params.get("protocolVersion", MCP_LEGACY_VERSION),
+            "capabilities": {"tools": {}, "resources": {}},
+            "serverInfo": MCP_INFO,
+            "instructions": MCP_INSTRUCTIONS,
+        }
+        return mcp_result(request_id, result), False
+    if method in ("notifications/initialized", "notifications/cancelled"):
+        return None, modern
+    if method == "ping":
+        return mcp_result(request_id, {}, modern), modern
+    if method == "tools/list":
+        return mcp_result(request_id, mcp_cache({"tools": mcp_tools()}, modern), modern), modern
+    if method == "resources/list":
+        resources = [
+            {
+                "uri": "md2pdf://syntax",
+                "name": "md2pdf syntax reference",
+                "description": "Complete authoring syntax and frontmatter reference.",
+                "mimeType": "text/markdown",
+            },
+            {
+                "uri": "md2pdf://example",
+                "name": "md2pdf feature example",
+                "description": "A document demonstrating every supported feature.",
+                "mimeType": "text/markdown",
+            },
+        ]
+        return mcp_result(
+            request_id,
+            mcp_cache({"resources": resources}, modern),
+            modern,
+        ), modern
+    if method == "resources/read":
+        uri = params.get("uri")
+        paths = {
+            "md2pdf://syntax": Path(__file__).resolve().parent.parent / "docs" / "SYNTAX.md",
+            "md2pdf://example": Path(__file__).resolve().parent.parent / "tests" / "extended.md",
+        }
+        if uri not in paths:
+            return mcp_error(request_id, -32602, "unknown resource", modern), modern
+        text_value = paths[uri].read_text(encoding="utf-8")
+        result = {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": text_value}]}
+        return mcp_result(request_id, mcp_cache(result, modern), modern), modern
+    if method == "tools/call":
+        if params.get("name") != "render_file":
+            return mcp_error(request_id, -32602, "unknown tool", modern), modern
+        try:
+            rendered = mcp_render(root, params.get("arguments") or {})
+            result = {
+                "content": [{"type": "text", "text": json.dumps(rendered, ensure_ascii=False)}],
+                "structuredContent": rendered,
+                "isError": False,
+            }
+        except (OSError, ValueError, RuntimeError) as error:
+            result = {
+                "content": [{"type": "text", "text": str(error)}],
+                "isError": True,
+            }
+        return mcp_result(request_id, result, modern), modern
+    return mcp_error(request_id, -32601, "method not found", modern), modern
+
+
+def mcp_main(argv):
+    parser = argparse.ArgumentParser(prog="md2pdf mcp", description="Run the local md2pdf MCP server.")
+    parser.add_argument("--root", type=Path, default=Path.cwd())
+    args = parser.parse_args(argv)
+    root = args.root.resolve(strict=True)
+    if not root.is_dir():
+        parser.error("--root must be a directory")
+    modern = False
+    for line in sys.stdin:
+        try:
+            message = json.loads(line)
+            response, modern = mcp_dispatch(message, root, modern)
+        except (json.JSONDecodeError, TypeError, AttributeError) as error:
+            response = mcp_error(None, -32700, str(error), modern)
+        if response is not None:
+            sys.stdout.write(json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n")
+            sys.stdout.flush()
+    return 0
+
+
 def main(argv=None):
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    raw = sys.argv[1:] if argv is None else argv
+    if raw and raw[0] == "mcp":
+        return mcp_main(raw[1:])
+    args = parse_args(raw)
     exe = find_typst()
 
     # `Path.resolve()` walks the symlink chain, so the fonts are found even when
@@ -341,7 +576,12 @@ def main(argv=None):
                 exe,
                 "query(<md2pdf-html>).first().value",
                 main_typ, docdir, fonts,
-                {"md2pdf-query": "1", "md2pdf-target": "html"}, args.system_fonts,
+                {
+                    "md2pdf-query": "1",
+                    "md2pdf-target": "html",
+                    "md2pdf-html-theme": args.html_theme,
+                },
+                args.system_fonts,
             )
             if err or not isinstance(html, str):
                 die("HTML render failed:\n%s" % (err or "unexpected result"))

@@ -16,9 +16,9 @@ mod math;
 mod tokens;
 
 use crate::{
-    build_options, hash_url, is_remote, leading_h1_index, match_emoji,
+    build_options, hash_url, heading_parts, is_remote, leading_h1_index, match_emoji,
     parse_dims, parse_placeholder, plain_text, preprocess, preprocess_citations, safe_url,
-    split_inline_bibliography, task_checked, Admonition, Preprocessed, Spoiler,
+    split_inline_bibliography, task_checked, unique_heading_id, Admonition, Preprocessed, Spoiler,
     CITATION_CLOSE_TOKEN, CITATION_OPEN_TOKEN,
 };
 use assets::Assets;
@@ -81,6 +81,11 @@ pub(crate) fn mermaid_key(code: &str) -> String {
 pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> String {
     let flag = |key| option(options, key).is_some_and(|v| v != "0" && !v.is_empty());
     let standalone = flag("standalone");
+    let theme = match option(options, "theme") {
+        Some("light") => Some("light"),
+        Some("dark") => Some("dark"),
+        _ => None,
+    };
     // The render is backed by a source the reader can edit: blocks carry the
     // line they came from, and task checkboxes are live. A download has no
     // source to point at, so it never sets this.
@@ -131,6 +136,11 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     } else {
         toc(&doc.headings, doc.german)
     };
+    let theme_toggle = if standalone && !fm.flag("hide-theme-toggle") {
+        theme_toggle(doc.german)
+    } else {
+        String::new()
+    };
     let main = main.replace(TOC_SLOT, &inline_toc(&doc.headings));
 
     let lang = fm.first("lang").unwrap_or(if doc.german { "de" } else { "en" });
@@ -147,13 +157,18 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     let fragment = format!(
         "<style>{fonts}{style}</style>\
          <div class=\"md2pdf\" id=\"md2pdf-root\" lang=\"{lang}\">\
-         {outline}<main class=\"md2pdf-doc\">{main}</main></div>{script}",
+         {outline}{theme_toggle}<main class=\"md2pdf-doc\">{main}</main></div>{script}",
         fonts = math_font_faces(&doc, &main),
         style = css::style(),
         lang = esc_attr(lang),
     );
     if standalone {
-        document(&fragment, &esc_attr(lang), title.as_deref().unwrap_or("Document"))
+        document(
+            &fragment,
+            &esc_attr(lang),
+            title.as_deref().unwrap_or("Document"),
+            theme,
+        )
     } else {
         fragment
     }
@@ -188,9 +203,10 @@ fn math_font_faces(doc: &Doc, markup: &str) -> String {
     out
 }
 
-fn document(fragment: &str, lang: &str, title: &str) -> String {
+fn document(fragment: &str, lang: &str, title: &str, theme: Option<&str>) -> String {
+    let theme = theme.map(|t| format!(" data-theme=\"{t}\"")).unwrap_or_default();
     format!(
-        "<!doctype html>\n<html lang=\"{lang}\">\n<head>\n\
+        "<!doctype html>\n<html lang=\"{lang}\"{theme}>\n<head>\n\
          <meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
          <meta name=\"generator\" content=\"md2pdf\">\n\
@@ -198,6 +214,16 @@ fn document(fragment: &str, lang: &str, title: &str) -> String {
          <style>html,body{{margin:0;padding:0;background:var(--md-bg);}}</style>\n\
          </head>\n<body>{fragment}</body>\n</html>\n",
         title = esc_text(title)
+    )
+}
+
+fn theme_toggle(german: bool) -> String {
+    let label = if german { "Farbschema wechseln" } else { "Toggle color theme" };
+    format!(
+        "<button class=\"md2pdf-theme-toggle\" type=\"button\" aria-label=\"{label}\" \
+         title=\"{label}\"><span class=\"md2pdf-theme-moon\" aria-hidden=\"true\"></span>\
+         <span class=\"md2pdf-theme-sun\" aria-hidden=\"true\"></span>\
+         <span class=\"md2pdf-sr\">{label}</span></button>"
     )
 }
 
@@ -279,7 +305,7 @@ fn leading_h1_text(src: &str) -> Option<String> {
     let arena = Arena::new();
     let root = parse_document(&arena, &pre.markdown, &build_options());
     let children: Vec<&AstNode> = root.children().collect();
-    let text = plain_text(children[leading_h1_index(&children)?]).trim().to_string();
+    let text = heading_parts(&plain_text(children[leading_h1_index(&children)?])).0;
     (!text.is_empty()).then_some(text)
 }
 
@@ -324,39 +350,8 @@ struct Doc {
 }
 
 impl Doc {
-    /// A unique `id` for a heading, derived from its text.
-    fn slug(&mut self, text: &str) -> String {
-        let mut base: String = text
-            .chars()
-            .flat_map(|c| {
-                if c.is_alphanumeric() {
-                    c.to_lowercase().collect::<Vec<_>>()
-                } else {
-                    vec!['-']
-                }
-            })
-            .collect::<String>()
-            .split('-')
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join("-");
-        // `md2pdf-` is the renderer's own namespace: the outline toggle, the
-        // root, the footnotes and the bibliography all live there. Dropping the
-        // prefix keeps the anchor readable while making a heading structurally
-        // unable to mint a second element with one of those ids.
-        while let Some(rest) = base.strip_prefix("md2pdf-") {
-            base = rest.to_string();
-        }
-        if base.is_empty() {
-            base = "section".to_string();
-        }
-        let n = self.slugs.entry(base.clone()).or_insert(0);
-        *n += 1;
-        if *n == 1 {
-            base
-        } else {
-            format!("{base}-{n}")
-        }
+    fn slug(&mut self, text: &str, custom: Option<&str>) -> String {
+        unique_heading_id(&mut self.slugs, text, custom)
     }
 
     fn cite_number(&mut self, key: &str) -> usize {
@@ -549,15 +544,34 @@ fn block<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
 }
 
 fn heading<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>, level: u8) -> String {
-    let text = plain_text(node).trim().to_string();
-    let id = doc.slug(&text);
-    let body = inlines(doc, f, node);
+    let (text, custom) = heading_parts(&plain_text(node));
+    let id = doc.slug(&text, custom.as_deref());
+    let body = heading_inlines(doc, f, node);
     doc.headings.push(Heading { level, id: id.clone(), text });
     format!(
         "<h{level} id=\"{id}\"><a class=\"md2pdf-anchor\" href=\"#{id}\" aria-hidden=\"true\" \
          tabindex=\"-1\">#</a>{body}</h{level}>",
         id = esc_attr(&id)
     )
+}
+
+fn heading_inlines<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
+    let children: Vec<&AstNode> = node.children().collect();
+    children
+        .iter()
+        .enumerate()
+        .map(|(i, child)| {
+            if i + 1 == children.len() {
+                if let NodeValue::Text(text) = &child.data.borrow().value {
+                    let (visible, custom) = heading_parts(text);
+                    if custom.is_some() {
+                        return text_run(doc, &visible);
+                    }
+                }
+            }
+            inline(doc, f, child)
+        })
+        .collect()
 }
 
 fn paragraph<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
@@ -830,8 +844,7 @@ fn inline<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
     let value = node.data.borrow().value.clone();
     match value {
         NodeValue::Text(t) => text_run(doc, &t),
-        // Unlike the PDF, HTML reflows: a source line wrap is just a space.
-        NodeValue::SoftBreak => " ".to_string(),
+        NodeValue::SoftBreak => "<br>".to_string(),
         NodeValue::LineBreak => "<br>".to_string(),
         NodeValue::Escaped => inlines(doc, f, node),
         NodeValue::Emph => format!("<em>{}</em>", inlines(doc, f, node)),

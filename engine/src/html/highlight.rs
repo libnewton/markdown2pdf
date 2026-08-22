@@ -1098,7 +1098,6 @@ mod tests {
     /// This is the correctness test and the injection guard at once: the only
     /// way markup reaches the output is if some lexer emits source it did not
     /// escape, and that shows up here as a mismatch.
-    #[test]
     fn highlighting_never_loses_source_text() {
         // Shapes chosen to leave a lexer mid-token: unterminated strings and
         // comments, delimiters inside literals, markup characters everywhere.

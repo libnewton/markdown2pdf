@@ -25,7 +25,7 @@ md2pdf turns Markdown into a typeset PDF, 100% in your browser. This document is
 
 [^demo]: Footnotes render as numbered notes at the foot of the page.
 
-Line breaks are kept: every newline in the source is a line break in the PDF. Write each paragraph as one long line — as this document does — and it is justified and wrapped for you; hard-wrap the source and those wraps show up in the output. A blank line starts a new paragraph; three or more blank lines leave extra vertical space.
+Line breaks are kept in PDF and HTML: every newline in the source is a visible line break. Write each paragraph as one long line — as this document does — and it is justified and wrapped for you; hard-wrap the source and those wraps show up in the output. A blank line starts a new paragraph; three or more blank lines leave extra vertical space.
 
 ---
 
@@ -82,6 +82,8 @@ The first `#` heading of a document becomes its title if the frontmatter has no 
 ## Tables
 
 Column alignment comes from the `:` markers in the separator row. A column grows by appending `+` to its separator cell: `---` is one share of the width, `---+` two, `---++` three.
+
+PDF tables may span as many pages as needed, but each row stays together and moves to the next page when it does not fit.
 
 | Feature       | Supported | Notes                                     |
 | ------------- | --------- | --------------------------------------++  |
@@ -276,6 +278,12 @@ Sequences are handled as one glyph — flags 🇩🇪 🇯🇵 and families 👨
 
 ## Links & references
 
+Every body heading gets an automatic Unicode-aware anchor. This section is reachable as [Links & references](#links-references). Add a stable invisible ID with `## Heading {#custom-id}`, then link to it with `[jump](#custom-id)`. A leading H1 promoted to the document title is not a body anchor.
+
+### Stable anchor example {#custom-id}
+
+The `{#custom-id}` suffix above is not printed, and [this link](#custom-id) returns to it.
+
 Inline: [md2pdf README](https://github.com/libnewton/markdown2pdf).
 
 Reference style: [SvelteKit][sk] and [Typst][typst] power the rendering.
@@ -326,6 +334,7 @@ Everything the document controls lives in the YAML block at the top. All keys ar
 | `date`                                       | text or a YAML date                           | none                |
 | `lang`                                       | `en`, `de`, `de-AT`, …                        | `en`                |
 | `hide-toc-button`                            | `true` to drop the HTML outline drawer        | `false`             |
+| `hide-theme-toggle`                          | `true` to drop the exported HTML theme toggle | `false`             |
 | `pageNumbers` or `page-numbers`              | `true`, `false`, `"1"`, `"1/1"`, or a template | `true`              |
 | `header-left` `header-center` `header-right` | text or an image                              | empty               |
 | `header-height`                              | positive `pt`, `mm`, `cm`, or `in` length     | automatic           |
