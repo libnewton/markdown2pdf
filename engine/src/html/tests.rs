@@ -507,6 +507,17 @@ fn standalone_theme_and_toggle_are_export_only() {
     assert!(exported.contains("md2pdf-theme-toggle\" type"), "{exported}");
     assert!(exported.contains("md2pdf-theme-moon"), "{exported}");
     assert!(exported.contains("md2pdf-theme-sun"), "{exported}");
+    assert!(
+        exported.contains(".md2pdf-theme-moon, .md2pdf-theme-sun {\n  display: block;"),
+        "{exported}"
+    );
+    let main_end = exported.find("</main>").expect("main");
+    let toggle = exported.find("md2pdf-theme-toggle\" type").expect("theme toggle");
+    assert!(toggle > main_end, "{exported}");
+    assert!(
+        exported.contains("@media (max-width: 640px) {\n  .md2pdf-theme-toggle {\n    position: static;"),
+        "{exported}"
+    );
     let hidden = render(
         "---\nhide-theme-toggle: true\n---\n\n## A",
         "standalone=1\ntheme=light\n",

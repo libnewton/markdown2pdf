@@ -157,7 +157,7 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     let fragment = format!(
         "<style>{fonts}{style}</style>\
          <div class=\"md2pdf\" id=\"md2pdf-root\" lang=\"{lang}\">\
-         {outline}{theme_toggle}<main class=\"md2pdf-doc\">{main}</main></div>{script}",
+         {outline}<main class=\"md2pdf-doc\">{main}</main>{theme_toggle}</div>{script}",
         fonts = math_font_faces(&doc, &main),
         style = css::style(),
         lang = esc_attr(lang),

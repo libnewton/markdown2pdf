@@ -469,6 +469,7 @@ const REST: &str = r#"}
 .md2pdf-theme-toggle:hover { color: var(--md-fg); }
 .md2pdf-theme-toggle:focus-visible { outline: 2px solid var(--md-accent); outline-offset: 2px; }
 .md2pdf-theme-moon, .md2pdf-theme-sun {
+  display: block;
   width: 1rem;
   height: 1rem;
   margin: auto;
@@ -490,6 +491,13 @@ const REST: &str = r#"}
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) .md2pdf-theme-moon { display: none; }
   :root:not([data-theme]) .md2pdf-theme-sun { display: block; }
+}
+@media (max-width: 640px) {
+  .md2pdf-theme-toggle {
+    position: static;
+    display: block;
+    margin: -3rem auto 2rem;
+  }
 }
 
 /* ---- table of contents ------------------------------------------------ */

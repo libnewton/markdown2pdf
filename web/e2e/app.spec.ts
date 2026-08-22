@@ -2,10 +2,16 @@ import { expect, test, type Page } from '@playwright/test';
 
 /** Text of the rendered document, which lives inside a shadow root. */
 const documentText = (page: Page) =>
-	page.evaluate(() => document.querySelector('.html-preview')?.shadowRoot?.textContent ?? '');
+	page
+		.locator('.html-preview .md2pdf-root')
+		.textContent()
+		.then((text) => text ?? '');
 
 const editorText = (page: Page) =>
-	page.evaluate(() => document.querySelector('.cm-content')?.textContent ?? '');
+	page
+		.locator('.cm-content')
+		.textContent()
+		.then((text) => text ?? '');
 
 /**
  * Replace the whole document with `md` and wait for the preview to catch up.
@@ -188,6 +194,11 @@ test('HTML export captures the selected theme and owns the only theme toggle', a
 	});
 	expect(html).toContain('<html lang="en" data-theme="dark">');
 	expect(html).toContain('class="md2pdf-theme-toggle"');
+	expect(html).toContain('.md2pdf-theme-moon, .md2pdf-theme-sun {\n  display: block;');
+	expect(html.indexOf('class="md2pdf-theme-toggle"')).toBeGreaterThan(html.indexOf('</main>'));
+	expect(html).toContain(
+		'@media (max-width: 640px) {\n  .md2pdf-theme-toggle {\n    position: static;',
+	);
 });
 
 test('outline navigation reaches the URL', async ({ page }) => {
