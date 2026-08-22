@@ -469,43 +469,21 @@ const REST: &str = r#"}
 .md2pdf-theme-toggle:hover { color: var(--md-fg); }
 .md2pdf-theme-toggle:focus-visible { outline: 2px solid var(--md-accent); outline-offset: 2px; }
 .md2pdf-theme-moon, .md2pdf-theme-sun {
-  position: relative;
-  box-sizing: border-box;
   width: 1rem;
   height: 1rem;
   margin: auto;
+  background: currentColor;
+  -webkit-mask: center / contain no-repeat;
+  mask: center / contain no-repeat;
 }
 .md2pdf-theme-moon {
-  border: 1.6px solid currentColor;
-  border-radius: 50%;
-}
-.md2pdf-theme-moon::after {
-  content: "";
-  position: absolute;
-  width: .8rem;
-  height: .8rem;
-  left: .28rem;
-  top: -.12rem;
-  border-radius: 50%;
-  background: var(--md-bg);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'/%3E%3C/svg%3E");
 }
 .md2pdf-theme-sun {
-  width: .65rem;
-  height: .65rem;
-  border: 1.5px solid currentColor;
-  border-radius: 50%;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='4'/%3E%3Cpath d='M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'/%3E%3C/svg%3E");
 }
-.md2pdf-theme-sun::before, .md2pdf-theme-sun::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 1.15rem;
-  height: 1.5px;
-  background: linear-gradient(to right, currentColor 0 .22rem, transparent .22rem .93rem, currentColor .93rem);
-  transform: translate(-50%, -50%);
-}
-.md2pdf-theme-sun::after { rotate: 90deg; }
 .md2pdf-theme-sun { display: none; }
 [data-theme="dark"] .md2pdf-theme-moon { display: none; }
 [data-theme="dark"] .md2pdf-theme-sun { display: block; }
