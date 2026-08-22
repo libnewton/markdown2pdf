@@ -25,6 +25,15 @@ jobs:
       - run: cargo test
         working-directory: engine
 
+  cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -p "test_*.py"
+
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -41,6 +50,7 @@ jobs:
       - run: npx prettier --check .
       - run: npm run check
       - run: npm test
+      - run: npm run build
       # The browser tests cover what unit tests structurally cannot: the
       # document the app actually renders.
       - run: npx playwright install --with-deps chromium

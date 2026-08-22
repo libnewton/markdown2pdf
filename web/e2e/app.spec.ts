@@ -38,7 +38,7 @@ test.beforeEach(async ({ page }) => {
 test('a leading heading survives a frontmatter title', async ({ page }) => {
 	// The bug this suite exists for: the headline was deleted from the rendered
 	// document and nothing took its place.
-	await type(page, '---\ntitle: From Frontmatter\n---\n\n# acc\n\nbody\n', 'body');
+	await type(page, '---\ntitle: From Frontmatter\n---\n\n# acc\n\nbody\n', 'From Frontmatter');
 	const text = await documentText(page);
 	expect(text).toContain('From Frontmatter');
 	expect(text).toContain('acc');
