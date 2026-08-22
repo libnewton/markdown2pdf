@@ -66,6 +66,17 @@ export function collectRemoteImageUrls(markdown: string): string[] {
 	for (const m of markdown.matchAll(MARKDOWN_IMAGE_REGEX)) {
 		urls.add(m[1]);
 	}
+
+	const frontmatter = markdown.match(
+		/^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)(?:\r?\n|$)/,
+	)?.[1];
+	if (frontmatter) {
+		const coverImage =
+			/^(?:cover-image|cover_image):[ \t]*(?:"(https?:\/\/[^"\r\n]+)"|'(https?:\/\/[^'\r\n]+)'|(https?:\/\/\S+?))(?:[ \t]+#.*)?[ \t]*$/gim;
+		for (const match of frontmatter.matchAll(coverImage)) {
+			urls.add(match[1] ?? match[2] ?? match[3]);
+		}
+	}
 	return [...urls];
 }
 

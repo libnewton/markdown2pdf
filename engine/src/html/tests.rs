@@ -929,6 +929,48 @@ fn discovery_lists_only_local_images() {
 }
 
 #[test]
+fn discovery_includes_images_used_by_pdf_frontmatter() {
+    let md = "---\n\
+cover_image: https://e.com/cover.png # full bleed\n\
+cover-logo: \"![](https://e.com/logo.svg =x16)\"\n\
+header_left: \"![](images/header.png =200x)\"\n\
+footer-right: \"![](https://e.com/logo.svg =32x24)\"\n\
+---\n\n\
+![](images/body.png)\n\n\
+![](https://e.com/cover.png)";
+
+    assert_eq!(
+        crate::image_targets(md),
+        vec![
+            "https://e.com/cover.png",
+            "https://e.com/logo.svg",
+            "images/header.png",
+            "images/body.png",
+        ]
+    );
+    assert_eq!(local_images(md), vec!["images/header.png", "images/body.png"]);
+    assert_eq!(
+        crate::collect_remote_images(md),
+        vec![
+            (
+                "https://e.com/cover.png".to_string(),
+                format!("remote/{}", crate::hash_url("https://e.com/cover.png")),
+            ),
+            (
+                "https://e.com/logo.svg".to_string(),
+                format!("remote/{}", crate::hash_url("https://e.com/logo.svg")),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn only_cover_image_accepts_a_bare_frontmatter_path() {
+    let md = "---\ncover-image: images/cover.png\ncover-logo: images/logo.png\nheader-left: https://e.com/header.png\n---";
+    assert_eq!(crate::image_targets(md), vec!["images/cover.png"]);
+}
+
+#[test]
 fn discovery_finds_mermaid_inside_nested_blocks_but_not_inside_wider_fences() {
     let md = "```mermaid\ntop\n```\n\n:::info\n```mermaid\nnested\n```\n:::\n\n\
         ````md\n```mermaid\nquoted\n```\n````";
@@ -1383,4 +1425,3 @@ fn no_fixture_can_inject_a_tag_or_an_attribute() {
         }
     }
 }
-

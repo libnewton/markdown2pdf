@@ -42,8 +42,8 @@
 }
 
 // A cover image is either a Markdown image (`![](path)` — the form that gets a
-// remote URL prefetched, as for `cover-logo`) or a bare path. Any `=WxH` sizing
-// is ignored: the image always covers the whole page.
+// remote URL prefetched, as for `cover-logo`) or a bare local path / remote URL.
+// Any `=WxH` sizing is ignored: the image always covers the whole page.
 #let _cover-image-path(value) = {
   if value == none or type(value) != str or value.trim() == "" { return none }
   let img = parse-image-field(value)

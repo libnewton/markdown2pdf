@@ -445,12 +445,12 @@ The four geometries fill the bottom of the page: \`arcs\` (quarter-discs from th
 \`\`\`yaml
 ---
 title: Quarterly Report
-cover-image: cover-a4.png              # or "![](https://…/cover.png)" for a remote one
+cover-image: cover-a4.png              # or https://…/cover.png for a remote one
 cover-text-color: "#ffffff"            # dark artwork needs light text
 ---
 \`\`\`
 
-The path is resolved like any other image: relative to the document in the CLI, and to the uploaded asset path in the web app — drop the image into the editor, then move the inserted \`images/…\` path into \`cover-image:\`. A remote cover needs the Markdown form (\`"![](url)"\`), which is what gets it prefetched. Sizing is ignored: the image always covers the page, cropped rather than distorted if it is not A4. PDF covers are not supported — export them as PNG or SVG first.
+The path is resolved like any other image: relative to the document in the CLI, and to the uploaded asset path in the web app — drop the image into the editor, then move the inserted \`images/…\` path into \`cover-image:\`. A remote cover accepts a bare \`https://\` URL or the Markdown form (\`"![](url)"\`). Sizing is ignored: the image always covers the page, cropped rather than distorted if it is not A4. PDF covers are not supported — export them as PNG or SVG first.
 
 Title, subtitle, authors and date stay where they always are, so \`cover-text-color\` is usually all a dark background needs; it takes \`white\`, \`black\`, or a hex value. The hairline keeps its \`cover-color\` tint.
 

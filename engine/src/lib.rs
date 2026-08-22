@@ -1650,8 +1650,35 @@ fn hash_url(url: &str) -> String {
     format!("{h:08x}")
 }
 
-/// Every image target in the document, in source order and deduplicated, with
-/// any `=WxH` size hint stripped. Descends into admonition and spoiler bodies.
+fn frontmatter_image_path(value: &str) -> Option<String> {
+    let value = value.trim();
+    if !value.starts_with("![") || !value.ends_with(')') {
+        return None;
+    }
+    let open = value.find("](")?;
+    let inner = value[open + 2..value.len() - 1].trim();
+    if inner.is_empty() {
+        return None;
+    }
+
+    if let Some(space) = inner.rfind(char::is_whitespace) {
+        let (path, tail) = inner.split_at(space);
+        let size = tail.trim().trim_start_matches('=');
+        if let Some((width, height)) = size.split_once(['x', 'X']) {
+            let valid = |part: &str| {
+                part.is_empty() || part.chars().all(|c| c.is_ascii_digit() || c == '.')
+            };
+            if (!width.is_empty() || !height.is_empty()) && valid(width) && valid(height) {
+                return Some(path.trim().to_string());
+            }
+        }
+    }
+    Some(inner.to_string())
+}
+
+/// Every image target in the document, deduplicated, with any `=WxH` size hint
+/// stripped. Descends into admonition and spoiler bodies and includes the
+/// frontmatter fields that the PDF template renders as images.
 ///
 /// Both hosts read this: the CLI prefetches the remote ones, the HTML renderer
 /// embeds the local ones. Parsed rather than string-scanned, so a URL that only
@@ -1659,6 +1686,39 @@ fn hash_url(url: &str) -> String {
 fn image_targets(src: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+
+    let fm = html::Frontmatter::parse(src);
+    let cover_image = fm.first("cover-image").or_else(|| fm.first("cover_image"));
+    {
+        let mut add = |path: String| {
+            if !path.is_empty() && seen.insert(path.clone()) {
+                found.push(path);
+            }
+        };
+
+        if let Some(value) = cover_image {
+            add(frontmatter_image_path(value).unwrap_or_else(|| value.trim().to_string()));
+        }
+
+        for (hyphenated, underscored) in [
+            ("cover-logo", "cover_logo"),
+            ("header-left", "header_left"),
+            ("header-center", "header_center"),
+            ("header-right", "header_right"),
+            ("footer-left", "footer_left"),
+            ("footer-center", "footer_center"),
+            ("footer-right", "footer_right"),
+        ] {
+            if let Some(path) = fm
+                .first(hyphenated)
+                .or_else(|| fm.first(underscored))
+                .and_then(frontmatter_image_path)
+            {
+                add(path);
+            }
+        }
+    }
+
     walk_document(src, &mut |value| {
         if let NodeValue::Image(link) = value {
             let (path, _) = html::split_dims(&link.url, &link.title);

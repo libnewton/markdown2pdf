@@ -1047,10 +1047,10 @@ fn inline_text(doc: &Doc, s: &str) -> String {
 /// The handful of frontmatter keys HTML cares about. The PDF path reads the
 /// full block with Typst's YAML decoder; the browser never runs Typst, so the
 /// engine has to read these itself.
-struct Frontmatter(HashMap<String, Vec<String>>);
+pub(crate) struct Frontmatter(HashMap<String, Vec<String>>);
 
 impl Frontmatter {
-    fn parse(src: &str) -> Self {
+    pub(crate) fn parse(src: &str) -> Self {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
         let Some(rest) = src.strip_prefix("---\n").or_else(|| src.strip_prefix("---\r\n")) else {
             return Self(map);
@@ -1085,7 +1085,7 @@ impl Frontmatter {
         Self(map)
     }
 
-    fn first(&self, key: &str) -> Option<&str> {
+    pub(crate) fn first(&self, key: &str) -> Option<&str> {
         self.0.get(key)?.first().map(String::as_str)
     }
 
@@ -1104,11 +1104,24 @@ impl Frontmatter {
 fn unquote(s: &str) -> String {
     let s = s.trim();
     for q in ['"', '\''] {
-        if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
-            return s[1..s.len() - 1].to_string();
+        if s.starts_with(q) {
+            if let Some(end) = s.rfind(q).filter(|end| *end > 0) {
+                let tail = s[end + 1..].trim();
+                if tail.is_empty() || tail.starts_with('#') {
+                    return s[1..end].to_string();
+                }
+            }
         }
     }
-    s.to_string()
+    let comment = s
+        .char_indices()
+        .find(|(i, c)| {
+            *c == '#'
+                && (*i == 0 || s[..*i].chars().next_back().is_some_and(char::is_whitespace))
+        })
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    s[..comment].trim_end().to_string()
 }
 
 /// A numbered reference list for `bibliography: inline`.

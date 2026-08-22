@@ -110,7 +110,6 @@
   set text(
     font: (
       "IBM Plex Sans",
-      "Roboto",
       "Libertinus Sans",
       "Noto Sans SC",
       "Noto Sans KR",
@@ -167,7 +166,7 @@
       text(
         weight: "bold",
         fill: rgb(tokens.base.heading),
-        font: ("IBM Plex Sans", "Roboto"),
+        font: "IBM Plex Sans",
         size: body-size * style.size,
         tracking: style.tracking,
         marker + it.body,
