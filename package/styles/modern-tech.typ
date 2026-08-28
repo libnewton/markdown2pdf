@@ -130,8 +130,10 @@
     first-line-indent: 0pt,
     spacing: 1.2em,
   )
-  set list(indent: 1em, body-indent: 0.5em, spacing: 0.8em, marker: md2pdf-list-markers)
-  set enum(indent: 1em, body-indent: 0.5em, spacing: 0.8em, full: true, numbering: md2pdf-enum-numbering)
+  // Keep item gaps larger than the leading inside a wrapped item, so separate
+  // items cannot read as a tighter pair than two lines of the same item.
+  set list(indent: 1em, body-indent: 0.5em, spacing: 1.2em, marker: md2pdf-list-markers)
+  set enum(indent: 1em, body-indent: 0.5em, spacing: 1.2em, full: true, numbering: md2pdf-enum-numbering)
 
   // 4) Headings: explicit size ramp per level (clear hierarchy).
   // Typst's own defaults stop scaling at level 3, so `###` and `####` both

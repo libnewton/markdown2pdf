@@ -247,6 +247,14 @@ test('a slash command expands on Enter', async ({ page }) => {
 	await expect.poll(() => editorText(page)).toContain('[toc]');
 });
 
+test('Tab indents the editor instead of moving focus', async ({ page }) => {
+	await type(page, 'child', '');
+	await page.keyboard.press('Tab');
+
+	await expect.poll(() => editorText(page)).toMatch(/^\s+child$/);
+	await expect(page.locator('.cm-content')).toBeFocused();
+});
+
 test('a diagram is embedded as an image, never as inline markup', async ({ page }) => {
 	await type(page, '```mermaid\ngraph LR\n  A["</svg><script>x</script>"] --> B\n```\n', '');
 	await page.waitForTimeout(2000);

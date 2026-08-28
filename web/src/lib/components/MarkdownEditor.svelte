@@ -6,7 +6,7 @@
   import { markdown as langMarkdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
-  import { isolateHistory } from '@codemirror/commands'
+  import { indentWithTab, isolateHistory } from '@codemirror/commands'
   import { linkAround, slashCommand, toggleWrap } from '$lib/editor/commands'
   import { taskMarker } from '$lib/utils/task-marker'
 
@@ -152,7 +152,7 @@
       doc: markdown,
       extensions: [
         // Before basicSetup, so these win over its defaults.
-        keymap.of(editorCommands),
+        keymap.of([...editorCommands, indentWithTab]),
         basicSetup,
         langMarkdown({ codeLanguages: languages }),
         oneDark,
