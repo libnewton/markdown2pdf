@@ -125,7 +125,7 @@ pub(crate) const PLAIN: &[(&str, &str)] = &[
         "shadow",
         "0 1px 2px var(--md-shadow-color), 0 8px 24px var(--md-shadow-color)",
     ),
-    ("measure", "46rem"),
+    ("measure", "56rem"),
 ];
 
 /// The custom-property declarations, without the surrounding selector. Built

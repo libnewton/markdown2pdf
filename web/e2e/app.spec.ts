@@ -1,9 +1,22 @@
 import { expect, test, type Page } from '@playwright/test';
 
+type LiveGeometry = {
+	measure: string;
+	cap: number;
+	documentWidth: number;
+	hostWidth: number;
+	centerError: number;
+	pageScrollWidth: number;
+	pageClientWidth: number;
+	containerScrollWidth: number;
+	containerClientWidth: number;
+};
+
+
 /** Text of the rendered document, which lives inside a shadow root. */
 const documentText = (page: Page) =>
 	page
-		.locator('.html-preview .md2pdf-root')
+		.locator('.html-preview #md2pdf-root')
 		.textContent()
 		.then((text) => text ?? '');
 
@@ -88,6 +101,123 @@ test('the exported document keeps its checkboxes inert', async ({ page }) => {
 	});
 	expect(html).toContain('type="checkbox" disabled');
 	expect(html).not.toContain('data-md-line');
+});
+
+test('Web documents widen responsively without outer horizontal scrolling', async ({ page }) => {
+	const liveGeometry = () =>
+		page.evaluate(() => {
+			const preview = document.querySelector<HTMLElement>('.html-preview')!;
+			const root = preview.shadowRoot!;
+			const documentRoot = root.querySelector<HTMLElement>('.md2pdf')!;
+			const documentElement = root.querySelector<HTMLElement>('.md2pdf-doc')!;
+			const container = document.querySelector<HTMLElement>('.html-preview-container')!;
+			const documentBox = documentElement.getBoundingClientRect();
+			const hostBox = preview.getBoundingClientRect();
+			const pageRoot = document.documentElement;
+			return {
+				measure: getComputedStyle(documentRoot).getPropertyValue('--md-measure').trim(),
+				cap: 56 * Number.parseFloat(getComputedStyle(pageRoot).fontSize),
+				documentWidth: documentBox.width,
+				hostWidth: preview.clientWidth,
+				centerError:
+					documentBox.left +
+					documentBox.width / 2 -
+					(hostBox.left + hostBox.width / 2),
+				pageScrollWidth: pageRoot.scrollWidth,
+				pageClientWidth: pageRoot.clientWidth,
+				containerScrollWidth: container.scrollWidth,
+				containerClientWidth: container.clientWidth,
+			};
+		});
+	const expectNoLiveOuterOverflow = (geometry: LiveGeometry) => {
+		expect(geometry.pageScrollWidth).toBeLessThanOrEqual(geometry.pageClientWidth);
+		expect(geometry.containerScrollWidth).toBeLessThanOrEqual(geometry.containerClientWidth);
+	};
+
+	await page.setViewportSize({ width: 2560, height: 1200 });
+	await type(page, '# Width probe\n\nA responsive paragraph.');
+
+	let geometry = await liveGeometry();
+	expect(geometry.measure).toBe('56rem');
+	expect(geometry.documentWidth).toBeCloseTo(geometry.cap, 1);
+	expect(Math.abs(geometry.centerError)).toBeLessThanOrEqual(1);
+	expectNoLiveOuterOverflow(geometry);
+
+	await page.setViewportSize({ width: 1400, height: 1200 });
+	geometry = await liveGeometry();
+	expect(geometry.documentWidth).toBeCloseTo(geometry.hostWidth, 1);
+	expect(Math.abs(geometry.centerError)).toBeLessThanOrEqual(1);
+	expectNoLiveOuterOverflow(geometry);
+
+	await page.getByRole('button', { name: 'Document only' }).click();
+	await page.setViewportSize({ width: 1920, height: 1200 });
+	geometry = await liveGeometry();
+	expect(geometry.documentWidth).toBeCloseTo(geometry.cap, 1);
+	expect(Math.abs(geometry.centerError)).toBeLessThanOrEqual(1);
+	expectNoLiveOuterOverflow(geometry);
+
+	const download = page.waitForEvent('download');
+	await page.getByRole('button', { name: 'Export' }).click();
+	await page.getByRole('button', { name: /HTML/ }).click();
+	const stream = await (await download).createReadStream();
+	const html = await new Promise<string>((resolve) => {
+		let out = '';
+		stream.on('data', (chunk) => (out += chunk));
+		stream.on('end', () => resolve(out));
+	});
+
+	const standalone = await page.context().newPage();
+	try {
+		await standalone.setViewportSize({ width: 1920, height: 1200 });
+		await standalone.setContent(html);
+		let exportGeometry = await standalone.evaluate(() => {
+			const documentRoot = document.querySelector<HTMLElement>('.md2pdf')!;
+			const documentElement = document.querySelector<HTMLElement>('.md2pdf-doc')!;
+			const documentBox = documentElement.getBoundingClientRect();
+			const bodyBox = document.body.getBoundingClientRect();
+			const pageRoot = document.documentElement;
+			return {
+				measure: getComputedStyle(documentRoot).getPropertyValue('--md-measure').trim(),
+				cap: 56 * Number.parseFloat(getComputedStyle(pageRoot).fontSize),
+				documentWidth: documentBox.width,
+				availableWidth: documentRoot.clientWidth,
+				centerError:
+					documentBox.left +
+					documentBox.width / 2 -
+					(bodyBox.left + bodyBox.width / 2),
+				pageScrollWidth: pageRoot.scrollWidth,
+				pageClientWidth: pageRoot.clientWidth,
+				bodyScrollWidth: document.body.scrollWidth,
+				bodyClientWidth: document.body.clientWidth,
+			};
+		});
+		expect(exportGeometry.measure).toBe('56rem');
+		expect(exportGeometry.documentWidth).toBeCloseTo(exportGeometry.cap, 1);
+		expect(Math.abs(exportGeometry.centerError)).toBeLessThanOrEqual(1);
+		expect(exportGeometry.pageScrollWidth).toBeLessThanOrEqual(exportGeometry.pageClientWidth);
+		expect(exportGeometry.bodyScrollWidth).toBeLessThanOrEqual(exportGeometry.bodyClientWidth);
+
+		await standalone.setViewportSize({ width: 700, height: 1200 });
+		exportGeometry = await standalone.evaluate(() => {
+			const documentRoot = document.querySelector<HTMLElement>('.md2pdf')!;
+			const documentElement = document.querySelector<HTMLElement>('.md2pdf-doc')!;
+			const documentBox = documentElement.getBoundingClientRect();
+			const pageRoot = document.documentElement;
+			return {
+				documentWidth: documentBox.width,
+				availableWidth: documentRoot.clientWidth,
+				pageScrollWidth: pageRoot.scrollWidth,
+				pageClientWidth: pageRoot.clientWidth,
+				bodyScrollWidth: document.body.scrollWidth,
+				bodyClientWidth: document.body.clientWidth,
+			};
+		});
+		expect(exportGeometry.documentWidth).toBeCloseTo(exportGeometry.availableWidth, 1);
+		expect(exportGeometry.pageScrollWidth).toBeLessThanOrEqual(exportGeometry.pageClientWidth);
+		expect(exportGeometry.bodyScrollWidth).toBeLessThanOrEqual(exportGeometry.bodyClientWidth);
+	} finally {
+		await standalone.close();
+	}
 });
 
 test('the divider restores mouse and keyboard widths after reload', async ({ page }) => {
