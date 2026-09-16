@@ -67,14 +67,29 @@ struct StrForm {
 }
 
 const fn s(open: &'static str) -> StrForm {
-    StrForm { open, close: open, multiline: false, escapes: true }
+    StrForm {
+        open,
+        close: open,
+        multiline: false,
+        escapes: true,
+    }
 }
 const fn multi(open: &'static str, close: &'static str) -> StrForm {
-    StrForm { open, close, multiline: true, escapes: true }
+    StrForm {
+        open,
+        close,
+        multiline: true,
+        escapes: true,
+    }
 }
 /// A raw literal: no escape processing, so `r"C:\path\"` ends at the quote.
 const fn raw(open: &'static str, close: &'static str) -> StrForm {
-    StrForm { open, close, multiline: true, escapes: false }
+    StrForm {
+        open,
+        close,
+        multiline: true,
+        escapes: false,
+    }
 }
 
 struct Lang {
@@ -451,7 +466,11 @@ lang!(JULIA, line: HASH_LINE, block: &[("#=", "=#")], quotes: QUOTES, meta: &["@
 /// Highlight `code`, returning HTML. Falls back to plain escaped text when the
 /// language is unknown.
 pub(crate) fn highlight(info: &str, code: &str) -> String {
-    let name = info.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+    let name = info
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     match name.as_str() {
         "html" | "xml" | "svg" | "vue" | "svelte" => return markup(code),
         "diff" | "patch" => return diff(code),
@@ -548,7 +567,11 @@ fn generic(lang: &Lang, code: &str) -> String {
             let end = string_end(code, i, c);
             // `"key": value` — a quoted string with a colon after it is a
             // mapping key, not a value.
-            let tok = if lang.keys && followed_by_colon(&code[end..]) { Tok::Property } else { Tok::Str };
+            let tok = if lang.keys && followed_by_colon(&code[end..]) {
+                Tok::Property
+            } else {
+                Tok::Str
+            };
             emit!(end, tok);
             last_was_value = true;
             continue;
@@ -617,7 +640,9 @@ fn generic(lang: &Lang, code: &str) -> String {
         }
         // Operators as one run, so `!==` is a single span rather than three.
         if OPERATORS.contains(c) {
-            let len = rest.find(|d: char| !OPERATORS.contains(d)).unwrap_or(rest.len());
+            let len = rest
+                .find(|d: char| !OPERATORS.contains(d))
+                .unwrap_or(rest.len());
             emit!(i + len, Tok::Operator);
             last_was_value = false;
             continue;
@@ -663,7 +688,9 @@ fn calls(after: &str) -> bool {
 fn is_constant(word: &str) -> bool {
     word.contains('_')
         && word.chars().any(|c| c.is_ascii_uppercase())
-        && word.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && word
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
 /// End offset of a number, including base prefixes, digit separators,
@@ -867,13 +894,17 @@ fn stylesheet(code: &str) -> String {
             '.' | '#' | ':' if !in_block || c != ':' => {
                 let lead = if rest.starts_with("::") { 2 } else { 1 };
                 let end = word_end(&rest[lead..]) + lead;
-                push(&mut out, if end > lead { Tok::Type } else { Tok::Plain }, &rest[..end]);
+                push(
+                    &mut out,
+                    if end > lead { Tok::Type } else { Tok::Plain },
+                    &rest[..end],
+                );
                 rest = &rest[end..];
             }
             '0'..='9' => {
                 // Keep the unit attached: `1.5rem` is one number, not two.
-                let end = word_end_with(&rest[1..], |d| d.is_alphanumeric() || d == '.' || d == '%')
-                    + 1;
+                let end =
+                    word_end_with(&rest[1..], |d| d.is_alphanumeric() || d == '.' || d == '%') + 1;
                 push(&mut out, Tok::Num, &rest[..end]);
                 rest = &rest[end..];
             }
@@ -948,16 +979,28 @@ mod tests {
     /// from, and prose in a fence should not acquire colours.
     #[test]
     fn a_fence_without_a_language_is_left_alone() {
-        assert_eq!(highlight("", "a < b // not a comment"), "a &lt; b // not a comment");
+        assert_eq!(
+            highlight("", "a < b // not a comment"),
+            "a &lt; b // not a comment"
+        );
     }
 
     /// Python's `"""` used to lex as an empty string followed by an
     /// unterminated one, which coloured the rest of the block.
     #[test]
     fn python_triple_quotes_are_one_string() {
-        let out = highlight("python", "def f():\n    \"\"\"Doc \"with\" quotes.\"\"\"\n    return 1");
-        assert!(out.contains("md2pdf-t-s\">\"\"\"Doc \"with\" quotes.\"\"\"<"), "{out}");
-        assert!(out.contains("md2pdf-t-n\">1<"), "the code after it still lexes:\n{out}");
+        let out = highlight(
+            "python",
+            "def f():\n    \"\"\"Doc \"with\" quotes.\"\"\"\n    return 1",
+        );
+        assert!(
+            out.contains("md2pdf-t-s\">\"\"\"Doc \"with\" quotes.\"\"\"<"),
+            "{out}"
+        );
+        assert!(
+            out.contains("md2pdf-t-n\">1<"),
+            "the code after it still lexes:\n{out}"
+        );
     }
 
     /// `//` inside a regex literal is not a comment. The lexer decides from
@@ -965,11 +1008,20 @@ mod tests {
     #[test]
     fn a_regex_literal_is_not_a_comment() {
         let out = highlight("js", "s.replace(/\\/\\//g, '') + 1");
-        assert!(!out.contains("md2pdf-t-c"), "regex read as a comment:\n{out}");
-        assert!(out.contains("md2pdf-t-n\">1<"), "the line ended early:\n{out}");
+        assert!(
+            !out.contains("md2pdf-t-c"),
+            "regex read as a comment:\n{out}"
+        );
+        assert!(
+            out.contains("md2pdf-t-n\">1<"),
+            "the line ended early:\n{out}"
+        );
         // Division still divides.
         let div = highlight("js", "const r = a / b / c");
-        assert!(!div.contains("md2pdf-t-s"), "division read as a regex:\n{div}");
+        assert!(
+            !div.contains("md2pdf-t-s"),
+            "division read as a regex:\n{div}"
+        );
     }
 
     #[test]
@@ -982,7 +1034,10 @@ mod tests {
             ("0b1010", "0b1010"),
         ] {
             let out = highlight("rust", code);
-            assert!(out.contains(&format!("md2pdf-t-n\">{want}<")), "{code}: {out}");
+            assert!(
+                out.contains(&format!("md2pdf-t-n\">{want}<")),
+                "{code}: {out}"
+            );
         }
     }
 
@@ -996,7 +1051,10 @@ mod tests {
             ("java", "class Foo { X x; }", "X"),
         ] {
             let out = highlight(lang, code);
-            assert!(!out.contains(&format!("md2pdf-t-v\">{word}<")), "{lang}: {out}");
+            assert!(
+                !out.contains(&format!("md2pdf-t-v\">{word}<")),
+                "{lang}: {out}"
+            );
         }
     }
 
@@ -1014,15 +1072,24 @@ mod tests {
         assert!(out.contains("md2pdf-t-t\">.card<"), "{out}");
         assert!(out.contains("md2pdf-t-p\">color<"), "{out}");
         assert!(out.contains("md2pdf-t-p\">margin<"), "{out}");
-        assert!(out.contains("md2pdf-t-n\">1.5rem<"), "the unit rides along:\n{out}");
+        assert!(
+            out.contains("md2pdf-t-n\">1.5rem<"),
+            "the unit rides along:\n{out}"
+        );
         assert!(highlight("css", "@media print { a { b: c } }").contains("md2pdf-t-m\">@media<"));
     }
 
     #[test]
     fn mapping_keys_are_told_apart_from_values() {
-        let yaml = highlight("yaml", "title: md2pdf\nurl: https://example.com\nlist:\n  - a: 1");
+        let yaml = highlight(
+            "yaml",
+            "title: md2pdf\nurl: https://example.com\nlist:\n  - a: 1",
+        );
         assert!(yaml.contains("md2pdf-t-p\">title<"), "{yaml}");
-        assert!(yaml.contains("md2pdf-t-p\">a<"), "a key under a list marker:\n{yaml}");
+        assert!(
+            yaml.contains("md2pdf-t-p\">a<"),
+            "a key under a list marker:\n{yaml}"
+        );
         // The `https` in a value is not a key just because a colon follows.
         assert!(!yaml.contains("md2pdf-t-p\">https<"), "{yaml}");
 
@@ -1128,11 +1195,52 @@ mod tests {
         // Every name `lang_for` knows, plus the special lexers and the
         // fallback, so adding a language cannot skip this.
         const NAMES: &[&str] = &[
-            "rust", "js", "ts", "python", "go", "c", "cpp", "java", "cs", "json", "yaml", "toml",
-            "sh", "sql", "css", "scss", "typst", "diff", "php", "ruby", "swift", "lua", "r",
-            "dart", "scala", "perl", "powershell", "dockerfile", "makefile", "graphql", "protobuf",
-            "hcl", "nix", "zig", "elixir", "haskell", "latex", "julia", "html", "xml", "svg",
-            "vue", "svelte", "patch", "brainfuck", "",
+            "rust",
+            "js",
+            "ts",
+            "python",
+            "go",
+            "c",
+            "cpp",
+            "java",
+            "cs",
+            "json",
+            "yaml",
+            "toml",
+            "sh",
+            "sql",
+            "css",
+            "scss",
+            "typst",
+            "diff",
+            "php",
+            "ruby",
+            "swift",
+            "lua",
+            "r",
+            "dart",
+            "scala",
+            "perl",
+            "powershell",
+            "dockerfile",
+            "makefile",
+            "graphql",
+            "protobuf",
+            "hcl",
+            "nix",
+            "zig",
+            "elixir",
+            "haskell",
+            "latex",
+            "julia",
+            "html",
+            "xml",
+            "svg",
+            "vue",
+            "svelte",
+            "patch",
+            "brainfuck",
+            "",
         ];
         for name in NAMES {
             for code in HOSTILE {

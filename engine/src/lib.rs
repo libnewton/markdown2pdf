@@ -309,7 +309,11 @@ fn as_lines(src: &str) -> Vec<Line> {
 }
 
 fn join_lines(lines: &[Line]) -> (String, Vec<u32>) {
-    let text = lines.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join("\n");
+    let text = lines
+        .iter()
+        .map(|(l, _)| l.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     (text, lines.iter().map(|(_, o)| *o).collect())
 }
 
@@ -318,7 +322,13 @@ fn join_lines(lines: &[Line]) -> (String, Vec<u32>) {
 pub(crate) fn rebase(local: &[u32], base: &[u32]) -> Vec<u32> {
     local
         .iter()
-        .map(|&l| if l == 0 { 0 } else { base.get(l as usize - 1).copied().unwrap_or(0) })
+        .map(|&l| {
+            if l == 0 {
+                0
+            } else {
+                base.get(l as usize - 1).copied().unwrap_or(0)
+            }
+        })
         .collect()
 }
 
@@ -450,8 +460,18 @@ fn citation_keys(group: &str) -> Option<Vec<&str>> {
 }
 
 const ADMONITION_KINDS: &[&str] = &[
-    "success", "warning", "tip", "info", "danger", "note", "caution", "important",
-    "left", "center", "right", "row", // layout directives
+    "success",
+    "warning",
+    "tip",
+    "info",
+    "danger",
+    "note",
+    "caution",
+    "important",
+    "left",
+    "center",
+    "right",
+    "row", // layout directives
 ];
 
 /// Extract `:::kind` and `+++++` blocks, replacing each with an HTML-comment
@@ -476,7 +496,10 @@ fn preprocess(src: &str) -> Preprocessed {
 /// extra vertical space survives parsing. Skips fenced code; only fires between
 /// two "preservable" lines (not list/quote/table/rule/fence/pagebreak).
 fn preprocess_blank_lines(lines: Vec<Line>) -> Vec<Line> {
-    if !lines.windows(3).any(|w| w.iter().all(|(l, _)| l.trim().is_empty())) {
+    if !lines
+        .windows(3)
+        .any(|w| w.iter().all(|(l, _)| l.trim().is_empty()))
+    {
         return lines;
     }
     let mut out: Vec<Line> = Vec::new();
@@ -732,8 +755,10 @@ fn preprocess_admonitions(lines: Vec<Line>) -> (Vec<Line>, Vec<Admonition>) {
             i += 1;
             continue;
         }
-        if let Some((fence_len, kind, title)) =
-            fence.is_none().then(|| parse_admonition_open(&lines[i].0)).flatten()
+        if let Some((fence_len, kind, title)) = fence
+            .is_none()
+            .then(|| parse_admonition_open(&lines[i].0))
+            .flatten()
         {
             let mut body: Vec<Line> = Vec::new();
             i += 1;
@@ -746,7 +771,12 @@ fn preprocess_admonitions(lines: Vec<Line>) -> (Vec<Line>, Vec<Admonition>) {
             let (source, origin) = join_lines(&body);
             // The body is re-parsed as its own document, so it keeps its own
             // origins to be rebased against these when it is rendered.
-            blocks.push(Admonition { kind, title, source, origin });
+            blocks.push(Admonition {
+                kind,
+                title,
+                source,
+                origin,
+            });
             out.push((String::new(), 0));
             out.push((format!("<!--admonition:{id}-->"), 0));
             out.push((String::new(), 0));
@@ -777,8 +807,10 @@ fn preprocess_spoilers(lines: Vec<Line>) -> (Vec<Line>, Vec<Spoiler>) {
             i += 1;
             continue;
         }
-        if let Some(inline) =
-            fence.is_none().then(|| parse_spoiler_open(&lines[i].0)).flatten()
+        if let Some(inline) = fence
+            .is_none()
+            .then(|| parse_spoiler_open(&lines[i].0))
+            .flatten()
         {
             let close = ((i + 1)..lines.len()).find(|&j| is_spoiler_closer(&lines[j].0));
             if let Some(close) = close {
@@ -884,7 +916,12 @@ fn is_spoiler_closer(line: &str) -> bool {
 /// placeholder comrak parsed as an HtmlBlock.
 fn parse_placeholder(literal: &str, kind: &str) -> Option<usize> {
     let inner = literal.trim().strip_prefix("<!--")?.strip_suffix("-->")?;
-    inner.strip_prefix(kind)?.strip_prefix(':')?.trim().parse().ok()
+    inner
+        .strip_prefix(kind)?
+        .strip_prefix(':')?
+        .trim()
+        .parse()
+        .ok()
 }
 
 // ==========================================================================
@@ -991,7 +1028,9 @@ impl<'a> Ctx<'a> {
             }
             NodeValue::List(_) => return self.render_list(node, indent),
             NodeValue::Item(_) | NodeValue::TaskItem(_) => self.render_block_children(node),
-            NodeValue::CodeBlock(cb) => return self.render_code_block(&cb.info, &cb.literal, indent),
+            NodeValue::CodeBlock(cb) => {
+                return self.render_code_block(&cb.info, &cb.literal, indent)
+            }
             NodeValue::HtmlBlock(hb) => {
                 if let Some(id) = parse_placeholder(&hb.literal, "admonition") {
                     self.render_admonition(id)
@@ -1050,7 +1089,12 @@ impl<'a> Ctx<'a> {
                     )
                 }
             }
-            "row" => render_row(&a.source, self.alignment, self.citations, self.slugs.clone()),
+            "row" => render_row(
+                &a.source,
+                self.alignment,
+                self.citations,
+                self.slugs.clone(),
+            ),
             // Styled callout box.
             _ => {
                 let inner = convert_str_aligned_with(
@@ -1307,12 +1351,9 @@ impl<'a> Ctx<'a> {
             },
             NodeValue::ShortCode(s) => render_emoji(&s.emoji),
             NodeValue::Link(l) => render_link(&l.url, &self.render_inlines(node)),
-            NodeValue::Image(l) => render_image(
-                &l.url,
-                &l.title,
-                &plain_text(node),
-                self.visual_alignment(),
-            ),
+            NodeValue::Image(l) => {
+                render_image(&l.url, &l.title, &plain_text(node), self.visual_alignment())
+            }
             NodeValue::FootnoteReference(r) => self.render_footnote(&r.name),
             // Block nodes should not appear here, but render defensively.
             _ => self.render_inlines(node),
@@ -1919,7 +1960,11 @@ fn collect_mermaid_sources(src: &str) -> Vec<String> {
     walk_document(src, &mut |value| {
         if let NodeValue::CodeBlock(cb) = value {
             if cb.info.trim().eq_ignore_ascii_case("mermaid") {
-                let code = cb.literal.strip_suffix('\n').unwrap_or(&cb.literal).to_string();
+                let code = cb
+                    .literal
+                    .strip_suffix('\n')
+                    .unwrap_or(&cb.literal)
+                    .to_string();
                 if seen.insert(code.clone()) {
                     out.push(code);
                 }
@@ -1982,7 +2027,10 @@ fn max_backtick_run(s: &str) -> usize {
 fn esc_text(s: &str) -> String {
     let mut o = String::with_capacity(s.len());
     for c in s.chars() {
-        if matches!(c, '\\' | '#' | '*' | '_' | '`' | '[' | ']' | '$' | '<' | '>' | '@') {
+        if matches!(
+            c,
+            '\\' | '#' | '*' | '_' | '`' | '[' | ']' | '$' | '<' | '>' | '@' | '~' | '+' | '-'
+        ) {
             o.push('\\');
         }
         o.push(c);
@@ -2023,6 +2071,15 @@ mod tests {
     fn a_self_referencing_footnote_does_not_recurse_forever() {
         let out = convert_str("a[^n]\n\n[^n]: see[^n]", false);
         assert!(out.contains("#footnote[see]"), "{out}");
+    }
+
+    #[test]
+    fn typst_markup_characters_remain_literal_prose() {
+        assert_eq!(
+            convert_str("1~2\n1 ~ 2\n1\\~2", false),
+            "1\\~2\\\n1 \\~ 2\\\n1\\~2"
+        );
+        assert_eq!(convert_str("\\+ 111\n\\- 111", false), "\\+ 111\\\n\\- 111");
     }
 
     fn widths(md: &str) -> Vec<Vec<usize>> {
@@ -2205,7 +2262,10 @@ mod tests {
 
     #[test]
     fn accepts_single_dash_and_alignment_colons() {
-        assert_eq!(widths("| a | b | c |\n| - | :-+ | -:+ |\n"), vec![vec![1, 2, 2]]);
+        assert_eq!(
+            widths("| a | b | c |\n| - | :-+ | -:+ |\n"),
+            vec![vec![1, 2, 2]]
+        );
     }
 
     #[test]
@@ -2305,7 +2365,10 @@ mod tests {
             ":::left\n+++++ Summary\n![](spoiler.png \"=80x\")\n+++++\n:::\n",
             false,
         );
-        assert!(spoiler.contains("#spoiler(summary: \"Summary\")"), "{spoiler}");
+        assert!(
+            spoiler.contains("#spoiler(summary: \"Summary\")"),
+            "{spoiler}"
+        );
         assert!(
             spoiler.contains("#align(left)[#image(\"spoiler.png\", width: 80pt)]"),
             "{spoiler}"

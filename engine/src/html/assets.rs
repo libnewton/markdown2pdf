@@ -42,7 +42,11 @@ impl Assets {
         if data.is_empty() {
             return None;
         }
-        Some(format!("data:{};base64,{}", mime_for(key, data), base64(data)))
+        Some(format!(
+            "data:{};base64,{}",
+            mime_for(key, data),
+            base64(data)
+        ))
     }
 }
 
@@ -85,11 +89,14 @@ fn sniff(data: &[u8]) -> Option<&'static str> {
 }
 
 pub(crate) fn base64(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
         out.push(ALPHABET[(n >> 18 & 63) as usize] as char);
         out.push(ALPHABET[(n >> 12 & 63) as usize] as char);
@@ -161,12 +168,18 @@ mod tests {
     #[test]
     fn data_uri_uses_the_key_extension() {
         let a = Assets::decode("images/a.png\t3\n", b"abc");
-        assert_eq!(a.data_uri("images/a.png").unwrap(), "data:image/png;base64,YWJj");
+        assert_eq!(
+            a.data_uri("images/a.png").unwrap(),
+            "data:image/png;base64,YWJj"
+        );
     }
 
     #[test]
     fn data_uri_sniffs_extension_less_remote_keys() {
         let a = Assets::decode("remote/deadbeef\t8\n", b"\x89PNG\r\n\x1a\n");
-        assert!(a.data_uri("remote/deadbeef").unwrap().starts_with("data:image/png;base64,"));
+        assert!(a
+            .data_uri("remote/deadbeef")
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
     }
 }

@@ -8,7 +8,8 @@ use crate::convert_str;
 /// WCAG 2.1 relative luminance of a `#rrggbb` string.
 fn luminance(hex: &str) -> f64 {
     let ch = |i: usize| {
-        let v = u8::from_str_radix(&hex[1 + i * 2..3 + i * 2], 16).expect("hex pair") as f64 / 255.0;
+        let v =
+            u8::from_str_radix(&hex[1 + i * 2..3 + i * 2], 16).expect("hex pair") as f64 / 255.0;
         if v <= 0.04045 {
             v / 12.92
         } else {
@@ -115,7 +116,11 @@ fn an_image_url_inside_a_code_span_is_not_a_reference() {
 fn every_callout_reaches_the_typst_templates() {
     let toml = tokens::as_toml();
     for a in tokens::ADMONITIONS {
-        assert!(toml.contains(&format!("[admonition.{}]", a.kind)), "{}", a.kind);
+        assert!(
+            toml.contains(&format!("[admonition.{}]", a.kind)),
+            "{}",
+            a.kind
+        );
         assert!(toml.contains(&format!("en = \"{}\"", a.en)), "{}", a.en);
         assert!(toml.contains(&format!("de = \"{}\"", a.de)), "{}", a.de);
         assert!(toml.contains(a.accent.0), "{}", a.accent.0);
@@ -127,7 +132,9 @@ fn every_callout_reaches_the_typst_templates() {
 /// counts see only the document markup.
 fn strip_chrome(out: &str) -> String {
     let start = out.rfind("</style>").map_or(0, |i| i + "</style>".len());
-    let end = out[start..].rfind("<script>").map_or(out.len(), |i| start + i);
+    let end = out[start..]
+        .rfind("<script>")
+        .map_or(out.len(), |i| start + i);
     out[start..end].to_string()
 }
 
@@ -156,30 +163,135 @@ fn body(md: &str) -> String {
 /// Elements the renderer is allowed to emit. Anything else in the output came
 /// from the source document, which means escaping failed.
 const ALLOWED_TAGS: &[&str] = &[
-    "!doctype", "html", "head", "meta", "title", "style", "script", "body", "div", "main",
-    "header", "section", "nav", "aside", "article", "p", "span", "h1", "h2", "h3", "h4", "h5",
-    "h6", "a", "em", "strong", "del", "mark", "sup", "sub", "u", "br", "hr", "code", "pre",
-    "button", "ul", "ol", "li", "input", "label", "table", "thead", "tbody", "tr", "th", "td",
-    "colgroup", "col", "blockquote", "details", "summary", "figure", "figcaption", "img", "nobr",
+    "!doctype",
+    "html",
+    "head",
+    "meta",
+    "title",
+    "style",
+    "script",
+    "body",
+    "div",
+    "main",
+    "header",
+    "section",
+    "nav",
+    "aside",
+    "article",
+    "p",
+    "span",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "a",
+    "em",
+    "strong",
+    "del",
+    "mark",
+    "sup",
+    "sub",
+    "u",
+    "br",
+    "hr",
+    "code",
+    "pre",
+    "button",
+    "ul",
+    "ol",
+    "li",
+    "input",
+    "label",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "colgroup",
+    "col",
+    "blockquote",
+    "details",
+    "summary",
+    "figure",
+    "figcaption",
+    "img",
+    "nobr",
 ];
 
 /// MathML, spelled out. `math-core`'s output is inserted unescaped, so this is
 /// the list that decides what "trusted" means — an open-ended
 /// `starts_with('m')` also waved through `<marquee>` and `<map>`.
 const ALLOWED_MATHML: &[&str] = &[
-    "math", "annotation", "annotation-xml", "semantics", "merror", "mfrac", "mi", "mmultiscripts",
-    "mn", "mo", "mover", "mpadded", "mphantom", "mprescripts", "mroot", "mrow", "ms", "mspace",
-    "msqrt", "mstyle", "msub", "msubsup", "msup", "mtable", "mtd", "mtext", "mtr", "munder",
+    "math",
+    "annotation",
+    "annotation-xml",
+    "semantics",
+    "merror",
+    "mfrac",
+    "mi",
+    "mmultiscripts",
+    "mn",
+    "mo",
+    "mover",
+    "mpadded",
+    "mphantom",
+    "mprescripts",
+    "mroot",
+    "mrow",
+    "ms",
+    "mspace",
+    "msqrt",
+    "mstyle",
+    "msub",
+    "msubsup",
+    "msup",
+    "mtable",
+    "mtd",
+    "mtext",
+    "mtr",
+    "munder",
     "munderover",
 ];
 
 /// Attributes the renderer emits. Everything else — and anything at all
 /// starting with `on` — came from the document.
 const ALLOWED_ATTRS: &[&str] = &[
-    "align", "alt", "charset", "checked", "class", "content", "data-done", "data-lang",
-    "data-level", "data-theme", "decoding", "disabled", "display", "draggable", "for", "height",
-    "href", "id", "lang", "loading", "name", "open", "rel", "scriptlevel", "span", "src", "start",
-    "style", "tabindex", "title", "type", "width", "xmlns",
+    "align",
+    "alt",
+    "charset",
+    "checked",
+    "class",
+    "content",
+    "data-done",
+    "data-lang",
+    "data-level",
+    "data-theme",
+    "decoding",
+    "disabled",
+    "display",
+    "draggable",
+    "for",
+    "height",
+    "href",
+    "id",
+    "lang",
+    "loading",
+    "name",
+    "open",
+    "rel",
+    "scriptlevel",
+    "span",
+    "src",
+    "start",
+    "style",
+    "tabindex",
+    "title",
+    "type",
+    "width",
+    "xmlns",
 ];
 
 fn assert_no_injected_tags(out: &str) {
@@ -274,7 +386,10 @@ fn attributes(attrs: &str) -> Vec<(String, String)> {
     let mut found = Vec::new();
     let mut rest = attrs.trim();
     while !rest.is_empty() {
-        let name: String = rest.chars().take_while(|c| !"= \t\n/>".contains(*c)).collect();
+        let name: String = rest
+            .chars()
+            .take_while(|c| !"= \t\n/>".contains(*c))
+            .collect();
         if name.is_empty() {
             rest = &rest[rest.chars().next().map_or(0, char::len_utf8)..];
             continue;
@@ -291,7 +406,9 @@ fn attributes(attrs: &str) -> Vec<(String, String)> {
                     body[..end].to_string()
                 }
                 None => {
-                    let end = after.find(|c: char| c.is_whitespace()).unwrap_or(after.len());
+                    let end = after
+                        .find(|c: char| c.is_whitespace())
+                        .unwrap_or(after.len());
                     rest = &after[end..];
                     after[..end].to_string()
                 }
@@ -345,7 +462,10 @@ fn standalone_is_off_by_default_and_for_an_explicit_zero() {
 #[test]
 fn a_leading_h1_becomes_the_title_and_leaves_the_body() {
     let out = html("# The Title\n\nbody text");
-    assert!(out.contains("<header class=\"md2pdf-titleblock\"><h1>The Title</h1>"), "{out}");
+    assert!(
+        out.contains("<header class=\"md2pdf-titleblock\"><h1>The Title</h1>"),
+        "{out}"
+    );
     assert!(!body("# The Title\n\nbody text").contains("The Title"));
 }
 
@@ -360,7 +480,14 @@ fn frontmatter_title_leaves_a_leading_h1_in_the_body() {
     assert!(out.contains("<h1>From Frontmatter</h1>"), "{out}");
     assert!(out.contains("<span>Ada</span><span>Grace</span>"), "{out}");
     assert!(out.contains("<span>2026-01-01</span>"), "{out}");
-    assert!(body(&format!("{}", "---\ntitle: From Frontmatter\n---\n\n# Kept\n\nbody")).contains("Kept"), "{out}");
+    assert!(
+        body(&format!(
+            "{}",
+            "---\ntitle: From Frontmatter\n---\n\n# Kept\n\nbody"
+        ))
+        .contains("Kept"),
+        "{out}"
+    );
 }
 
 /// An empty `title:` is not a title. It used to strip the H1 *and* suppress
@@ -370,7 +497,10 @@ fn frontmatter_title_leaves_a_leading_h1_in_the_body() {
 fn an_empty_frontmatter_title_falls_back_to_the_leading_h1() {
     let out = html("---\ntitle: \"\"\n---\n\n# Real Title\n\nbody");
     assert!(out.contains("<h1>Real Title</h1>"), "{out}");
-    assert!(!body("---\ntitle: \"\"\n---\n\n# Real Title\n\nbody").contains("Real Title"), "{out}");
+    assert!(
+        !body("---\ntitle: \"\"\n---\n\n# Real Title\n\nbody").contains("Real Title"),
+        "{out}"
+    );
 }
 
 /// The two renderers have to agree about which heading survives. They did not:
@@ -405,7 +535,10 @@ fn both_renderers_agree_on_which_h1_survives() {
             .to_string();
         let h1 = String::from_utf8(crate::leading_h1(md.as_bytes()).unwrap()).unwrap();
         let from_h1 = fm_title.is_empty() && !h1.is_empty();
-        assert_eq!(from_h1, !heading_stays, "the shared rule disagrees for {md:?}");
+        assert_eq!(
+            from_h1, !heading_stays,
+            "the shared rule disagrees for {md:?}"
+        );
 
         assert_eq!(
             body(&md).contains("Heading"),
@@ -431,7 +564,9 @@ fn frontmatter_reads_block_lists_and_quoted_scalars() {
 
 #[test]
 fn german_documents_get_german_labels() {
-    let out = html("---\nlang: de-AT\n---\n\n# A\n\n## B\n\n## C\n\n:::info\nx\n:::\n\ntext[^n]\n\n[^n]: note");
+    let out = html(
+        "---\nlang: de-AT\n---\n\n# A\n\n## B\n\n## C\n\n:::info\nx\n:::\n\ntext[^n]\n\n[^n]: note",
+    );
     assert!(out.contains("lang=\"de-AT\""), "{out}");
     assert!(out.contains(">Info<"), "{out}");
     assert!(out.contains(">Inhalt<"), "{out}");
@@ -479,7 +614,10 @@ fn headings_get_stable_unique_ids_and_an_anchor() {
     assert!(out.contains("<h2 id=\"same\">"), "{out}");
     assert!(out.contains("<h3 id=\"same-2\">"), "{out}");
     assert!(out.contains("id=\"ünï-cödé\""), "{out}");
-    assert!(out.contains("<a class=\"md2pdf-anchor\" href=\"#same\""), "{out}");
+    assert!(
+        out.contains("<a class=\"md2pdf-anchor\" href=\"#same\""),
+        "{out}"
+    );
 }
 
 #[test]
@@ -494,17 +632,29 @@ fn headings_accept_invisible_custom_ids_and_disambiguate_duplicates() {
 #[test]
 fn invalid_custom_ids_remain_visible() {
     for heading in ["Bad {#two words}", "Bad {#-start}", "Bad {#md2pdf-root}"] {
-        assert!(body(&format!("## {heading}")).contains(heading), "{heading}");
+        assert!(
+            body(&format!("## {heading}")).contains(heading),
+            "{heading}"
+        );
     }
 }
 
 #[test]
 fn standalone_theme_and_toggle_are_export_only() {
     let fragment = render("## A", "theme=dark\n", "", b"");
-    assert!(!fragment.contains("md2pdf-theme-toggle\" type"), "{fragment}");
+    assert!(
+        !fragment.contains("md2pdf-theme-toggle\" type"),
+        "{fragment}"
+    );
     let exported = render("## A", "standalone=1\ntheme=dark\n", "", b"");
-    assert!(exported.contains("<html lang=\"en\" data-theme=\"dark\">"), "{exported}");
-    assert!(exported.contains("md2pdf-theme-toggle\" type"), "{exported}");
+    assert!(
+        exported.contains("<html lang=\"en\" data-theme=\"dark\">"),
+        "{exported}"
+    );
+    assert!(
+        exported.contains("md2pdf-theme-toggle\" type"),
+        "{exported}"
+    );
     assert!(exported.contains("md2pdf-theme-moon"), "{exported}");
     assert!(exported.contains("md2pdf-theme-sun"), "{exported}");
     assert!(
@@ -512,10 +662,14 @@ fn standalone_theme_and_toggle_are_export_only() {
         "{exported}"
     );
     let main_end = exported.find("</main>").expect("main");
-    let toggle = exported.find("md2pdf-theme-toggle\" type").expect("theme toggle");
+    let toggle = exported
+        .find("md2pdf-theme-toggle\" type")
+        .expect("theme toggle");
     assert!(toggle > main_end, "{exported}");
     assert!(
-        exported.contains("@media (max-width: 640px) {\n  .md2pdf-theme-toggle {\n    position: static;"),
+        exported.contains(
+            "@media (max-width: 640px) {\n  .md2pdf-theme-toggle {\n    position: static;"
+        ),
         "{exported}"
     );
     let hidden = render(
@@ -547,7 +701,10 @@ fn thematic_breaks_and_page_break_tokens_are_distinguishable() {
 #[test]
 fn lists_nest_and_keep_their_ordinal_start() {
     let out = body("- a\n  - b\n\n1. x\n2. y");
-    assert!(out.contains("<ul><li>a<ul><li>b</li></ul></li></ul>"), "{out}");
+    assert!(
+        out.contains("<ul><li>a<ul><li>b</li></ul></li></ul>"),
+        "{out}"
+    );
     assert!(out.contains("<ol><li>x</li><li>y</li></ol>"), "{out}");
     assert!(body("5. five").contains("<ol start=\"5\">"));
 }
@@ -556,8 +713,14 @@ fn lists_nest_and_keep_their_ordinal_start() {
 fn task_lists_render_real_checkboxes() {
     let out = body("- [x] done\n- [ ] open");
     assert!(out.contains("<ul class=\"md2pdf-tasks\">"), "{out}");
-    assert!(out.contains("<input type=\"checkbox\" disabled checked><div>done</div>"), "{out}");
-    assert!(out.contains("<input type=\"checkbox\" disabled><div>open</div>"), "{out}");
+    assert!(
+        out.contains("<input type=\"checkbox\" disabled checked><div>done</div>"),
+        "{out}"
+    );
+    assert!(
+        out.contains("<input type=\"checkbox\" disabled><div>open</div>"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -583,14 +746,21 @@ fn deep_nesting_does_not_blow_up() {
 fn blockquotes_and_admonitions_carry_their_kind() {
     assert!(body("> quoted").contains("<blockquote><p>quoted</p></blockquote>"));
     let out = body(":::warning Careful\nbody\n:::");
-    assert!(out.contains("<aside class=\"md2pdf-adm md2pdf-adm-warning\">"), "{out}");
-    assert!(out.contains("md2pdf-adm-label\">Careful</strong><p>body</p>"), "{out}");
+    assert!(
+        out.contains("<aside class=\"md2pdf-adm md2pdf-adm-warning\">"),
+        "{out}"
+    );
+    assert!(
+        out.contains("md2pdf-adm-label\">Careful</strong><p>body</p>"),
+        "{out}"
+    );
 }
 
 #[test]
 fn an_untitled_admonition_falls_back_to_its_default_label() {
     assert!(body(":::danger\nx\n:::").contains(">DANGER<"));
     assert!(body(":::important\nx\n:::").contains(">IMPORTANT<"));
+    assert!(body(":::success\nx\n:::").contains(">HIGHLIGHT<"));
 }
 
 #[test]
@@ -615,12 +785,18 @@ fn layout_directives_map_to_alignment_and_grid() {
     assert!(body(":::center\nmid\n:::").contains("<div class=\"md2pdf-center\"><p>mid</p></div>"));
     let out = body("::::row\nleft\n\nright\n::::");
     assert!(out.contains("style=\"--md-cols:2\""), "{out}");
-    assert!(out.contains("<div><p>left</p></div><div><p>right</p></div>"), "{out}");
+    assert!(
+        out.contains("<div><p>left</p></div><div><p>right</p></div>"),
+        "{out}"
+    );
 }
 
 #[test]
 fn a_six_column_row_reports_its_column_count() {
-    let cells = (1..=6).map(|i| format!("c{i}")).collect::<Vec<_>>().join("\n\n");
+    let cells = (1..=6)
+        .map(|i| format!("c{i}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
     assert!(body(&format!("::::row\n{cells}\n::::")).contains("--md-cols:6"));
 }
 
@@ -629,11 +805,16 @@ fn a_six_column_row_reports_its_column_count() {
 #[test]
 fn code_blocks_get_a_language_tag_lines_and_a_copy_button() {
     let out = body("```rust\nlet x = 1;\nlet y = 2;\n```");
-    assert!(out.contains("<div class=\"md2pdf-code\" data-lang=\"rust\">"), "{out}");
+    assert!(
+        out.contains("<div class=\"md2pdf-code\" data-lang=\"rust\">"),
+        "{out}"
+    );
     // The tag is a hook for styling, not a visible chip.
     assert!(!html("```rust\nx\n```").contains("content: attr(data-lang)"));
     assert!(
-        out.contains("<button class=\"md2pdf-copy\" type=\"button\" data-done=\"Copied\">Copy</button>"),
+        out.contains(
+            "<button class=\"md2pdf-copy\" type=\"button\" data-done=\"Copied\">Copy</button>"
+        ),
         "{out}"
     );
     assert_eq!(out.matches("class=\"md2pdf-line\"").count(), 2, "{out}");
@@ -644,7 +825,10 @@ fn code_blocks_get_a_language_tag_lines_and_a_copy_button() {
 fn a_plain_fence_has_no_language_tag() {
     let out = body("```\nplain\n```");
     assert!(!out.contains("data-lang"), "{out}");
-    assert!(out.contains("<span class=\"md2pdf-line\">plain</span>"), "{out}");
+    assert!(
+        out.contains("<span class=\"md2pdf-line\">plain</span>"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -692,7 +876,10 @@ fn an_even_table_needs_no_colgroup() {
 #[test]
 fn a_very_wide_table_keeps_every_column() {
     let cols = 30;
-    let head = (0..cols).map(|i| format!("c{i}")).collect::<Vec<_>>().join(" | ");
+    let head = (0..cols)
+        .map(|i| format!("c{i}"))
+        .collect::<Vec<_>>()
+        .join(" | ");
     let sep = vec!["-"; cols].join(" | ");
     let out = body(&format!("| {head} |\n| {sep} |\n| {head} |"));
     assert_eq!(out.matches("<th>").count(), cols);
@@ -725,7 +912,10 @@ fn scripting_url_schemes_are_refused() {
 #[test]
 fn images_embed_as_data_uris_with_their_caption() {
     let out = html_with("![A cat](images/cat.png)", "images/cat.png", PNG);
-    assert!(out.contains("<figure><img src=\"data:image/png;base64,"), "{out}");
+    assert!(
+        out.contains("<figure><img src=\"data:image/png;base64,"),
+        "{out}"
+    );
     assert!(out.contains("alt=\"A cat\""), "{out}");
     assert!(out.contains("<figcaption>A cat</figcaption>"), "{out}");
     assert!(out.contains("style=\"width:100%\""), "{out}");
@@ -746,7 +936,10 @@ fn image_dimension_syntax_becomes_width_and_height() {
 #[test]
 fn a_missing_image_degrades_to_a_visible_placeholder() {
     let out = body("![alt text](images/gone.png)");
-    assert!(out.contains("<span class=\"md2pdf-missing\">alt text</span>"), "{out}");
+    assert!(
+        out.contains("<span class=\"md2pdf-missing\">alt text</span>"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -766,7 +959,10 @@ fn a_figure_is_never_nested_inside_a_paragraph() {
 fn mermaid_embeds_the_hosts_svg_as_an_image_and_falls_back_to_code() {
     let key = mermaid_key("graph LR\nA-->B");
     let out = html_with("```mermaid\ngraph LR\nA-->B\n```", &key, b"<svg><g/></svg>");
-    assert!(out.contains("<figure class=\"md2pdf-mermaid\"><img src=\"data:image/svg+xml;base64,"), "{out}");
+    assert!(
+        out.contains("<figure class=\"md2pdf-mermaid\"><img src=\"data:image/svg+xml;base64,"),
+        "{out}"
+    );
     assert!(out.contains("alt=\"Mermaid diagram\""), "{out}");
     assert!(body("```mermaid\ngraph LR\n```").contains("data-lang=\"mermaid\""));
 }
@@ -779,10 +975,22 @@ fn a_scriptable_mermaid_svg_is_embedded_inert() {
     let key = mermaid_key("graph LR");
     let hostile = br#"<svg onload="alert(1)"><script>x</script><foreignObject><img src=x onerror=alert(1)></foreignObject><a xlink:href="javascript:alert(1)">go</a></svg>"#;
     let out = html_with("```mermaid\ngraph LR\n```", &key, hostile);
-    for payload in ["<script", "onload", "onerror", "javascript:", "foreignObject"] {
-        assert!(!out.contains(payload), "{payload} survived into the markup:\n{out}");
+    for payload in [
+        "<script",
+        "onload",
+        "onerror",
+        "javascript:",
+        "foreignObject",
+    ] {
+        assert!(
+            !out.contains(payload),
+            "{payload} survived into the markup:\n{out}"
+        );
     }
-    assert!(out.contains("<img src=\"data:image/svg+xml;base64,"), "{out}");
+    assert!(
+        out.contains("<img src=\"data:image/svg+xml;base64,"),
+        "{out}"
+    );
     assert_no_injected_tags(&out);
 }
 
@@ -799,7 +1007,12 @@ fn shortcodes_and_zwj_sequences_resolve_to_one_glyph() {
     assert!(body(":smile:").contains('\u{1f604}'));
     let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
     let key = "twemoji/1f468-200d-1f469-200d-1f467.svg";
-    assert_eq!(html_with(family, key, b"<svg/>").matches("md2pdf-emoji").count(), 1);
+    assert_eq!(
+        html_with(family, key, b"<svg/>")
+            .matches("md2pdf-emoji")
+            .count(),
+        1
+    );
 }
 
 // ---- math ---------------------------------------------------------------
@@ -824,8 +1037,14 @@ fn math_with_markup_characters_stays_escaped() {
 #[test]
 fn footnotes_collect_into_a_numbered_section_with_backlinks() {
     let out = html("text[^a] more[^b]\n\n[^a]: first\n[^b]: second");
-    assert!(out.contains("id=\"md2pdf-fnref-1\"><a href=\"#md2pdf-fn-1\">[1]</a>"), "{out}");
-    assert!(out.contains("<li id=\"md2pdf-fn-2\"><p>second<a class=\"md2pdf-backref\""), "{out}");
+    assert!(
+        out.contains("id=\"md2pdf-fnref-1\"><a href=\"#md2pdf-fn-1\">[1]</a>"),
+        "{out}"
+    );
+    assert!(
+        out.contains("<li id=\"md2pdf-fn-2\"><p>second<a class=\"md2pdf-backref\""),
+        "{out}"
+    );
     assert!(out.contains("href=\"#md2pdf-fnref-2\""), "{out}");
 }
 
@@ -858,7 +1077,10 @@ fn inline_citations_number_by_first_use_and_build_a_reference_list() {
         "{out}"
     );
     assert!(out.contains("href=\"#md2pdf-ref-b\">[1]</a>"), "{out}");
-    assert!(out.contains("<li id=\"md2pdf-ref-b\">G. Hopper, J. Bartik"), "{out}");
+    assert!(
+        out.contains("<li id=\"md2pdf-ref-b\">G. Hopper, J. Bartik"),
+        "{out}"
+    );
     assert!(out.contains("\u{201c}Compilers\u{201d}"), "{out}");
     assert!(out.contains("<em>ACM</em>"), "{out}");
     assert!(out.contains("<li id=\"md2pdf-ref-a\">A. Lovelace"), "{out}");
@@ -878,10 +1100,19 @@ fn citations_stay_literal_without_the_frontmatter_switch() {
 fn the_drawer_appears_once_there_are_two_headings_and_is_closed_by_default() {
     assert!(!html("## Only one").contains("md2pdf-toc-btn"));
     let out = html("## One\n\n### Two");
-    assert!(out.contains("<input type=\"checkbox\" class=\"md2pdf-toc-state\""), "{out}");
+    assert!(
+        out.contains("<input type=\"checkbox\" class=\"md2pdf-toc-state\""),
+        "{out}"
+    );
     assert!(!out.contains(" checked"), "{out}");
-    assert!(out.contains("<li data-level=\"0\"><a href=\"#one\">One</a></li>"), "{out}");
-    assert!(out.contains("<li data-level=\"1\"><a href=\"#two\">Two</a></li>"), "{out}");
+    assert!(
+        out.contains("<li data-level=\"0\"><a href=\"#one\">One</a></li>"),
+        "{out}"
+    );
+    assert!(
+        out.contains("<li data-level=\"1\"><a href=\"#two\">Two</a></li>"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -922,7 +1153,10 @@ fn markup_in_prose_alt_titles_and_headings_is_escaped() {
 #[test]
 fn raw_html_blocks_are_shown_not_executed() {
     let out = body("<div onclick=\"x\">raw</div>");
-    assert!(out.contains("&lt;div onclick=\"x\"&gt;raw&lt;/div&gt;"), "{out}");
+    assert!(
+        out.contains("&lt;div onclick=\"x\"&gt;raw&lt;/div&gt;"),
+        "{out}"
+    );
 }
 
 /// `<br>` is the whole raw-HTML allowance. It earns its place because a table
@@ -955,8 +1189,13 @@ fn hide_toc_button_drops_the_drawer_but_not_an_inline_toc() {
     assert!(both.contains("md2pdf-toc-inline"), "{both}");
     // Anything that is not an affirmative leaves the button alone.
     for value in ["false", "no", "", "maybe"] {
-        let out = html(&format!("---\nhide-toc-button: {value}\n---\n\n## a\n\n## b"));
-        assert!(out.contains("md2pdf-toc-btn"), "{value:?} hid the button:\n{out}");
+        let out = html(&format!(
+            "---\nhide-toc-button: {value}\n---\n\n## a\n\n## b"
+        ));
+        assert!(
+            out.contains("md2pdf-toc-btn"),
+            "{value:?} hid the button:\n{out}"
+        );
     }
 }
 
@@ -993,7 +1232,10 @@ footer-right: \"![](https://e.com/logo.svg =32x24)\"\n\
             "images/body.png",
         ]
     );
-    assert_eq!(local_images(md), vec!["images/header.png", "images/body.png"]);
+    assert_eq!(
+        local_images(md),
+        vec!["images/header.png", "images/body.png"]
+    );
     assert_eq!(
         crate::collect_remote_images(md),
         vec![
@@ -1045,11 +1287,16 @@ fn the_math_font_is_embedded_only_when_the_host_supplies_it() {
     let manifest = "fonts/math.woff2\t2\nfonts/math-alpha.woff2\t2\n";
     let out = render("$a$", "standalone=1\n", manifest, b"abcd");
     assert_eq!(out.matches("@font-face").count(), 1, "{out}");
-    assert!(out.contains("src:url(data:font/woff2;base64,YWI=)"), "{out}");
+    assert!(
+        out.contains("src:url(data:font/woff2;base64,YWI=)"),
+        "{out}"
+    );
     // Only a document that reaches into the math alphanumerics pays for them.
     // `\mathbb{R}` does not: it is ℝ, a Letterlike Symbol the base face has.
     assert_eq!(
-        render(r"$\mathbb{R}$", "standalone=1\n", manifest, b"abcd").matches("@font-face").count(),
+        render(r"$\mathbb{R}$", "standalone=1\n", manifest, b"abcd")
+            .matches("@font-face")
+            .count(),
         1
     );
     let out = render(r"$\mathbb{A}$", "standalone=1\n", manifest, b"abcd");
@@ -1103,7 +1350,10 @@ fn every_construct_renders_in_both_outputs() {
         ("autolink", "<https://e.com>", "<a href"),
     ];
     for (name, md, marker) in cases {
-        assert!(!convert_str(md, false).trim().is_empty(), "{name}: empty Typst output");
+        assert!(
+            !convert_str(md, false).trim().is_empty(),
+            "{name}: empty Typst output"
+        );
         let out = html(md);
         assert!(out.contains(marker), "{name}: HTML missing {marker}\n{out}");
     }
@@ -1164,7 +1414,10 @@ fn a_block_reports_the_line_the_author_wrote() {
     assert_eq!(lines_of("a\n\n\n\n\nb"), vec![1, 6]);
 
     // A `+`-width table inserts a placeholder line before the header.
-    assert_eq!(lines_of("| a | b |\n| - | -+ |\n| c | d |\n\nafter"), vec![1, 5]);
+    assert_eq!(
+        lines_of("| a | b |\n| - | -+ |\n| c | d |\n\nafter"),
+        vec![1, 5]
+    );
 
     // A heading after several collapsing runs still lands.
     assert_eq!(lines_of("a\n\n\n\nb\n\n\n\n# h"), vec![1, 5, 9]);
@@ -1247,12 +1500,18 @@ fn every_checkbox_points_at_a_line_that_holds_a_marker() {
             let end = rest.find('"').unwrap();
             let line: usize = rest[..end].parse().unwrap();
             let text = source.get(line - 1).copied().unwrap_or("");
-            assert!(is_marker(text), "{name} line {line} is not a marker: {text:?}");
+            assert!(
+                is_marker(text),
+                "{name} line {line} is not a marker: {text:?}"
+            );
             checked += 1;
             rest = &rest[end..];
         }
     }
-    assert!(checked > 3, "only {checked} checkboxes across the fixtures — is this vacuous?");
+    assert!(
+        checked > 3,
+        "only {checked} checkboxes across the fixtures — is this vacuous?"
+    );
 }
 
 /// A list where only some items are tasks: comrak marks the whole list, but a
@@ -1260,8 +1519,16 @@ fn every_checkbox_points_at_a_line_that_holds_a_marker() {
 #[test]
 fn only_a_real_task_item_becomes_clickable() {
     let out = editable("- [ ] task\n- plain");
-    assert_eq!(out.matches("data-md-line").count(), 2, "one list, one task:\n{out}");
-    assert_eq!(out.matches("disabled").count(), 1, "the plain item stays inert:\n{out}");
+    assert_eq!(
+        out.matches("data-md-line").count(),
+        2,
+        "one list, one task:\n{out}"
+    );
+    assert_eq!(
+        out.matches("disabled").count(),
+        1,
+        "the plain item stays inert:\n{out}"
+    );
 }
 
 /// The default output is unchanged: this is preview machinery, and a download
@@ -1336,7 +1603,10 @@ fn a_heading_cannot_claim_a_reserved_id() {
         );
     }
     assert!(out.contains("id=\"toc-state\""), "{out}");
-    assert!(out.contains("id=\"x\""), "a repeated prefix must not survive:\n{out}");
+    assert!(
+        out.contains("id=\"x\""),
+        "a repeated prefix must not survive:\n{out}"
+    );
 }
 
 /// The batched asset list has to say exactly what the five single-purpose
@@ -1360,11 +1630,17 @@ fn the_batched_asset_list_matches_the_individual_calls() {
             .collect::<Vec<_>>()
     };
 
-    assert_eq!(of("image"), lines(crate::html_images(md.as_bytes()).unwrap()));
+    assert_eq!(
+        of("image"),
+        lines(crate::html_images(md.as_bytes()).unwrap())
+    );
     assert_eq!(of("remote"), lines(crate::remotes(md.as_bytes()).unwrap()));
     assert_eq!(of("emoji"), lines(crate::twemojis(md.as_bytes()).unwrap()));
     assert_eq!(of("font"), lines(crate::html_fonts(md.as_bytes()).unwrap()));
-    assert_eq!(of("mermaid"), lines(crate::html_mermaid(md.as_bytes()).unwrap()));
+    assert_eq!(
+        of("mermaid"),
+        lines(crate::html_mermaid(md.as_bytes()).unwrap())
+    );
     assert!(!of("mermaid").is_empty(), "the demo has diagrams");
 }
 
@@ -1378,7 +1654,10 @@ const FIXTURES: &[(&str, &str)] = &[
     ("citations.md", include_str!("../../../tests/citations.md")),
     ("emoji.md", include_str!("../../../tests/emoji.md")),
     ("cover.md", include_str!("../../../tests/cover.md")),
-    ("frontmatter.md", include_str!("../../../tests/frontmatter.md")),
+    (
+        "frontmatter.md",
+        include_str!("../../../tests/frontmatter.md"),
+    ),
     ("unicode.md", include_str!("../../../tests/unicode.md")),
 ];
 
@@ -1397,8 +1676,14 @@ fn no_fixture_loses_a_heading_a_task_or_a_code_block() {
 
         // The one heading allowed to disappear is the one promoted to title.
         let promoted = String::from_utf8(crate::leading_h1(md.as_bytes()).unwrap()).unwrap();
-        let has_fm_title = Frontmatter::parse(md).first("title").is_some_and(|t| !t.is_empty());
-        let consumed = if has_fm_title { String::new() } else { promoted };
+        let has_fm_title = Frontmatter::parse(md)
+            .first("title")
+            .is_some_and(|t| !t.is_empty());
+        let consumed = if has_fm_title {
+            String::new()
+        } else {
+            promoted
+        };
 
         let mut fence = false;
         for line in md.lines() {
@@ -1425,8 +1710,14 @@ fn no_fixture_loses_a_heading_a_task_or_a_code_block() {
             if !consumed.is_empty() && consumed.contains(word) {
                 continue;
             }
-            assert!(html_out.contains(word), "{name}: HTML lost heading word {word:?}");
-            assert!(typst_out.contains(word), "{name}: Typst lost heading word {word:?}");
+            assert!(
+                html_out.contains(word),
+                "{name}: HTML lost heading word {word:?}"
+            );
+            assert!(
+                typst_out.contains(word),
+                "{name}: Typst lost heading word {word:?}"
+            );
         }
     }
 }
@@ -1463,7 +1754,11 @@ fn no_fixture_can_inject_a_tag_or_an_attribute() {
     for (name, md) in FIXTURES {
         for options in ["", "standalone=1\n"] {
             let out = render(md, options, "", b"");
-            let checked = if options.is_empty() { out.clone() } else { strip_chrome(&out) };
+            let checked = if options.is_empty() {
+                out.clone()
+            } else {
+                strip_chrome(&out)
+            };
             assert_no_injected_tags(&checked);
             assert_no_injected_attributes(&checked);
             assert!(!checked.contains("<script"), "{name}: script in a fragment");

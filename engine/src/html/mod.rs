@@ -16,8 +16,8 @@ mod math;
 mod tokens;
 
 use crate::{
-    build_options, hash_url, heading_parts, is_remote, leading_h1_index, match_emoji,
-    parse_dims, parse_placeholder, plain_text, preprocess, preprocess_citations, safe_url,
+    build_options, hash_url, heading_parts, is_remote, leading_h1_index, match_emoji, parse_dims,
+    parse_placeholder, plain_text, preprocess, preprocess_citations, safe_url,
     split_inline_bibliography, task_checked, unique_heading_id, Admonition, Preprocessed, Spoiler,
     CITATION_CLOSE_TOKEN, CITATION_OPEN_TOKEN,
 };
@@ -115,7 +115,10 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     // the H1 is dropped only when it is the thing that became the title. A
     // frontmatter title does not consume it — that heading belongs to the body
     // and nothing else would take its place.
-    let fm_title = fm.first("title").filter(|t| !t.is_empty()).map(str::to_string);
+    let fm_title = fm
+        .first("title")
+        .filter(|t| !t.is_empty())
+        .map(str::to_string);
     let h1 = leading_h1_text(&body_src);
     let from_h1 = fm_title.is_none() && h1.is_some();
     let title = fm_title.clone().or_else(|| h1.clone());
@@ -143,7 +146,9 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     };
     let main = main.replace(TOC_SLOT, &inline_toc(&doc.headings));
 
-    let lang = fm.first("lang").unwrap_or(if doc.german { "de" } else { "en" });
+    let lang = fm
+        .first("lang")
+        .unwrap_or(if doc.german { "de" } else { "en" });
     // Only the standalone export carries the behaviour script. A fragment is
     // mounted by a host that has to re-execute it to make it run at all, and
     // "take the first <script> out of the document and run it" is not a
@@ -195,7 +200,10 @@ fn math_font_faces(doc: &Doc, markup: &str) -> String {
         )
     };
     let mut out = face("", &base);
-    if markup.chars().any(|c| ('\u{1D400}'..='\u{1D7FF}').contains(&c)) {
+    if markup
+        .chars()
+        .any(|c| ('\u{1D400}'..='\u{1D7FF}').contains(&c))
+    {
         if let Some(alpha) = doc.assets.data_uri("fonts/math-alpha.woff2") {
             out.push_str(&face("unicode-range:U+1D400-1D7FF;", &alpha));
         }
@@ -204,7 +212,9 @@ fn math_font_faces(doc: &Doc, markup: &str) -> String {
 }
 
 fn document(fragment: &str, lang: &str, title: &str, theme: Option<&str>) -> String {
-    let theme = theme.map(|t| format!(" data-theme=\"{t}\"")).unwrap_or_default();
+    let theme = theme
+        .map(|t| format!(" data-theme=\"{t}\""))
+        .unwrap_or_default();
     format!(
         "<!doctype html>\n<html lang=\"{lang}\"{theme}>\n<head>\n\
          <meta charset=\"utf-8\">\n\
@@ -218,7 +228,11 @@ fn document(fragment: &str, lang: &str, title: &str, theme: Option<&str>) -> Str
 }
 
 fn theme_toggle(german: bool) -> String {
-    let label = if german { "Farbschema wechseln" } else { "Toggle color theme" };
+    let label = if german {
+        "Farbschema wechseln"
+    } else {
+        "Toggle color theme"
+    };
     format!(
         "<button class=\"md2pdf-theme-toggle\" type=\"button\" aria-label=\"{label}\" \
          title=\"{label}\"><span class=\"md2pdf-theme-moon\" aria-hidden=\"true\"></span>\
@@ -230,9 +244,16 @@ fn theme_toggle(german: bool) -> String {
 fn title_block(fm: &Frontmatter, title: Option<&str>, doc: &Doc) -> String {
     let subtitle = fm.first("subtitle").unwrap_or_default();
     let authors = fm.list("authors");
-    let authors = if authors.is_empty() { fm.list("author") } else { authors };
+    let authors = if authors.is_empty() {
+        fm.list("author")
+    } else {
+        authors
+    };
     let date = fm.first("date").unwrap_or_default();
-    if title.is_none_or(str::is_empty) && subtitle.is_empty() && authors.is_empty() && date.is_empty()
+    if title.is_none_or(str::is_empty)
+        && subtitle.is_empty()
+        && authors.is_empty()
+        && date.is_empty()
     {
         return String::new();
     }
@@ -241,7 +262,10 @@ fn title_block(fm: &Frontmatter, title: Option<&str>, doc: &Doc) -> String {
         out.push_str(&format!("<h1>{}</h1>", inline_text(doc, t)));
     }
     if !subtitle.is_empty() {
-        out.push_str(&format!("<p class=\"md2pdf-subtitle\">{}</p>", inline_text(doc, subtitle)));
+        out.push_str(&format!(
+            "<p class=\"md2pdf-subtitle\">{}</p>",
+            inline_text(doc, subtitle)
+        ));
     }
     let mut byline: Vec<String> = authors.iter().map(|a| inline_text(doc, a)).collect();
     if !date.is_empty() {
@@ -282,7 +306,10 @@ fn inline_toc(headings: &[Heading]) -> String {
     if headings.is_empty() {
         return String::new();
     }
-    format!("<nav class=\"md2pdf-toc-inline\">{}</nav>", toc_list(headings))
+    format!(
+        "<nav class=\"md2pdf-toc-inline\">{}</nav>",
+        toc_list(headings)
+    )
 }
 
 fn toc_list(headings: &[Heading]) -> String {
@@ -367,9 +394,7 @@ impl Doc {
             return String::new();
         }
         let title = if self.german { "Fußnoten" } else { "Notes" };
-        let mut out = format!(
-            "<section class=\"md2pdf-notes\"><h2>{title}</h2><ol>"
-        );
+        let mut out = format!("<section class=\"md2pdf-notes\"><h2>{title}</h2><ol>");
         for note in &self.notes {
             let back = format!(
                 "<a class=\"md2pdf-backref\" href=\"#{}\" aria-label=\"back to reference\">\u{21a9}</a>",
@@ -462,7 +487,11 @@ fn render_source(src: &str, doc: &mut Doc, strip_h1: bool, base: &[u32]) -> Stri
     frame.collect_notes(root);
 
     let children: Vec<&AstNode> = root.children().collect();
-    let skip = if strip_h1 { leading_h1_index(&children) } else { None };
+    let skip = if strip_h1 {
+        leading_h1_index(&children)
+    } else {
+        None
+    };
     children
         .iter()
         .enumerate()
@@ -547,7 +576,11 @@ fn heading<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>, level: u8) -
     let (text, custom) = heading_parts(&plain_text(node));
     let id = doc.slug(&text, custom.as_deref());
     let body = heading_inlines(doc, f, node);
-    doc.headings.push(Heading { level, id: id.clone(), text });
+    doc.headings.push(Heading {
+        level,
+        id: id.clone(),
+        text,
+    });
     format!(
         "<h{level} id=\"{id}\"><a class=\"md2pdf-anchor\" href=\"#{id}\" aria-hidden=\"true\" \
          tabindex=\"-1\">#</a>{body}</h{level}>",
@@ -678,7 +711,11 @@ fn code_block(doc: &Doc, info: &str, literal: &str) -> String {
     } else {
         format!(" data-lang=\"{}\"", esc_attr(lang))
     };
-    let (copy, done) = if doc.german { ("Kopieren", "Kopiert") } else { ("Copy", "Copied") };
+    let (copy, done) = if doc.german {
+        ("Kopieren", "Kopiert")
+    } else {
+        ("Copy", "Copied")
+    };
     format!(
         "<div class=\"md2pdf-code\"{lang_attr}>\
          <button class=\"md2pdf-copy\" type=\"button\" data-done=\"{done}\">{copy}</button>\
@@ -694,7 +731,11 @@ fn code_block(doc: &Doc, info: &str, literal: &str) -> String {
 /// in the page rather than the shadow root. Loaded through `<img>` it cannot
 /// script or fetch, whatever it contains.
 fn mermaid(doc: &Doc, code: &str) -> String {
-    let label = if doc.german { "Mermaid-Diagramm" } else { "Mermaid diagram" };
+    let label = if doc.german {
+        "Mermaid-Diagramm"
+    } else {
+        "Mermaid diagram"
+    };
     match doc.assets.data_uri(&mermaid_key(code)) {
         Some(src) => format!(
             "<figure class=\"md2pdf-mermaid\"><img src=\"{src}\" alt=\"{label}\" \
@@ -783,7 +824,11 @@ fn task_item<'a>(doc: &mut Doc, f: &Frame<'a>, item: &'a AstNode<'a>) -> String 
 }
 
 fn table<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
-    let widths = f.pending_widths.take().and_then(|id| f.table_widths.get(id)).cloned();
+    let widths = f
+        .pending_widths
+        .take()
+        .and_then(|id| f.table_widths.get(id))
+        .cloned();
     let NodeValue::Table(t) = node.data.borrow().value.clone() else {
         return String::new();
     };
@@ -801,9 +846,7 @@ fn table<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
     let cells = |doc: &mut Doc, row: &'a AstNode<'a>, tag: &str| -> String {
         row.children()
             .enumerate()
-            .map(|(i, cell)| {
-                format!("<{tag}{}>{}</{tag}>", align_of(i), inlines(doc, f, cell))
-            })
+            .map(|(i, cell)| format!("<{tag}{}>{}</{tag}>", align_of(i), inlines(doc, f, cell)))
             .collect()
     };
 
@@ -871,11 +914,19 @@ fn inline<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
 }
 
 fn link(url: &str, label: &str) -> String {
-    let label = if label.trim().is_empty() { esc_text(url) } else { label.to_string() };
+    let label = if label.trim().is_empty() {
+        esc_text(url)
+    } else {
+        label.to_string()
+    };
     match safe_url(url) {
         Some(href) => {
             let external = href.starts_with("http://") || href.starts_with("https://");
-            let rel = if external { " rel=\"noopener noreferrer\"" } else { "" };
+            let rel = if external {
+                " rel=\"noopener noreferrer\""
+            } else {
+                ""
+            };
             format!("<a href=\"{}\"{rel}>{label}</a>", esc_attr(&href))
         }
         // A rejected scheme still shows its text; it just is not clickable.
@@ -898,7 +949,11 @@ fn image(doc: &Doc, url: &str, title: &str, alt: &str) -> String {
     let caption = if caption_is_dims { "" } else { caption };
 
     let Some(src) = doc.assets.data_uri(&key) else {
-        let what = if caption.is_empty() { url.as_str() } else { caption };
+        let what = if caption.is_empty() {
+            url.as_str()
+        } else {
+            caption
+        };
         return format!("<span class=\"md2pdf-missing\">{}</span>", esc_text(what));
     };
 
@@ -922,7 +977,10 @@ fn image(doc: &Doc, url: &str, title: &str, alt: &str) -> String {
     if caption.is_empty() {
         format!("<figure>{img}</figure>")
     } else {
-        format!("<figure>{img}<figcaption>{}</figcaption></figure>", esc_text(caption))
+        format!(
+            "<figure>{img}<figcaption>{}</figcaption></figure>",
+            esc_text(caption)
+        )
     }
 }
 
@@ -938,7 +996,11 @@ fn footnote<'a>(doc: &mut Doc, f: &Frame<'a>, name: &str) -> String {
             let number = doc.notes.len() + 1;
             doc.note_index.insert(name.to_string(), number);
             let back = format!("md2pdf-fnref-{number}");
-            doc.notes.push(Note { number, back: back.clone(), html: String::new() });
+            doc.notes.push(Note {
+                number,
+                back: back.clone(),
+                html: String::new(),
+            });
             let html = blocks(doc, f, def);
             doc.notes[number - 1].html = html;
             number
@@ -957,7 +1019,10 @@ fn text_run(doc: &mut Doc, s: &str) -> String {
     let mut rest = s;
     loop {
         let mark = rest.find("==");
-        let citation = doc.citations.then(|| rest.find(CITATION_OPEN_TOKEN)).flatten();
+        let citation = doc
+            .citations
+            .then(|| rest.find(CITATION_OPEN_TOKEN))
+            .flatten();
         let next = match (mark, citation) {
             (None, None) => break,
             (Some(m), None) => (m, false),
@@ -1065,7 +1130,10 @@ pub(crate) struct Frontmatter(HashMap<String, Vec<String>>);
 impl Frontmatter {
     pub(crate) fn parse(src: &str) -> Self {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
-        let Some(rest) = src.strip_prefix("---\n").or_else(|| src.strip_prefix("---\r\n")) else {
+        let Some(rest) = src
+            .strip_prefix("---\n")
+            .or_else(|| src.strip_prefix("---\r\n"))
+        else {
             return Self(map);
         };
         let mut key = String::new();
@@ -1089,7 +1157,11 @@ impl Frontmatter {
             key = k.trim().to_ascii_lowercase();
             let v = v.trim();
             let values = match v.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
-                Some(flow) => flow.split(',').map(unquote).filter(|s| !s.is_empty()).collect(),
+                Some(flow) => flow
+                    .split(',')
+                    .map(unquote)
+                    .filter(|s| !s.is_empty())
+                    .collect(),
                 None if v.is_empty() => Vec::new(),
                 None => vec![unquote(v)],
             };
@@ -1129,8 +1201,7 @@ fn unquote(s: &str) -> String {
     let comment = s
         .char_indices()
         .find(|(i, c)| {
-            *c == '#'
-                && (*i == 0 || s[..*i].chars().next_back().is_some_and(char::is_whitespace))
+            *c == '#' && (*i == 0 || s[..*i].chars().next_back().is_some_and(char::is_whitespace))
         })
         .map(|(i, _)| i)
         .unwrap_or(s.len());
@@ -1147,8 +1218,13 @@ fn bibliography(bibtex: &str, doc: &Doc) -> String {
         return String::new();
     }
     let entries = parse_bibtex(bibtex);
-    let title = if doc.german { "Literatur" } else { "References" };
-    let mut out = format!("<section class=\"md2pdf-notes md2pdf-bibliography\"><h2>{title}</h2><ol>");
+    let title = if doc.german {
+        "Literatur"
+    } else {
+        "References"
+    };
+    let mut out =
+        format!("<section class=\"md2pdf-notes md2pdf-bibliography\"><h2>{title}</h2><ol>");
     for key in &doc.cites {
         let body = match entries.get(key) {
             Some(fields) => format_reference(fields),
@@ -1202,7 +1278,10 @@ fn parse_fields(src: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let mut rest = src;
     while let Some(eq) = rest.find('=') {
-        let name = rest[..eq].trim_start_matches([',', '\n', '\r', ' ', '\t']).trim().to_string();
+        let name = rest[..eq]
+            .trim_start_matches([',', '\n', '\r', ' ', '\t'])
+            .trim()
+            .to_string();
         let after = rest[eq + 1..].trim_start();
         let (value, consumed) = match after.chars().next() {
             Some('{') => match balanced_len(&after[1..]) {
@@ -1221,7 +1300,11 @@ fn parse_fields(src: &str) -> HashMap<String, String> {
         if !name.is_empty() {
             out.insert(
                 name.to_ascii_lowercase(),
-                value.replace(['{', '}', '\n'], " ").split_whitespace().collect::<Vec<_>>().join(" "),
+                value
+                    .replace(['{', '}', '\n'], " ")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
             );
         }
         let offset = rest.len() - after.len() + consumed;
@@ -1266,7 +1349,11 @@ fn format_reference(fields: &HashMap<String, String>) -> String {
     let url = get("url");
     if !url.is_empty() {
         if let Some(href) = safe_url(url) {
-            out.push_str(&format!(" <a href=\"{}\">{}</a>", esc_attr(&href), esc_text(url)));
+            out.push_str(&format!(
+                " <a href=\"{}\">{}</a>",
+                esc_attr(&href),
+                esc_text(url)
+            ));
         }
     }
     out

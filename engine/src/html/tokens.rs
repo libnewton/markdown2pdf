@@ -33,8 +33,8 @@ pub(crate) const ADMONITIONS: &[Admonition] = &[
         kind: "success",
         accent: ("#16a34a", "#4ade80"),
         bg: ("#f0fdf4", "#10241a"),
-        en: "SUCCESS",
-        de: "Erfolg",
+        en: "HIGHLIGHT",
+        de: "Hervorhebung",
     },
     Admonition {
         kind: "warning",
@@ -104,7 +104,11 @@ pub(crate) const BASE: &[(&str, &str, &str)] = &[
     ("mark-fg", "#453c05", "#fdf6d8"),
     ("quote-bg", "#f8f9fa", "#1a1e25"),
     ("scrim", "rgba(16, 24, 40, .3)", "rgba(0, 0, 0, .55)"),
-    ("shadow-color", "rgba(16, 24, 40, .12)", "rgba(0, 0, 0, .55)"),
+    (
+        "shadow-color",
+        "rgba(16, 24, 40, .12)",
+        "rgba(0, 0, 0, .55)",
+    ),
     ("t-c", "#666f7b", "#7f8a9c"),
     ("t-s", "#0a7d55", "#6dd3a4"),
     ("t-n", "#b45309", "#f0b464"),
