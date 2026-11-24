@@ -2193,3 +2193,23 @@ fn spoilers_from_three_syntaxes() {
     assert!(typst.contains("#spoiler(summary: \"Classic\")"), "{typst}");
     assert_eq!(body(md).matches("<details").count(), 4);
 }
+
+/// The HedgeDoc and Outline rewrites stop at code: inline spans, fences and
+/// indented blocks keep their text exactly.
+#[test]
+fn code_keeps_byline_tags_and_sizes_verbatim() {
+    let md = "Use `[name=Ada]` or ``![a](p.png =20x10)`` here [name=Bo].\n\n```\n[name=Ada]\n![a](p.png =20x10)\n{%youtube x %}\n```\n\n    [time=now]\n\n    \\\n";
+    let out = body(md);
+    assert!(out.contains("<code>[name=Ada]</code>"), "{out}");
+    assert!(out.contains("<code>![a](p.png =20x10)</code>"), "{out}");
+    assert!(out.contains("md2pdf-tag-byline\">— Bo<"), "{out}");
+    let typst = convert_str(md, false);
+    assert!(typst.contains("`[name=Ada]`"), "{typst}");
+    assert!(typst.contains("`![a](p.png =20x10)`"), "{typst}");
+    assert!(
+        typst.contains("```\n[name=Ada]\n![a](p.png =20x10)\n{%youtube x %}\n```"),
+        "{typst}"
+    );
+    assert!(typst.contains("[time=now]"), "{typst}");
+    assert!(!typst.contains("#v(0.5em)"), "{typst}");
+}

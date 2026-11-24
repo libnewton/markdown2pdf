@@ -585,17 +585,21 @@ pub(crate) const BYLINE_CLOSE: char = '\u{E005}';
 /// Line-level syntax from HedgeDoc and Outline, rewritten into what the parser
 /// and the renderers already understand. Code fences are left alone.
 fn preprocess_extensions(lines: Vec<Line>) -> Vec<Line> {
+    let candidate = |l: &str| {
+        l.trim() == "\\"
+            || l.contains("{%")
+            || l.contains("![")
+            || BYLINE_TAGS.iter().any(|t| l.contains(t))
+    };
+    if !lines.iter().any(|(l, _)| candidate(l)) {
+        return lines;
+    }
+    // Asking the parser is what tells an indented code block from a list
+    // item's continuation; fences come along with it.
+    let code = code_block_lines(&join_lines(&lines).0);
     let mut out: Vec<Line> = Vec::with_capacity(lines.len());
-    let mut fence: Option<(char, usize)> = None;
     for (i, (line, origin)) in lines.iter().enumerate() {
-        if let Some((fc, fl)) = fence_marker(line) {
-            match fence {
-                None => fence = Some((fc, fl)),
-                Some((c, l)) if c == fc && fl >= l => fence = None,
-                _ => {}
-            }
-        }
-        if fence.is_some() || fence_marker(line).is_some() {
+        if code.contains(&(i + 1)) || !candidate(line) {
             out.push((line.clone(), *origin));
             continue;
         }
@@ -615,10 +619,45 @@ fn preprocess_extensions(lines: Vec<Line>) -> Vec<Line> {
         }
         let line = match embed_link(line).filter(|_| alone) {
             Some(link) => link,
-            None => bylines(&sized_image_targets(line)),
+            None => outside_code_spans(line, |text| bylines(&sized_image_targets(text))),
         };
         out.push((line, *origin));
     }
+    out
+}
+
+/// Apply `rewrite` to the parts of a line outside inline code spans, which
+/// stay verbatim. A backtick run opens a span that the next run of the same
+/// length closes; an unclosed run is plain text.
+fn outside_code_spans(line: &str, rewrite: impl Fn(&str) -> String) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut text_start = 0;
+    let mut i = 0;
+    let bytes = line.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let run = bytes[i..].iter().take_while(|&&b| b == b'`').count();
+        let fence = &line[i..i + run];
+        let close = line[i + run..]
+            .match_indices(fence)
+            .map(|(at, _)| i + run + at)
+            .find(|&at| {
+                line.as_bytes().get(at + run) != Some(&b'`') && line.as_bytes()[at - 1] != b'`'
+            });
+        match close {
+            Some(end) => {
+                out.push_str(&rewrite(&line[text_start..i]));
+                out.push_str(&line[i..end + run]);
+                i = end + run;
+                text_start = i;
+            }
+            None => i += run,
+        }
+    }
+    out.push_str(&rewrite(&line[text_start..]));
     out
 }
 

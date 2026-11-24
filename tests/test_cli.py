@@ -64,7 +64,7 @@ class McpTests(unittest.TestCase):
 
     def test_resources_return_the_canonical_reference_and_example(self):
         for uri, marker in [
-            ("md2pdf://syntax", "## Headings and navigation"),
+            ("md2pdf://syntax", "## Headings and anchors"),
             ("md2pdf://example", "# Welcome"),
         ]:
             response, _ = cli.mcp_dispatch(

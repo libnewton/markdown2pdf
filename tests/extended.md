@@ -248,7 +248,7 @@ Warning on the right.
 
 ## Images
 
-Images are centered by default and fill the text width unless you give them a size. Wrap a sized image in an alignment directive to move it; its caption stays centered beneath the image. Alt text becomes the caption; leave it empty for a bare image. `http(s)` URLs are fetched and embedded — in the browser they go through `fetch` (set a CORS proxy in the settings menu if a host refuses), in the CLI through a prefetch pass before the compile.
+Images are centered by default and fill the text width unless you give them a size. Wrap a sized image in an alignment directive to move it; its caption stays centered beneath the image. Alt text becomes the caption; leave it empty for a bare image. `http(s)` URLs are fetched and embedded — in the browser they go through `fetch`, in the CLI through a prefetch pass before the compile.
 
 The path may be a file next to the document or an `http(s)` URL — both take the same size syntax.
 
@@ -325,7 +325,7 @@ graph LR
 
 ## Frontmatter reference
 
-Everything the document controls lives in the YAML block at the top. All keys are optional, and hyphenated keys also accept underscores (`header_left`, `cover_color`, `letter_to`).
+Everything the document controls lives in the YAML block at the top. All keys are optional and case-insensitive, and `_` equals `-` (`header_left`, `cover_color`, `letter_to`).
 
 | Key                                          | Value                                         | Default             |
 | -------------------------------------------+ | --------------------------------------------++ | ------------------+ |
@@ -380,7 +380,7 @@ Setting `footer-center` yourself replaces the number entirely.
 
 ## Running header & footer
 
-Six optional slots — `header-left`, `header-center`, `header-right` and the same three for `footer-`. They are small, grey, have no separating rule, and start on the **second** page. The default page number also appears on page one when there is no cover. This document uses four slots:
+Six optional slots — `header-left`, `header-center`, `header-right` and the same three for `footer-`. They are small, grey and have no separating rule. Without a cover they start on page one; with a cover the cover stays clean and they begin on page two. This document uses four slots:
 
 ```yaml
 ---
