@@ -6,21 +6,24 @@ host I/O Typst's compile sandbox cannot do itself: it discovers remote image
 URLs (pass 1), fetches them, and renders (pass 2). It contains no Markdown
 logic.
 
-Standard library only, Python 3.9+, and no behaviour that differs per OS
-beyond one documented symlink fallback.
+Standard library only, Python 3.9+, no behaviour that differs per OS.
 
-    md2pdf [--html|--pdf] <input.md> [output]
+    md2pdf [--pdf] [--html] <input.md> [output]
+    md2pdf [--pdf] [--html] [-o OUTDIR] <input.md> [<input.md> ...]
 """
 
 import argparse
+import http.client
 import ipaddress
 import json
-import os
+import re
+import secrets
 import shutil
+import signal
 import socket
 import subprocess
 import sys
-import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -36,24 +39,55 @@ PLACEHOLDER = b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></s
 # `image()` resolve against the document's own directory rather than the
 # package root. `asset` and `read-asset` are the same trick for images the
 # template places itself (header/footer, cover logo) and for the HTML target,
-# which embeds every image as a data: URI.
+# which embeds every image as a data: URI. Remote images are aliased under the
+# per-run directory `md2pdf-remote-dir`, so concurrent runs never share a path.
+# While `md2pdf-fetched` is 0 the downloads do not exist yet, and HTML's
+# discovery run reads a blank image in their place.
 MAIN_TEMPLATE = """#import "@local/md2pdf:0.1.0": prepare, prepare-html
 #let _src = read("{docname}")
 #let _html = sys.inputs.at("md2pdf-target", default: "") == "html"
 #let _html-theme = sys.inputs.at("md2pdf-html-theme", default: "system")
-#let _d = prepare(_src, asset: (p, ..a) => image(p, ..a))
+#let _remote-dir = sys.inputs.at("md2pdf-remote-dir", default: "remote")
+#let _fetched = sys.inputs.at("md2pdf-fetched", default: "1") == "1"
+#let _read-asset(p) = if not _fetched and p.starts-with(_remote-dir + "/") {{
+  bytes("{blank}")
+}} else {{
+  read(p, encoding: none)
+}}
+#let _missing = json(bytes(sys.inputs.at("md2pdf-missing-images", default: "[]")))
+#let _d = prepare(
+  _src,
+  asset: (p, ..a) => image(p, ..a),
+  remote-dir: _remote-dir,
+  missing-images: _missing,
+)
 #metadata(_d.remotes) <md2pdf-remote-images>
+#metadata(_d.images) <md2pdf-images>
 #if _html [
   #metadata(prepare-html(
     _src,
-    read-asset: p => read(p, encoding: none),
+    read-asset: _read-asset,
     theme: _html-theme,
+    remote-dir: _remote-dir,
+    missing-images: _missing,
   )) <md2pdf-html>
 ] else if not _d.skip {{
   show: _d.template
   eval(_d.body, mode: "markup", scope: _d.scope)
 }}
 """
+
+EVAL_REMOTES = "query(<md2pdf-remote-images>).first().value"
+EVAL_IMAGES = "query(<md2pdf-images>).first().value"
+EVAL_HTML = "query(<md2pdf-html>).first().value"
+EVAL_MANIFEST = "(remotes: %s, images: %s)" % (EVAL_REMOTES, EVAL_IMAGES)
+EVAL_BOTH = "(remotes: %s, images: %s, html: %s)" % (EVAL_REMOTES, EVAL_IMAGES, EVAL_HTML)
+
+MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdown", ".mkd")
+
+
+class RenderError(Exception):
+    """One file failed; the rest of a batch carries on."""
 
 
 def die(message):
@@ -63,6 +97,11 @@ def die(message):
 
 def warn(message):
     print("md2pdf: WARN " + message, file=sys.stderr)
+
+
+def status(message):
+    # stderr, so `--html in.md /dev/stdout` leaves stdout as pure HTML.
+    print("md2pdf: " + message, file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +154,24 @@ def typst_base(docdir, fonts, system_fonts=True):
     return flags
 
 
+def input_flags(inputs):
+    flags = []
+    for key, value in inputs.items():
+        flags += ["--input", "%s=%s" % (key, value)]
+    return flags
+
+
+def without_font_warnings(stderr):
+    """Typst's stderr minus its "unknown font family" warnings.
+
+    The templates list CJK fallbacks the bundled `fonts/` does not carry, so
+    every run would otherwise print a screenful about faces nobody asked for.
+    """
+    blocks = re.split(r"(?m)^(?=(?:warning|error): )", stderr)
+    kept = [b for b in blocks if not b.startswith("warning: unknown font family")]
+    return "".join(kept).strip()
+
+
 def typst_eval(exe, expression, main, docdir, fonts, inputs, system_fonts=True):
     """Evaluate an expression in the document's context and parse the result.
 
@@ -122,12 +179,10 @@ def typst_eval(exe, expression, main, docdir, fonts, inputs, system_fonts=True):
     0.15 deprecates.
     """
     cmd = [exe, "eval", expression, "--in", str(main), "--format", "json"]
-    cmd += typst_base(docdir, fonts, system_fonts)
-    for key, value in inputs.items():
-        cmd += ["--input", "%s=%s" % (key, value)]
+    cmd += typst_base(docdir, fonts, system_fonts) + input_flags(inputs)
     done = subprocess.run(cmd, capture_output=True, text=True)
     if done.returncode != 0:
-        return None, done.stderr
+        return None, without_font_warnings(done.stderr)
     try:
         return json.loads(done.stdout), None
     except json.JSONDecodeError as e:
@@ -195,24 +250,46 @@ def check_url(url, allow_private):
             )
 
 
+def is_markup_page(head, content_type):
+    """Whether a response is clearly a web page rather than an image.
+
+    A soft-404 answers 200 with an HTML page, which would otherwise fail the
+    whole render with "unknown image format". Anything not clearly markup is
+    left to Typst, whatever its format.
+    """
+    if content_type.lower().startswith("text/html"):
+        return True
+    text = head.lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    return text.startswith(b"<") and not text.startswith((b"<svg", b"<?xml", b"<!--"))
+
+
 def fetch(url, dest, timeout, max_bytes, allow_private):
-    """Download one image, streaming so an oversized body is cut off early."""
+    """Download one image within `timeout` seconds in total.
+
+    Streams, so an oversized body is cut off early. The deadline is checked
+    between reads, so a slow drip overruns it by at most one socket timeout.
+    """
     check_url(url, allow_private)
+    deadline = time.monotonic() + timeout
     opener = urllib.request.build_opener(SafeRedirect(allow_private))
     request = urllib.request.Request(url, headers={"User-Agent": "md2pdf"})
+    body = bytearray()
     with opener.open(request, timeout=timeout) as response:
-        size = 0
-        with open(dest, "wb") as out:
-            while True:
-                chunk = response.read(64 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > max_bytes:
-                    raise ValueError(
-                        "larger than the %d MB limit" % (max_bytes // (1024 * 1024))
-                    )
-                out.write(chunk)
+        while True:
+            chunk = response.read1(64 * 1024)
+            if not chunk:
+                break
+            body += chunk
+            if len(body) > max_bytes:
+                raise ValueError(
+                    "larger than the %d MB limit" % (max_bytes // (1024 * 1024))
+                )
+            if time.monotonic() > deadline:
+                raise ValueError("timed out after %g s" % timeout)
+        content_type = response.headers.get("Content-Type", "")
+    if is_markup_page(bytes(body[:2048]), content_type):
+        raise ValueError("not an image")
+    dest.write_bytes(body)
 
 
 def fetch_all(items, into, args):
@@ -237,49 +314,66 @@ def fetch_all(items, into, args):
         try:
             fetch(url, into / name, args.timeout, args.max_size * 1024 * 1024, args.allow_private_hosts)
             seen[url] = name
-            print("md2pdf: fetched %s" % url)
-        except (urllib.error.URLError, ValueError, OSError, socket.timeout) as e:
+            status("fetched %s" % url)
+        except (
+            urllib.error.URLError,
+            http.client.HTTPException,
+            ValueError,
+            OSError,
+        ) as e:
             (into / name).write_bytes(PLACEHOLDER)
             warn("could not fetch %s: %s" % (url, e))
-
-
-def expose(docdir, tmpdir):
-    """Make the downloads visible to Typst as `<docdir>/remote`.
-
-    Typst reads only below `--root` but follows symlinks out of it, so a link
-    is enough and copies nothing. Windows restricts symlink creation to
-    Developer Mode or an elevated process, so fall back to a real directory.
-    Returns a callable that undoes whichever was used.
-    """
-    link = docdir / "remote"
-    if link.is_symlink():
-        link.unlink()
-    elif link.exists():
-        die("%s is in the way — delete it (md2pdf needs that name)" % link)
-    try:
-        os.symlink(str(tmpdir), str(link), target_is_directory=True)
-        return lambda: link.unlink(missing_ok=True)
-    except (OSError, NotImplementedError, AttributeError):
-        shutil.copytree(str(tmpdir), str(link))
-        return lambda: shutil.rmtree(str(link), ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
 
 
+def split_output(paths):
+    """Separate the output from the inputs in `md2pdf in.md out.pdf`.
+
+    Exactly two paths mean "input, output" unless the second is another
+    Markdown file, in which case both are inputs. The one exception is the
+    input named twice, which stays an output so that it can be refused.
+    """
+    if len(paths) == 2:
+        first, second = paths
+        other_markdown = (
+            second.suffix.lower() in MARKDOWN_SUFFIXES
+            and second.resolve() != first.resolve()
+        )
+        if not other_markdown:
+            return paths[:1], second
+    return paths, None
+
+
 def parse_args(argv):
     p = argparse.ArgumentParser(
         prog="md2pdf",
+        usage=(
+            "md2pdf [options] input.md [output]\n"
+            "       md2pdf [options] [-o OUTDIR] input.md [input.md ...]\n"
+            "       md2pdf mcp [--root DIR]"
+        ),
         description="Render Markdown to PDF or to one self-contained HTML file.",
+        epilog=(
+            "With one input, `output` names the file; its extension picks the format "
+            "unless --pdf or --html is given. With several inputs or -o, every file "
+            "is written to OUTDIR (default: next to its input) as <name>.pdf and/or "
+            "<name>.html; --pdf --html writes both. A file that fails is reported and "
+            "the rest still render; the exit status is 1 if any failed."
+        ),
     )
-    p.add_argument("input", type=Path, help="the Markdown file")
-    p.add_argument("output", type=Path, nargs="?", help="defaults to <input>.pdf")
-    fmt = p.add_mutually_exclusive_group()
-    fmt.add_argument("--html", dest="format", action="store_const", const="html")
-    fmt.add_argument("--pdf", dest="format", action="store_const", const="pdf")
+    p.add_argument("paths", type=Path, nargs="+", help=argparse.SUPPRESS)
+    p.add_argument("--output-file", type=Path, help=argparse.SUPPRESS)
+    p.add_argument("--pdf", action="store_true", help="write PDF (the default)")
+    p.add_argument("--html", action="store_true", help="write a standalone HTML file")
+    p.add_argument(
+        "-o", "--outdir", type=Path, metavar="OUTDIR",
+        help="directory for the results, created if missing",
+    )
     p.add_argument(
         "--timeout", type=float, default=20.0, metavar="SEC",
-        help="per remote image, default 20",
+        help="total time allowed per remote image, default 20",
     )
     p.add_argument(
         "--max-size", type=int, default=32, metavar="MB",
@@ -299,15 +393,39 @@ def parse_args(argv):
     )
     args = p.parse_args(argv)
 
-    if not args.input.is_file():
-        p.error("no such file: %s" % args.input)
-    # Without an explicit flag the output extension picks the format.
-    if args.format is None:
-        suffix = args.output.suffix.lower() if args.output else ""
-        args.format = "html" if suffix in (".html", ".htm") else "pdf"
-    if args.output is None:
-        args.output = args.input.with_suffix("." + args.format)
+    if args.output_file:
+        args.inputs, args.output = args.paths, args.output_file
+    elif args.outdir:
+        args.inputs, args.output = args.paths, None
+    else:
+        args.inputs, args.output = split_output(args.paths)
+    for source in args.inputs:
+        if not source.is_file():
+            p.error("no such file: %s" % source)
+    if args.output and len(args.inputs) != 1:
+        p.error("an output file takes exactly one input")
+
+    args.formats = [f for f in ("pdf", "html") if getattr(args, f)]
+    if args.output:
+        if len(args.formats) > 1:
+            p.error("an output file takes one of --pdf or --html, not both")
+        if not args.formats:
+            # Without an explicit flag the output extension picks the format.
+            html = args.output.suffix.lower() in (".html", ".htm")
+            args.formats = ["html" if html else "pdf"]
+    elif not args.formats:
+        args.formats = ["pdf"]
     return args
+
+
+def jobs(args):
+    """Every (input, output, format) the invocation asks for."""
+    for source in args.inputs:
+        for fmt in args.formats:
+            output = args.output or (args.outdir or source.parent) / (
+                "%s.%s" % (source.stem, fmt)
+            )
+            yield source, output, fmt
 
 
 MCP_VERSION = "2026-07-28"
@@ -395,6 +513,14 @@ def mcp_path(root, value, must_exist=False):
     return path
 
 
+def mcp_check_arguments(arguments):
+    if not isinstance(arguments, dict):
+        raise TypeError("arguments must be an object")
+    for name in ("input_path", "output_path", "format", "html_theme"):
+        if arguments.get(name) is not None and not isinstance(arguments[name], str):
+            raise TypeError("%s must be a string" % name)
+
+
 def mcp_render(root, arguments):
     source = mcp_path(root, arguments.get("input_path", ""), must_exist=True)
     if not source.is_file():
@@ -417,7 +543,7 @@ def mcp_render(root, arguments):
     cmd.append("--html" if fmt == "html" else "--pdf")
     if fmt == "html":
         cmd.extend(["--html-theme", theme])
-    cmd.extend([str(source), str(output)])
+    cmd.extend(["--output-file", str(output), str(source)])
     done = subprocess.run(cmd, capture_output=True, text=True)
     if done.returncode != 0:
         message = done.stderr.strip() or done.stdout.strip() or "render failed"
@@ -437,9 +563,19 @@ def mcp_render(root, arguments):
 
 
 def mcp_dispatch(message, root, modern):
+    """Answer one JSON-RPC message; a notification (no id) gets no answer."""
+    if not isinstance(message, dict):
+        return mcp_error(None, -32600, "invalid request", modern), modern
+    response, modern = mcp_handle(message, root, modern)
+    return (response if "id" in message else None), modern
+
+
+def mcp_handle(message, root, modern):
     request_id = message.get("id")
     method = message.get("method")
     params = message.get("params") or {}
+    if not isinstance(params, dict):
+        return mcp_error(request_id, -32602, "params must be an object", modern), modern
     if method == "server/discover":
         result = {
             "supportedVersions": [MCP_VERSION],
@@ -485,20 +621,31 @@ def mcp_dispatch(message, root, modern):
         ), modern
     if method == "resources/read":
         uri = params.get("uri")
+        if not isinstance(uri, str):
+            return mcp_error(request_id, -32602, "uri must be a string", modern), modern
         paths = {
             "md2pdf://syntax": Path(__file__).resolve().parent.parent / "docs" / "SYNTAX.md",
             "md2pdf://example": Path(__file__).resolve().parent.parent / "tests" / "extended.md",
         }
         if uri not in paths:
             return mcp_error(request_id, -32602, "unknown resource", modern), modern
-        text_value = paths[uri].read_text(encoding="utf-8")
+        try:
+            text_value = paths[uri].read_text(encoding="utf-8")
+        except OSError as error:
+            detail = "cannot read %s: %s" % (uri, error.strerror)
+            return mcp_error(request_id, -32002, detail, modern), modern
         result = {"contents": [{"uri": uri, "mimeType": "text/markdown", "text": text_value}]}
         return mcp_result(request_id, mcp_cache(result, modern), modern), modern
     if method == "tools/call":
         if params.get("name") != "render_file":
             return mcp_error(request_id, -32602, "unknown tool", modern), modern
+        arguments = params.get("arguments")
         try:
-            rendered = mcp_render(root, params.get("arguments") or {})
+            mcp_check_arguments({} if arguments is None else arguments)
+        except TypeError as error:
+            return mcp_error(request_id, -32602, str(error), modern), modern
+        try:
+            rendered = mcp_render(root, arguments or {})
             result = {
                 "content": [{"type": "text", "text": json.dumps(rendered, ensure_ascii=False)}],
                 "structuredContent": rendered,
@@ -525,12 +672,111 @@ def mcp_main(argv):
         try:
             message = json.loads(line)
             response, modern = mcp_dispatch(message, root, modern)
-        except (json.JSONDecodeError, TypeError, AttributeError) as error:
+        except json.JSONDecodeError as error:
             response = mcp_error(None, -32700, str(error), modern)
         if response is not None:
             sys.stdout.write(json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n")
             sys.stdout.flush()
     return 0
+
+
+def typst_string(value):
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def render_file(exe, fonts, args, source, output, fmt):
+    """Render one document, raising RenderError with a one-line cause."""
+    source_path = source.resolve()
+    if output.resolve() == source_path:
+        raise RenderError("refusing to overwrite the input with its own output")
+    docdir = source_path.parent
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise RenderError("cannot create %s: %s" % (output.parent, e.strerror))
+
+    # Everything this run puts next to the document shares one unique prefix,
+    # so concurrent runs in one folder never touch each other's files.
+    prefix = ".md2pdf-" + secrets.token_hex(4)
+    main_typ = docdir / (prefix + ".typ")
+    source_copy = docdir / (prefix + ".md")
+    remote_dir = prefix + "-remote"
+    base = {"md2pdf-remote-dir": remote_dir}
+
+    def html_inputs():
+        return dict(
+            base,
+            **{"md2pdf-query": "1", "md2pdf-target": "html", "md2pdf-html-theme": args.html_theme},
+        )
+
+    def evaluate(expression, inputs):
+        return typst_eval(exe, expression, main_typ, docdir, fonts, inputs, args.system_fonts)
+
+    try:
+        docname = source.name
+        try:
+            # Typst refuses a backslash in any path, so such a file is read
+            # through a copy.
+            if "\\" in docname:
+                shutil.copyfile(source_path, source_copy)
+                docname = source_copy.name
+            main_typ.write_text(
+                MAIN_TEMPLATE.format(
+                    docname=typst_string(docname),
+                    blank=typst_string(PLACEHOLDER.decode()),
+                ),
+                encoding="utf-8",
+            )
+        except OSError as e:
+            raise RenderError("cannot write in %s: %s" % (docdir, e.strerror))
+
+        # Remote images cannot be fetched from inside Typst's sandbox, and a
+        # missing local image would abort the compile, so the first run
+        # discovers both. For HTML the same run already renders the document,
+        # which is the whole job when there is nothing to fetch or stand in for.
+        html = manifest = None
+        if fmt == "html":
+            manifest, _ = evaluate(EVAL_BOTH, dict(html_inputs(), **{"md2pdf-fetched": "0"}))
+            html = manifest and manifest["html"]
+        if manifest is None:
+            manifest, _ = evaluate(EVAL_MANIFEST, dict(base, **{"md2pdf-query": "1"}))
+        remotes, images = (manifest["remotes"], manifest["images"]) if manifest else ([], [])
+        missing = [i for i in images if not (docdir / i.lstrip("/")).is_file()]
+        for image in missing:
+            warn("missing image %s in %s" % (image, source))
+        if missing:
+            base["md2pdf-missing-images"] = json.dumps(missing)
+        if remotes or missing:
+            html = None
+        if remotes:
+            fetch_dir = docdir / remote_dir
+            fetch_dir.mkdir()
+            fetch_all(remotes, fetch_dir, args)
+
+        if fmt == "html":
+            if html is None:
+                html, err = evaluate(EVAL_HTML, html_inputs())
+                if err or not isinstance(html, str):
+                    raise RenderError("HTML render failed:\n%s" % (err or "unexpected result"))
+            # newline="" keeps Windows from rewriting the engine's line endings.
+            with open(output, "w", encoding="utf-8", newline="") as out:
+                out.write(html)
+        else:
+            cmd = [exe, "compile", "--format", "pdf"]
+            cmd += typst_base(docdir, fonts, args.system_fonts) + input_flags(base)
+            cmd += [str(main_typ), str(output)]
+            done = subprocess.run(cmd, capture_output=True, text=True)
+            diagnostics = without_font_warnings(done.stderr)
+            if done.returncode != 0:
+                raise RenderError("PDF render failed:\n%s" % diagnostics)
+            if diagnostics:
+                print(diagnostics, file=sys.stderr)
+    except OSError as e:
+        raise RenderError("%s: %s" % (e.filename or output, e.strerror))
+    finally:
+        main_typ.unlink(missing_ok=True)
+        source_copy.unlink(missing_ok=True)
+        shutil.rmtree(str(docdir / remote_dir), ignore_errors=True)
 
 
 def main(argv=None):
@@ -539,68 +785,26 @@ def main(argv=None):
         return mcp_main(raw[1:])
     args = parse_args(raw)
     exe = find_typst()
+    # Run the `finally` cleanup the way Ctrl-C already does.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
 
     # `Path.resolve()` walks the symlink chain, so the fonts are found even when
     # the script is reached through a link on PATH.
-    here = Path(__file__).resolve().parent
-    fonts = here.parent / "fonts"
-    docdir = args.input.resolve().parent
-    main_typ = docdir / (".md2pdf-main-%d.typ" % os.getpid())
-    tmpdir = Path(tempfile.mkdtemp(prefix="md2pdf-"))
-    undo_remote = None
-
-    try:
-        main_typ.write_text(
-            MAIN_TEMPLATE.format(docname=args.input.name), encoding="utf-8"
-        )
-
-        # Pass 1 — discover remote image URLs, which the Typst sandbox cannot
-        # fetch itself.
-        remotes, err = typst_eval(
-            exe,
-            "query(<md2pdf-remote-images>).first().value",
-            main_typ, docdir, fonts, {"md2pdf-query": "1"}, args.system_fonts,
-        )
-        if err:
-            remotes = []
-        fetch_all(remotes or [], tmpdir, args)
-        undo_remote = expose(docdir, tmpdir)
-
-        # Pass 2 — render.
-        if args.format == "html":
-            # The engine renders the HTML itself and returns it as a metadata
-            # value, so the CLI and the browser emit the same bytes.
-            # `md2pdf-query=1` short-circuits prepare(), so the PDF body is
-            # never built.
-            html, err = typst_eval(
-                exe,
-                "query(<md2pdf-html>).first().value",
-                main_typ, docdir, fonts,
-                {
-                    "md2pdf-query": "1",
-                    "md2pdf-target": "html",
-                    "md2pdf-html-theme": args.html_theme,
-                },
-                args.system_fonts,
-            )
-            if err or not isinstance(html, str):
-                die("HTML render failed:\n%s" % (err or "unexpected result"))
-            # newline="" keeps Windows from rewriting the engine's line endings.
-            with open(args.output, "w", encoding="utf-8", newline="") as out:
-                out.write(html)
-        else:
-            cmd = [exe, "compile"] + typst_base(docdir, fonts, args.system_fonts)
-            cmd += [str(main_typ), str(args.output)]
-            if subprocess.run(cmd).returncode != 0:
-                raise SystemExit(1)
-    finally:
-        if undo_remote:
-            undo_remote()
-        main_typ.unlink(missing_ok=True)
-        shutil.rmtree(str(tmpdir), ignore_errors=True)
-
-    print("md2pdf: wrote %s" % args.output)
-    return 0
+    fonts = Path(__file__).resolve().parent.parent / "fonts"
+    written = {}
+    failed = False
+    for source, output, fmt in jobs(args):
+        try:
+            if written.setdefault(output.resolve(), source) != source:
+                raise RenderError(
+                    "%s is also the output of %s" % (output, written[output.resolve()])
+                )
+            render_file(exe, fonts, args, source, output, fmt)
+            status("wrote %s" % output)
+        except RenderError as e:
+            print("md2pdf: %s: %s" % (source, e), file=sys.stderr)
+            failed = True
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
