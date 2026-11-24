@@ -1,6 +1,6 @@
-import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
-import { SvelteKitPWA } from '@vite-pwa/sveltekit';
+import adapter from '@sveltejs/adapter-static';
+import { withPwa } from '@vite-pwa/sveltekit';
 // @ts-ignore -- node builtins are present at vite build time
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 // @ts-ignore
@@ -123,54 +123,61 @@ const assetPlugins = process.env.VITEST ? [] : [copyMd2pdfPackage(), bundleFonts
 export default defineConfig({
 	plugins: [
 		...assetPlugins,
-		sveltekit(),
-		SvelteKitPWA({
-			registerType: 'autoUpdate',
-			workbox: {
-				// The twemoji mirror is ~3700 files and 17 MB, fetched one glyph
-				// at a time only by documents that use emoji. Precaching it would
-				// mean downloading all of it to install the app.
-				// Same argument for the CJK faces: ~26 MB, fetched only by the
-				// documents that need them.
-				globIgnores: ['**/md2pdf/twemoji/**', '**/fonts/NotoSans[SK][CR]-*'],
+		// Wraps the sveltekit() plugin.
+		withPwa(
+			{
+				adapter: adapter(),
+				alias: { $lib: 'src/lib' },
+				prerender: { handleHttpError: 'fail' },
+			},
+			{
+				registerType: 'autoUpdate',
 				// engine.wasm and the Typst compiler are past the 2 MB default.
 				maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
+				workbox: {
+					// The twemoji mirror is ~3700 files and 17 MB, fetched one glyph
+					// at a time only by documents that use emoji. Precaching it would
+					// mean downloading all of it to install the app.
+					// Same argument for the CJK faces: ~26 MB, fetched only by the
+					// documents that need them.
+					globIgnores: ['**/md2pdf/twemoji/**', '**/fonts/NotoSans[SK][CR]-*'],
+				},
+				manifest: {
+					name: 'md2pdf',
+					short_name: 'md2pdf',
+					description: 'Markdown to PDF Professional Export Tool',
+					theme_color: '#ffffff',
+					icons: [
+						{
+							src: 'favicon-16x16.png',
+							sizes: '16x16',
+							type: 'image/png',
+						},
+						{
+							src: 'favicon-32x32.png',
+							sizes: '32x32',
+							type: 'image/png',
+						},
+						{
+							src: 'logo.png',
+							sizes: '183x100',
+							type: 'image/png',
+						},
+						{
+							src: 'apple-touch-icon.png',
+							sizes: '180x180',
+							type: 'image/png',
+						},
+						{
+							src: 'square.png',
+							sizes: '240x240',
+							type: 'image/png',
+							purpose: 'any maskable',
+						},
+					],
+				},
 			},
-			manifest: {
-				name: 'md2pdf',
-				short_name: 'md2pdf',
-				description: 'Markdown to PDF Professional Export Tool',
-				theme_color: '#ffffff',
-				icons: [
-					{
-						src: 'favicon-16x16.png',
-						sizes: '16x16',
-						type: 'image/png',
-					},
-					{
-						src: 'favicon-32x32.png',
-						sizes: '32x32',
-						type: 'image/png',
-					},
-					{
-						src: 'logo.png',
-						sizes: '183x100',
-						type: 'image/png',
-					},
-					{
-						src: 'apple-touch-icon.png',
-						sizes: '180x180',
-						type: 'image/png',
-					},
-					{
-						src: 'square.png',
-						sizes: '240x240',
-						type: 'image/png',
-						purpose: 'any maskable',
-					},
-				],
-			},
-		}),
+		),
 	],
 	worker: {
 		format: 'es',

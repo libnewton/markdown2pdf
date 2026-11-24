@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { browser } from '$app/environment'
+  import { browser } from '$app/env'
   import { page } from '$app/state'
   import { replaceState } from '$app/navigation'
   import { onMount } from 'svelte'
@@ -180,7 +180,7 @@
     viewMode = next
     // View mode has no paged preview: a page is a PDF idea.
     if (next === 'view') previewMode = 'document'
-    const url = new URL(page.url)
+    const url = new URL(page.url.href)
     for (const mode of VIEW_MODES) url.searchParams.delete(mode)
     // `?view` reads better than `?view=`, and both parse the same. Built by
     // hand rather than by patching what `URLSearchParams` serialised: with a
@@ -212,7 +212,7 @@
    * reader is — which left `?view` unable to produce a link to a section.
    */
   function setHash(id: string) {
-    const url = new URL(page.url)
+    const url = new URL(page.url.href)
     url.hash = id
     replaceState(url.href, page.state)
   }
