@@ -12,7 +12,6 @@ type LiveGeometry = {
 	containerClientWidth: number;
 };
 
-
 /** Text of the rendered document, which lives inside a shadow root. */
 const documentText = (page: Page) =>
 	page
@@ -119,10 +118,7 @@ test('Web documents widen responsively without outer horizontal scrolling', asyn
 				cap: 56 * Number.parseFloat(getComputedStyle(pageRoot).fontSize),
 				documentWidth: documentBox.width,
 				hostWidth: preview.clientWidth,
-				centerError:
-					documentBox.left +
-					documentBox.width / 2 -
-					(hostBox.left + hostBox.width / 2),
+				centerError: documentBox.left + documentBox.width / 2 - (hostBox.left + hostBox.width / 2),
 				pageScrollWidth: pageRoot.scrollWidth,
 				pageClientWidth: pageRoot.clientWidth,
 				containerScrollWidth: container.scrollWidth,
@@ -181,10 +177,7 @@ test('Web documents widen responsively without outer horizontal scrolling', asyn
 				cap: 56 * Number.parseFloat(getComputedStyle(pageRoot).fontSize),
 				documentWidth: documentBox.width,
 				availableWidth: documentRoot.clientWidth,
-				centerError:
-					documentBox.left +
-					documentBox.width / 2 -
-					(bodyBox.left + bodyBox.width / 2),
+				centerError: documentBox.left + documentBox.width / 2 - (bodyBox.left + bodyBox.width / 2),
 				pageScrollWidth: pageRoot.scrollWidth,
 				pageClientWidth: pageRoot.clientWidth,
 				bodyScrollWidth: document.body.scrollWidth,
