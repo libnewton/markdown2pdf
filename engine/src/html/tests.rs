@@ -3,7 +3,7 @@
 //! the other.
 
 use super::*;
-use crate::convert_str;
+use crate::typst::convert_str;
 
 /// WCAG 2.1 relative luminance of a `#rrggbb` string.
 fn luminance(hex: &str) -> f64 {
@@ -106,8 +106,8 @@ fn every_advertised_language_highlights_something() {
 #[test]
 fn an_image_url_inside_a_code_span_is_not_a_reference() {
     let md = "Write `![a](https://example.com/x.png)` to embed it.\n\n![real](y.png)\n";
-    assert_eq!(crate::image_targets(md), vec!["y.png".to_string()]);
-    assert!(crate::collect_remote_images(md).is_empty());
+    assert_eq!(crate::discover(md).images, vec!["y.png".to_string()]);
+    assert!(crate::discover(md).remotes("remote").is_empty());
 }
 
 /// The TOML handed to the Typst templates has to carry every callout, so the
@@ -121,8 +121,9 @@ fn every_callout_reaches_the_typst_templates() {
             "{}",
             a.kind
         );
-        assert!(toml.contains(&format!("en = \"{}\"", a.en)), "{}", a.en);
-        assert!(toml.contains(&format!("de = \"{}\"", a.de)), "{}", a.de);
+        let (en, de) = (tokens::string(a.kind, false), tokens::string(a.kind, true));
+        assert!(toml.contains(&format!("en = \"{en}\"")), "{en}");
+        assert!(toml.contains(&format!("de = \"{de}\"")), "{de}");
         assert!(toml.contains(a.accent.0), "{}", a.accent.0);
     }
     assert!(toml.contains("[base]"));
@@ -219,6 +220,14 @@ const ALLOWED_TAGS: &[&str] = &[
     "figcaption",
     "img",
     "nobr",
+    // Raw inline formatting tags the renderer rebuilds without attributes.
+    "b",
+    "i",
+    "ins",
+    "s",
+    "strike",
+    "kbd",
+    "small",
 ];
 
 /// MathML, spelled out. `math-core`'s output is inserted unescaped, so this is
@@ -525,10 +534,9 @@ fn both_renderers_agree_on_which_h1_survives() {
 
         // What `lib.typ` computes before calling `convert`.
         let fm_title = Frontmatter::parse(&md)
-            .first("title")
+            .text("title")
             .filter(|t| !t.is_empty())
-            .unwrap_or_default()
-            .to_string();
+            .unwrap_or_default();
         let h1 = String::from_utf8(crate::leading_h1(md.as_bytes()).unwrap()).unwrap();
         let from_h1 = fm_title.is_empty() && !h1.is_empty();
         assert_eq!(
@@ -756,7 +764,7 @@ fn blockquotes_and_admonitions_carry_their_kind() {
 fn an_untitled_admonition_falls_back_to_its_default_label() {
     assert!(body(":::danger\nx\n:::").contains(">DANGER<"));
     assert!(body(":::important\nx\n:::").contains(">IMPORTANT<"));
-    assert!(body(":::success\nx\n:::").contains(">HIGHLIGHT<"));
+    assert!(body(":::success\nx\n:::").contains(">Success<"));
 }
 
 #[test]
@@ -1155,20 +1163,47 @@ fn raw_html_blocks_are_shown_not_executed() {
     );
 }
 
-/// `<br>` is the whole raw-HTML allowance. It earns its place because a table
-/// cell holds inline content only, so there is no Markdown way to get a second
-/// line into one; `__underline__` already covers what `<u>` was for.
+/// Raw HTML: a short list of inline formatting tags renders, rebuilt from
+/// the tag name so no attribute survives; comments vanish; every other tag is
+/// text.
 #[test]
-fn br_is_the_only_inline_tag_that_passes_through() {
+fn only_inline_formatting_tags_pass_through() {
     assert!(body("a<br>b<br/>c<br />d").contains("a<br>b<br>c<br>d"));
-    let u = body("a <u>b</u> c");
-    assert!(u.contains("a &lt;u&gt;b&lt;/u&gt; c"), "{u}");
-    // Near-misses are text too, not a second spelling of the tag.
-    for shape in ["<u foo=bar>x</u>", "< u>x</ u>", "<u/>x", "<break>x"] {
+    let out =
+        body("<kbd>Ctrl</kbd>+<kbd>C</kbd>, <sup>s</sup> <u onclick=\"x\">u</u> <small>m</small>");
+    assert!(out.contains("<kbd>Ctrl</kbd>+<kbd>C</kbd>"), "{out}");
+    assert!(
+        out.contains("<sup>s</sup> <u>u</u> <small>m</small>"),
+        "{out}"
+    );
+    // Near-misses and unpaired tags are text, not a second spelling.
+    for shape in [
+        "< u>x</ u>",
+        "<u/>x",
+        "<break>x",
+        "<b>never closed",
+        "<span>x</span>",
+    ] {
         let out = body(shape);
         assert!(out.contains("&lt;"), "{shape} was not escaped:\n{out}");
     }
     assert!(body("__still underlined__").contains("<u>still underlined</u>"));
+    let comments = body("a <!-- hidden --> b\n\n<!-- block -->\n\nc");
+    assert!(
+        !comments.contains("hidden") && !comments.contains("block"),
+        "{comments}"
+    );
+}
+
+/// The Typst side of the same policy.
+#[test]
+fn inline_formatting_tags_render_in_the_pdf() {
+    let out = convert_str("<b>b</b> <kbd>k</kbd> <span>s</span> a <!-- c --> z", false);
+    assert!(
+        out.contains("#strong[b] #md-kbd[k] \\<span\\>s\\<\\/span\\> a  z"),
+        "{out}"
+    );
+    assert_eq!(convert_str("<!-- only a comment -->", false), "");
 }
 
 #[test]
@@ -1205,7 +1240,10 @@ fn ampersands_are_escaped_exactly_once() {
 #[test]
 fn discovery_lists_only_local_images() {
     let md = "![a](images/a.png) ![b](https://e.com/b.png) ![c](sub/c.jpg)";
-    assert_eq!(local_images(md), vec!["images/a.png", "sub/c.jpg"]);
+    assert_eq!(
+        crate::discover(md).local_images().collect::<Vec<_>>(),
+        vec!["images/a.png", "sub/c.jpg"]
+    );
 }
 
 #[test]
@@ -1220,7 +1258,7 @@ footer-right: \"![](https://e.com/logo.svg =32x24)\"\n\
 ![](https://e.com/cover.png)";
 
     assert_eq!(
-        crate::image_targets(md),
+        crate::discover(md).images,
         vec![
             "https://e.com/cover.png",
             "https://e.com/logo.svg",
@@ -1229,11 +1267,11 @@ footer-right: \"![](https://e.com/logo.svg =32x24)\"\n\
         ]
     );
     assert_eq!(
-        local_images(md),
+        crate::discover(md).local_images().collect::<Vec<_>>(),
         vec!["images/header.png", "images/body.png"]
     );
     assert_eq!(
-        crate::collect_remote_images(md),
+        crate::discover(md).remotes("remote"),
         vec![
             (
                 "https://e.com/cover.png".to_string(),
@@ -1250,29 +1288,29 @@ footer-right: \"![](https://e.com/logo.svg =32x24)\"\n\
 #[test]
 fn only_cover_image_accepts_a_bare_frontmatter_path() {
     let md = "---\ncover-image: images/cover.png\ncover-logo: images/logo.png\nheader-left: https://e.com/header.png\n---";
-    assert_eq!(crate::image_targets(md), vec!["images/cover.png"]);
+    assert_eq!(crate::discover(md).images, vec!["images/cover.png"]);
 }
 
 #[test]
 fn discovery_finds_mermaid_inside_nested_blocks_but_not_inside_wider_fences() {
     let md = "```mermaid\ntop\n```\n\n:::info\n```mermaid\nnested\n```\n:::\n\n\
         ````md\n```mermaid\nquoted\n```\n````";
-    assert_eq!(crate::collect_mermaid_sources(md), vec!["top", "nested"]);
+    assert_eq!(crate::discover(md).mermaid, vec!["top", "nested"]);
 }
 
 #[test]
 fn duplicate_diagrams_share_one_asset() {
     let md = "```mermaid\nsame\n```\n\n```mermaid\nsame\n```";
-    assert_eq!(crate::collect_mermaid_sources(md).len(), 1);
+    assert_eq!(crate::discover(md).mermaid.len(), 1);
     let out = html_with(md, &mermaid_key("same"), b"<svg/>");
     assert_eq!(out.matches("md2pdf-mermaid").count(), 2, "{out}");
 }
 
 #[test]
 fn only_documents_with_math_ask_for_the_math_font() {
-    assert!(crate::has_math("$a$"));
-    assert!(crate::has_math("text\n\n$$x = 1$$"));
-    assert!(!crate::has_math("# Plain\n\nno formulas, just a `$` sign"));
+    assert!(crate::discover("$a$").math);
+    assert!(crate::discover("text\n\n$$x = 1$$").math);
+    assert!(!crate::discover("# Plain\n\nno formulas, just a `$` sign").math);
 }
 
 #[test]
@@ -1605,41 +1643,6 @@ fn a_heading_cannot_claim_a_reserved_id() {
     );
 }
 
-/// The batched asset list has to say exactly what the five single-purpose
-/// calls say, or a host that switches to it starts losing images.
-#[test]
-fn the_batched_asset_list_matches_the_individual_calls() {
-    let md = include_str!("../../../tests/extended.md");
-    let lines = |b: Vec<u8>| {
-        String::from_utf8(b)
-            .unwrap()
-            .lines()
-            .filter(|l| !l.is_empty())
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
-    let batched = lines(crate::html_assets(md.as_bytes()).unwrap());
-    let of = |kind: &str| {
-        batched
-            .iter()
-            .filter_map(|l| l.strip_prefix(&format!("{kind}\t")).map(str::to_string))
-            .collect::<Vec<_>>()
-    };
-
-    assert_eq!(
-        of("image"),
-        lines(crate::html_images(md.as_bytes()).unwrap())
-    );
-    assert_eq!(of("remote"), lines(crate::remotes(md.as_bytes()).unwrap()));
-    assert_eq!(of("emoji"), lines(crate::twemojis(md.as_bytes()).unwrap()));
-    assert_eq!(of("font"), lines(crate::html_fonts(md.as_bytes()).unwrap()));
-    assert_eq!(
-        of("mermaid"),
-        lines(crate::html_mermaid(md.as_bytes()).unwrap())
-    );
-    assert!(!of("mermaid").is_empty(), "the demo has diagrams");
-}
-
 /// Every fixture in `tests/`, so a new one is covered by adding it here once.
 const FIXTURES: &[(&str, &str)] = &[
     ("html-edge.md", include_str!("../../../tests/html-edge.md")),
@@ -1655,6 +1658,12 @@ const FIXTURES: &[(&str, &str)] = &[
         include_str!("../../../tests/frontmatter.md"),
     ),
     ("unicode.md", include_str!("../../../tests/unicode.md")),
+    ("hedgedoc.md", include_str!("../../../tests/hedgedoc.md")),
+    ("outline.md", include_str!("../../../tests/outline.md")),
+    (
+        "regressions.md",
+        include_str!("../../../tests/regressions.md"),
+    ),
 ];
 
 /// Content does not silently vanish.
@@ -1673,7 +1682,7 @@ fn no_fixture_loses_a_heading_a_task_or_a_code_block() {
         // The one heading allowed to disappear is the one promoted to title.
         let promoted = String::from_utf8(crate::leading_h1(md.as_bytes()).unwrap()).unwrap();
         let has_fm_title = Frontmatter::parse(md)
-            .first("title")
+            .text("title")
             .is_some_and(|t| !t.is_empty());
         let consumed = if has_fm_title {
             String::new()
@@ -1732,12 +1741,16 @@ fn no_fixture_loses_a_formula_to_the_html_math_renderer() {
             !out.contains("math-core-unknown-cmd"),
             "{name}: a formula rendered with a command dropped out of it"
         );
-        // `html-edge.md` carries malformed LaTeX on purpose; falling back to
-        // the source is the right answer there, and the only one.
-        if *name != "html-edge.md" {
+        // `html-edge.md` and `regressions.md` carry malformed LaTeX on
+        // purpose; falling back to the source is the right answer there.
+        if !matches!(*name, "html-edge.md" | "regressions.md") {
             assert!(
                 !out.contains("md2pdf-math-error"),
                 "{name}: a formula fell back to its source"
+            );
+            assert!(
+                !convert_str(md, false).contains("#md-math-error("),
+                "{name}: a formula fell back to its source in the PDF"
             );
         }
     }
@@ -1760,4 +1773,423 @@ fn no_fixture_can_inject_a_tag_or_an_attribute() {
             assert!(!checked.contains("<script"), "{name}: script in a fragment");
         }
     }
+}
+
+/// A leading `---` is a thematic break unless what follows it is a YAML
+/// mapping; it used to swallow the text up to the next `---`, and abort the
+/// PDF when that text was not YAML at all.
+#[test]
+fn a_leading_rule_is_frontmatter_only_when_a_mapping_follows() {
+    for (md, kept) in [
+        (
+            "---\n\nSome intro text.\n\n---\n\n## After",
+            "Some intro text.",
+        ),
+        ("---\n- alpha\n- beta\n---\nbody", "alpha"),
+        ("---\nSetext\n---\nbody", "Setext"),
+    ] {
+        assert!(body(md).contains(kept), "HTML lost {kept:?} in {md:?}");
+        assert!(
+            convert_str(md, false).contains(kept),
+            "Typst lost {kept:?} in {md:?}"
+        );
+    }
+    let md = "---\ntitle: T\n...\n\nbody";
+    assert!(!body(md).contains("title:"), "{}", body(md));
+    assert!(!convert_str(md, false).contains("title"));
+}
+
+#[test]
+fn block_scalars_work_in_html_too() {
+    let out = html("---\ntitle: >-\n  Folded\n  Title\n---\n\ntext");
+    assert!(out.contains("<h1>Folded Title</h1>"), "{out}");
+}
+
+#[test]
+fn a_task_is_checked_only_by_its_own_marker_in_html() {
+    let out = body("- [ ] parent\n  - [x] child");
+    let parent = out.find("parent").unwrap();
+    let first_box = &out[..parent];
+    assert!(!first_box.contains("checked"), "{out}");
+    assert!(out[parent..].contains("checked"), "{out}");
+}
+
+/// A checkbox write goes to the line the renderer reports, so inside every
+/// lifted block — rows, admonitions, spoilers, and those nested in each
+/// other — it has to be the absolute document line.
+#[test]
+fn tasks_in_lifted_blocks_report_absolute_lines() {
+    for md in [
+        "intro\n\n::::row\n- [ ] a\n\n- [ ] b\n::::\n",
+        "intro\n\n:::info\n- [ ] a\n:::\n",
+        "intro\n\n+++++ s\n- [ ] a\n+++++\n",
+        "intro\n\n::::row\n:::info\n- [ ] a\n:::\n::::\n",
+        "intro\n\n:::::info\n::::row\n+++++ s\n- [ ] a\n+++++\n::::\n:::::\n",
+    ] {
+        let out = editable(md);
+        let lines: Vec<&str> = md.lines().collect();
+        let mut rest = out.as_str();
+        let mut found = 0;
+        let marker = "<input type=\"checkbox\" data-md-line=\"";
+        while let Some(i) = rest.find(marker) {
+            rest = &rest[i + marker.len()..];
+            let n: usize = rest[..rest.find('"').unwrap()].parse().unwrap();
+            assert!(lines[n - 1].starts_with("- [ ]"), "{md:?}: line {n}");
+            found += 1;
+        }
+        assert!(found > 0, "{md:?}: {out}");
+    }
+}
+
+#[test]
+fn the_language_badge_shows_only_the_language() {
+    for (info, lang) in [
+        ("javascript=", "javascript"),
+        ("js=101", "js"),
+        ("{.python}", "python"),
+        ("python title=\"x\"", "python"),
+    ] {
+        let out = body(&format!("```{info}\nlet a = 1;\n```"));
+        assert!(
+            out.contains(&format!("data-lang=\"{lang}\"")),
+            "{info}: {out}"
+        );
+    }
+}
+
+#[test]
+fn semicolon_grouped_citations_resolve_in_html() {
+    let md = "---\nbibliography: inline\n---\n\nSee [@a; @b].\n\n@misc{a, title={A}}\n@misc{b, title={B}}\n";
+    let out = html(md);
+    assert!(
+        out.contains("md2pdf-ref-a") && out.contains("md2pdf-ref-b"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_colon_line_inside_a_fence_does_not_close_the_admonition() {
+    let md = ":::info\n```py\nprint(1)\n:::\nprint(2)\n```\n:::\nafter";
+    let typst = convert_str(md, false);
+    assert_eq!(typst.matches("#admonition(").count(), 1, "{typst}");
+    let inner = &typst[..typst.find("after").unwrap()];
+    assert!(inner.contains("print(2)"), "{typst}");
+    let out = body(md);
+    let aside = &out[out.find("<aside").unwrap()..out.find("</aside>").unwrap()];
+    assert_eq!(aside.matches("md2pdf-line").count(), 3, "{out}");
+}
+
+#[test]
+fn an_unclosed_admonition_stays_literal() {
+    let md = ":::info Title\nbody text\n\n## Later";
+    let typst = convert_str(md, false);
+    assert!(!typst.contains("#admonition("), "{typst}");
+    assert!(
+        typst.contains(":::info Title") && typst.contains("== Later"),
+        "{typst}"
+    );
+    let out = body(md);
+    assert!(
+        !out.contains("<aside") && out.contains(":::info Title"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_typed_placeholder_comment_does_not_copy_a_block() {
+    let md = ":::tip\nonce\n:::\n\n<!--admonition:0-->\n\n<!--spoiler:0-->";
+    assert_eq!(convert_str(md, false).matches("#admonition(").count(), 1);
+    assert_eq!(body(md).matches("<aside").count(), 1);
+}
+
+#[test]
+fn a_custom_id_after_inline_markup_is_applied_and_hidden() {
+    for (md, id) in [
+        ("## **Bold** {#b1}", "b1"),
+        ("## With `code` {#c1}", "c1"),
+        ("## [Link](u) {#l1}", "l1"),
+        ("## H $\\alpha$ {#a1}", "a1"),
+    ] {
+        let typst = convert_str(md, false);
+        assert!(typst.ends_with(&format!(" <{id}>")), "{md}: {typst}");
+        assert!(!typst.contains("{\\#"), "{md}: {typst}");
+        let out = body(md);
+        assert!(out.contains(&format!("id=\"{id}\"")), "{md}: {out}");
+        assert!(!out.contains("{#"), "{md}: {out}");
+    }
+}
+
+/// Each lifted block is parsed on its own; a footnote defined in one and
+/// referenced in another used to print as literal `[^a]`.
+#[test]
+fn footnotes_resolve_across_lifted_blocks() {
+    for md in [
+        "Top[^a].\n\n:::info\nInside[^a]\n:::\n\n[^a]: the note",
+        "+++++ s\nIn a spoiler[^a]\n+++++\n\n[^a]: the note",
+        "::::row\nIn a row[^a]\n\nb\n::::\n\n[^a]: the note",
+        "Outside[^a].\n\n:::info\nbox\n\n[^a]: the note\n:::",
+    ] {
+        let typst = convert_str(md, false);
+        assert!(typst.contains("#footnote[the note]"), "{md:?}: {typst}");
+        assert!(!typst.contains("^a"), "{md:?}: {typst}");
+        let out = body(md);
+        assert!(out.contains("md2pdf-fnref"), "{md:?}: {out}");
+        assert!(!out.contains("[^a]"), "{md:?}: {out}");
+    }
+}
+
+#[test]
+fn repeated_footnote_references_get_unique_ids() {
+    let out = body("a[^n] b[^n] c[^n]\n\n[^n]: note");
+    assert!(out.contains("id=\"md2pdf-fnref-1\""), "{out}");
+    assert!(out.contains("id=\"md2pdf-fnref-1-2\""), "{out}");
+    assert!(out.contains("id=\"md2pdf-fnref-1-3\""), "{out}");
+}
+
+#[test]
+fn inline_footnotes_in_different_blocks_stay_distinct() {
+    let md = "Top^[first].\n\n:::info\nBox^[second]\n:::\n\nAlso[^n].\n\n[^n]: named";
+    let out = html(md);
+    assert!(out.contains("first") && out.contains("second"), "{out}");
+    assert!(out.contains("md2pdf-fn-2"), "{out}");
+    let typst = convert_str(md, false);
+    assert!(
+        typst.contains("#footnote[first]") && typst.contains("#footnote[second]"),
+        "{typst}"
+    );
+}
+
+/// pandoc's rule: a super- or subscript holds no whitespace.
+#[test]
+fn super_and_subscripts_never_span_whitespace() {
+    let md = "2^10 and 3^4, ~5 to ~10\n\n19^th^ H~2~O ~~gone~~";
+    let typst = convert_str(md, false);
+    assert_eq!(
+        typst,
+        "2^10 and 3^4, \\~5 to \\~10\n\n19#super[th] H#sub[2]O #strike[gone]"
+    );
+    let out = body(md);
+    assert!(out.contains("2^10 and 3^4, ~5 to ~10"), "{out}");
+    assert!(
+        out.contains("19<sup>th</sup> H<sub>2</sub>O <del>gone</del>"),
+        "{out}"
+    );
+}
+
+#[test]
+fn outline_attachment_links_drop_their_byte_count() {
+    let md = "[report.pdf 1874](https://wiki.example.org/api/files.get?id=1) [v 2024](https://e.com/v 2024)";
+    let typst = convert_str(md, false);
+    assert!(typst.contains("[report.pdf]"), "{typst}");
+    let out = body(md);
+    assert!(out.contains(">report.pdf</a>"), "{out}");
+    let plain = body("[keep 1874](https://e.com/files/x.pdf)");
+    assert!(plain.contains(">keep 1874</a>"), "{plain}");
+}
+
+#[test]
+fn the_bibliography_heading_is_localised_and_configurable() {
+    let bib = "See [@a].\n\n@misc{a, title={A}}\n";
+    let with = |front: &str| html(&format!("---\nbibliography: inline\n{front}---\n\n{bib}"));
+    assert!(with("").contains("<h2>References</h2>"));
+    assert!(with("lang: de\n").contains("<h2>Referenzen</h2>"));
+    assert!(with("bibliography-title: Quellen\n").contains("<h2>Quellen</h2>"));
+    let none = with("bibliography-title: false\n");
+    assert!(none.contains("md2pdf-bibliography\"><ol>"), "{none}");
+}
+
+#[test]
+fn the_success_callout_is_labelled_success() {
+    assert!(body(":::success\nx\n:::").contains(">Success<"));
+    assert!(html("---\nlang: de\n---\n\n:::success\nx\n:::").contains(">Erfolg<"));
+}
+
+#[test]
+fn image_width_sets_the_default_size_in_both_outputs() {
+    let md = "---\nimage-width: 85%\n---\n\n![](a.png)\n\n![](b.png \"=40x\")";
+    let typst = convert_str(md, false);
+    assert!(
+        typst.contains("#md-image(\"a.png\", width: 85%)"),
+        "{typst}"
+    );
+    assert!(
+        typst.contains("#md-image(\"b.png\", width: 40pt)"),
+        "{typst}"
+    );
+    let out = render(md, "", "a.png\t8\n", PNG);
+    assert!(out.contains("style=\"width:85%\""), "{out}");
+    for bad in ["image-width: wide", "image-width: -5%", "image-width: 85"] {
+        let md = format!("---\n{bad}\n---\n\n![](a.png)");
+        assert!(convert_str(&md, false).contains("width: 100%"), "{bad}");
+    }
+    assert!(convert_str("![](a.png)", false).contains("width: 100%"));
+}
+
+#[test]
+fn breaks_false_makes_single_newlines_soft() {
+    let md = "---\nbreaks: false\n---\n\none\ntwo";
+    assert!(convert_str(md, false).ends_with("one two"));
+    assert!(body(md).contains("<p>one\ntwo</p>"), "{}", body(md));
+    assert!(convert_str("one\ntwo", false).ends_with("one\\\ntwo"));
+}
+
+#[test]
+fn a_linked_slot_image_is_discovered() {
+    let md = "---\nfooter-center: \"[![](logo.png =x24)](https://example.org)\"\n---\n\ntext";
+    assert_eq!(crate::discover(md).images, vec!["logo.png"]);
+}
+
+#[test]
+fn hedgedoc_embeds_become_labelled_links() {
+    for (md, label, url) in [
+        (
+            "{%youtube aqz-KE-bpKQ %}",
+            "YouTube: aqz-KE-bpKQ",
+            "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+        ),
+        (
+            "{%vimeo 124148255 %}",
+            "Vimeo: 124148255",
+            "https://vimeo.com/124148255",
+        ),
+        (
+            "{%gist schacon/4277 %}",
+            "Gist: schacon/4277",
+            "https://gist.github.com/schacon/4277",
+        ),
+        (
+            "{%slideshare a/b-1 %}",
+            "SlideShare: a/b-1",
+            "https://www.slideshare.net/a/b-1",
+        ),
+        (
+            "{%speakerdeck a/b %}",
+            "Speaker Deck: a/b",
+            "https://speakerdeck.com/a/b",
+        ),
+        (
+            "{%pdf https://example.com/s.pdf %}",
+            "PDF: https://example.com/s.pdf",
+            "https://example.com/s.pdf",
+        ),
+    ] {
+        let out = body(md);
+        assert!(
+            out.contains(&format!(
+                "<a href=\"{url}\" rel=\"noopener noreferrer\">{label}</a>"
+            )),
+            "{md}: {out}"
+        );
+        assert!(
+            convert_str(md, false).starts_with(&format!("#link(\"{url}\")[")),
+            "{md}"
+        );
+    }
+    // Only a paragraph of its own is an embed.
+    assert!(body("text {%youtube x %}").contains("{%youtube x %}"));
+}
+
+#[test]
+fn hedgedoc_bylines_are_small_grey_text() {
+    let md =
+        "Quote.\n[name=Ada] [time=Sun, Jun 28] [color=#907bf7]\n\nOnly colour [color=red] here.";
+    let out = body(md);
+    assert!(
+        out.contains("<span class=\"md2pdf-tag-byline\">— Ada, Sun, Jun 28</span>"),
+        "{out}"
+    );
+    assert!(out.contains("Only colour here."), "{out}");
+    let typst = convert_str(md, false);
+    assert!(
+        typst.contains(
+            "#text(size: 0.85em, fill: luma(120), style: \"italic\")[— Ada, Sun, Jun 28]"
+        ),
+        "{typst}"
+    );
+}
+
+#[test]
+fn a_size_inside_the_parentheses_sizes_the_image() {
+    let typst = convert_str("![a](pic.png =200x100)", false);
+    assert!(
+        typst.contains("#md-image(\"pic.png\", width: 200pt, height: 100pt)"),
+        "{typst}"
+    );
+    let out = render("![a](pic.png =200x)", "", "pic.png\t12\n", PNG);
+    assert!(out.contains("width=\"200\""), "{out}");
+}
+
+#[test]
+fn a_size_at_the_end_of_an_image_title_sizes_the_image() {
+    let typst = convert_str("![](p.png \"My caption =300x200\")", false);
+    assert!(
+        typst.contains("#md-image(\"p.png\", width: 300pt, height: 200pt)"),
+        "{typst}"
+    );
+}
+
+#[test]
+fn a_lone_backslash_line_is_an_empty_paragraph() {
+    let md = "Above\n\n\\\n\nBelow\n\nhard\\\nbreak";
+    let typst = convert_str(md, false);
+    assert!(typst.contains("Above\n\n#v(0.5em)\n\nBelow"), "{typst}");
+    assert!(typst.contains("hard\\\nbreak"), "{typst}");
+    assert!(body(md).contains("md2pdf-spacer"));
+}
+
+#[test]
+fn lettered_and_roman_lists_count_in_their_own_style() {
+    let typst = convert_str("a. alpha\nb. beta", false);
+    assert_eq!(
+        typst,
+        "#[\n#set enum(numbering: \"a.\")\n+ alpha\n+ beta\n]"
+    );
+    let roman = convert_str("iii. three\niv. four", false);
+    assert!(
+        roman.contains("numbering: \"i.\")\n3. three\n+ four"),
+        "{roman}"
+    );
+    let out = body("A. one\nB. two\n\ni. x\nii. y");
+    assert!(
+        out.contains("<ol type=\"A\"><li>one</li><li>two</li></ol>"),
+        "{out}"
+    );
+    assert!(out.contains("<ol type=\"i\">"), "{out}");
+    // One line, or a run that does not count up, is prose.
+    assert!(!body("A. Smith wrote this.").contains("<ol"));
+    assert!(!body("a. one\nc. three").contains("<ol"));
+}
+
+#[test]
+fn callouts_nest_inside_list_items_and_quotes() {
+    for md in [
+        "- item\n  :::info\n  inside\n  :::\n- next",
+        "> quote\n> :::warning\n> inside\n> :::",
+    ] {
+        let typst = convert_str(md, false);
+        assert!(typst.contains("#admonition("), "{md}: {typst}");
+        assert!(!typst.contains(":::"), "{md}: {typst}");
+        let out = body(md);
+        assert!(out.contains("<aside"), "{md}: {out}");
+        let outer = if md.starts_with('-') {
+            "<li>"
+        } else {
+            "<blockquote>"
+        };
+        assert!(
+            out.find(outer).unwrap() < out.find("<aside").unwrap(),
+            "{out}"
+        );
+    }
+}
+
+#[test]
+fn spoilers_from_three_syntaxes() {
+    let md = "++++\nOuter\n\n+++\nInner\n\nbody\n+++\n++++\n\n:::spoiler Click\nhidden\n:::\n\n+++++ Classic\ntext\n+++++";
+    let typst = convert_str(md, false);
+    assert!(typst.contains("#spoiler(summary: \"Outer\")"), "{typst}");
+    assert!(typst.contains("#spoiler(summary: \"Inner\")"), "{typst}");
+    assert!(typst.contains("#spoiler(summary: \"Click\")"), "{typst}");
+    assert!(typst.contains("#spoiler(summary: \"Classic\")"), "{typst}");
+    assert_eq!(body(md).matches("<details").count(), 4);
 }

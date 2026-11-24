@@ -89,6 +89,7 @@ const REST: &str = r#"}
 .md2pdf-subtitle { margin: 0 0 .6rem; font-size: 1.2em; color: var(--md-muted); }
 .md2pdf-byline { margin: 0; color: var(--md-muted); font-size: .95em; }
 .md2pdf-byline span + span::before { content: " · "; }
+.md2pdf-tag-byline { color: var(--md-muted); font-size: .85em; font-style: italic; }
 
 /* ---- headings --------------------------------------------------------- */
 

@@ -1,0 +1,682 @@
+E = mc^2	ok
+\!	ok
+\,	ok
+\,\;\!	ok
+\:	ok
+\;	ok
+\Bigg|	ok
+\Bigr)	ok
+\Big|	ok
+\Box	ok
+\Cap	ok
+\Cup	ok
+\DeclareMathOperator{\foo}{foo} \foo x	fails
+\Delta	ok
+\Diamond	ok
+\Downarrow	ok
+\Gamma	ok
+\Im	ok
+\Join	ok
+\Lambda	ok
+\Leftarrow	ok
+\Leftrightarrow	ok
+\Longleftarrow	ok
+\Longrightarrow	ok
+\Omega	ok
+\P	ok
+\Phi	ok
+\Pi	ok
+\Pr	ok
+\Psi	ok
+\Re	ok
+\Rightarrow	ok
+\S	ok
+\SI{5}{m}	fails
+\Sigma	ok
+\TeX \LaTeX	ok
+\Theta	ok
+\Uparrow	ok
+\Upsilon	ok
+\Vdash	ok
+\Vert	ok
+\Xi	ok
+\\	ok
+\acute{x}	ok
+\aleph	ok
+\alpha	ok
+\alpha \& \beta	ok
+\alpha\beta\gamma\Gamma\Delta\epsilon\varepsilon\phi\varphi\omega\Omega	ok
+\amalg	ok
+\angle	ok
+\approx	ok
+\arccos	ok
+\arcsin	ok
+\arctan	ok
+\arg	ok
+\ast	ok
+\asymp	ok
+\backepsilon	ok
+\backprime	ok
+\backslash	ok
+\barwedge	ok
+\bar{x}	ok
+\bcancel{x}	ok
+\because	ok
+\begin{align*} a &= b \\ c &= d \end{align*}	ok
+\begin{aligned} \nabla \cdot \mathbf{E} &= \frac{\rho}{\varepsilon_0} \\ \nabla \times \mathbf{B} &= \mu_0\mathbf{J} \end{aligned}	ok
+\begin{aligned} a &= b + c \\ d &= e - f \end{aligned}	ok
+\begin{aligned} a &= b \\ c &= d \end{aligned}	ok
+\begin{align} a &= b \\ c &= d \end{align}	ok
+\begin{array}{cc} 1 & 2 \\ 3 & 4 \end{array}	ok
+\begin{array}{|c|c|} \hline a & b \\ \hline \end{array}	ok
+\begin{bmatrix} 1 & 2 \\ 3 & 4 \end{bmatrix}	ok
+\begin{cases} a \end{cases}	ok
+\begin{cases} x & x>0 \\ -x & \text{otherwise} \end{cases}	ok
+\begin{eqnarray} a &=& b \end{eqnarray}	fails
+\begin{equation} E=mc^2 \end{equation}	ok
+\begin{gather*} a \\ b \end{gather*}	fails
+\begin{matrix} a \end{foo}	ok
+\begin{multline} a \\ b \end{multline}	fails
+\begin{pmatrix} a	ok
+\begin{pmatrix} a & b \\ c & d \end{pmatrix}	ok
+\begin{pmatrix} a & b \\ c \end{pmatrix}	ok
+\begin{split} a &= b \\ &= c \end{split}	ok
+\begin{vmatrix} 1 & 2 \\ 3 & 4 \end{vmatrix}	ok
+\beta	ok
+\beth	ok
+\between	ok
+\bigcap	ok
+\bigcup	ok
+\bigcup \bigcap	ok
+\bigg|	ok
+\bigl(	ok
+\bigl( x \bigr)	ok
+\bigl( x \bigr) \Bigl( \biggl( \Biggl(	ok
+\bigodot	ok
+\bigoplus	ok
+\bigoplus \bigotimes	ok
+\bigoplus \bigotimes \bigcup \bigcap \biguplus \bigvee \bigwedge \coprod	ok
+\bigotimes	ok
+\bigsqcup	ok
+\bigstar	ok
+\bigtriangledown	ok
+\bigtriangleup	ok
+\biguplus	ok
+\biguplus \bigvee \bigwedge \coprod	ok
+\bigvee	ok
+\bigwedge	ok
+\big|	ok
+\big| x \Big\| 	ok
+\binom{n}	fails
+\binom{n}{k}	ok
+\binom{n}{k} \dbinom{n}{k} {n \choose k}	ok
+\blacksquare \lozenge \bigstar \clubsuit \heartsuit	ok
+\blacktriangle	ok
+\blacktriangledown	ok
+\bmod	ok
+\bm{x}	ok
+\boldsymbol{\alpha}	ok
+\boldsymbol{x}	ok
+\bot	ok
+\bowtie	ok
+\boxdot	ok
+\boxed{X\to Y\to Z \;\Rightarrow\; I(X;Y)\ \ge\ I(X;Z)}	ok
+\boxed{x}	ok
+\boxminus	ok
+\boxplus	ok
+\boxtimes	ok
+\braket{a}{b}	ok
+\bra{b}	ok
+\breve{x}	ok
+\bullet	ok
+\bumpeq	ok
+\cancel{x}	ok
+\cancel{x} \bcancel{x} \xcancel{x}	ok
+\cap	ok
+\cap \emptyset	ok
+\cdot	ok
+\cdot \cdots \ldots \vdots \ddots \times \div \pm \mp \circ \bullet \star	ok
+\cdots	ok
+\centerdot	ok
+\ce{H2O}	fails
+\cfrac{a}{b}	ok
+\char"41	fails
+\checkmark	ok
+\check{x}	ok
+\chi	ok
+\circ	ok
+\circeq	ok
+\circlearrowleft	ok
+\circledast	ok
+\circledcirc	ok
+\circleddash	ok
+\clubsuit	ok
+\coloneq	ok
+\coloneq \coloneqq \eqqcolon	ok
+\colorbox{red}{x}	ok
+\color{red} x \textcolor{blue}{y} \colorbox{yellow}{z}	ok
+\color{red}x	ok
+\color{red}{x}	ok
+\complement	ok
+\cong	ok
+\coprod	ok
+\copyright	ok
+\cos	ok
+\cosh	ok
+\cot	ok
+\coth	ok
+\csc	ok
+\cup	ok
+\cup \cap	ok
+\cup \cap \emptyset \varnothing \setminus	ok
+\curlyvee	ok
+\curvearrowright	ok
+\dagger	ok
+\dagger \ddagger \checkmark \degree \angle \triangle \square \diamond	ok
+\daleth	ok
+\dbinom{n}{k}	ok
+\ddagger	ok
+\dddot{x}	ok
+\ddots	ok
+\ddot{x}	ok
+\def\a{b} \a	fails
+\deg	ok
+\delta	ok
+\det	ok
+\dfrac{1}{	ok
+\dfrac{a}{b}	ok
+\diagdown	ok
+\diagup	ok
+\diamondsuit	ok
+\dim	ok
+\displaystyle	fails
+\displaystyle \frac{a}{b}	ok
+\displaystyle \sum x \textstyle y \scriptstyle z \scriptscriptstyle w	ok
+\displaystyle x	ok
+\div	ok
+\divideontimes	ok
+\doteq	ok
+\dotplus	ok
+\dots	ok
+\dotsb	ok
+\dotsc	ok
+\dot{x}	ok
+\dot{x} \ddot{x}	ok
+\downarrow	ok
+\ell	ok
+\emph{a}	ok
+\emptyset	ok
+\enclose{circle}{x}	fails
+\end{pmatrix}	fails
+\epsilon	ok
+\eqcirc	ok
+\equiv	ok
+\eta	ok
+\eth	ok
+\eth \wp \imath \jmath \complement \Bbbk	fails
+\exists	ok
+\exp	ok
+\fbox{x}	ok
+\flat	ok
+\forall	ok
+\forall \exists \nexists \neg \land \lor	ok
+\forall \exists \nexists \neg \land \lor \wedge \vee \oplus \otimes	ok
+\frac a b	ok
+\frac12	ok
+\frac12 x^2 x_1^2 x^{a^b} x_{a_b}	ok
+\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}	ok
+\frac{1}	fails
+\frac{a	fails
+\frac{a}b	ok
+\frac{a}{	ok
+\frac{a}{b} \dfrac{a}{b} \tfrac{a}{b} \cfrac{a}{b}	ok
+\frown	ok
+\gamma	ok
+\gcd	ok
+\genfrac{(}{)}{0pt}{}{a}{b}	fails
+\geq	ok
+\geqq	ok
+\geqslant	ok
+\gets	ok
+\gg	ok
+\gimel	ok
+\grave{x}	ok
+\gtrless	ok
+\gtrsim	ok
+\hat{	ok
+\hat{x}	ok
+\hat{x} \tilde{x} \bar{x} \vec{x} \dot{x} \ddot{x} \widehat{xy} \widetilde{xy} \overline{ab} \underline{ab}	ok
+\hbar	ok
+\hbox{a}	ok
+\heartsuit	ok
+\hline	ok
+\hom	ok
+\hookleftarrow	ok
+\hookrightarrow	ok
+\hphantom{x}	ok
+\href{http://a.b}{x}	fails
+\href{javascript:alert(1)}{click}	fails
+\hslash	ok
+\hspace{1em}	ok
+\idotsint	fails
+\iff	ok
+\iiint	ok
+\iiint \iiiint \idotsint	fails
+\iint	ok
+\iint \iiint	ok
+\imath	ok
+\implies	ok
+\in	ok
+\in \notin \subset \subseteq \supset \cup \cap \emptyset	ok
+\in \notin \subset \subseteq \supset \cup \cap \emptyset \varnothing \setminus	ok
+\inf	ok
+\infty	ok
+\injlim	ok
+\int\nolimits_0^1	ok
+\int_0^1 x^2 \, dx = \frac{1}{3}	ok
+\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}	ok
+\intercal	ok
+\iota	ok
+\jmath	ok
+\kappa	ok
+\ker	ok
+\ket{a}	ok
+\ket{a} \bra{b}	ok
+\ket{a} \bra{b} \braket{a}{b}	ok
+\ket{x} \bra{y} \braket{x|y}	ok
+\lVert	ok
+\lVert x \rVert \lvert x \rvert \vert x \Vert	ok
+\label{eq} x \ref{eq} \eqref{eq}	fails
+\lambda	ok
+\land	ok
+\land \lor	ok
+\langle	ok
+\langle x \rangle	ok
+\lbrace	ok
+\lbrack	ok
+\lceil	ok
+\lceil x \rceil \lfloor y \rfloor	ok
+\ldots	ok
+\ldots \cdots \vdots \ddots	ok
+\leadsto	ok
+\left( \frac{a}{b} \right)	ok
+\left( \frac{a}{b} \right) \left[ x \right\} \left. y \right|	ok
+\left( x	fails
+\left( x \middle| y \right)	ok
+\left( x \right)	ok
+\left. x \right|	ok
+\left\langle x \right\rangle \left\| y \right\|	ok
+\left\{ \begin{array}{l} a \\ b \end{array} \right.	ok
+\leftarrow	ok
+\leftrightarrow	ok
+\leftrightarrows	ok
+\leq	ok
+\leq \geq \neq \approx \equiv \sim \simeq \cong \propto \ll \gg	ok
+\leqq	ok
+\leqslant	ok
+\lessapprox	ok
+\lesseqgtr	ok
+\lessgtr	ok
+\lesssim	ok
+\lfloor	ok
+\lg	ok
+\lgroup	ok
+\lhd	ok
+\lim	ok
+\lim_{x\to 0}	ok
+\liminf	ok
+\limits	fails
+\limits_{x}	fails
+\limsup	ok
+\ll	ok
+\llcorner	ok
+\lmoustache	fails
+\ln	ok
+\lnot	ok
+\log	ok
+\longleftarrow	ok
+\longleftrightarrow	ok
+\longmapsto	ok
+\lor	ok
+\lrcorner	ok
+\ltimes	ok
+\lvert	ok
+\mapsto	ok
+\mathbb{1}	ok
+\mathbb{1} \mathbb{N}\mathbb{Z}\mathbb{Q}\mathbb{C}	ok
+\mathbb{R}	ok
+\mathbb{R}^n	ok
+\mathbf{\Gamma}	ok
+\mathbf{v}	ok
+\mathbf{v} \boldsymbol{\alpha} \bm{x}	ok
+\mathbf{x}	ok
+\mathbin{a}	ok
+\mathbin{a} \mathrel{b} \mathord{c} \mathopen{(} \mathclose{)} \mathpunct{,}	ok
+\mathcal{L}	ok
+\mathchoice{a}{b}{c}{d}	fails
+\mathclose{)}	ok
+\mathds{1}	fails
+\mathfrak{g}	ok
+\mathinner{a}	ok
+\mathit{ab}	ok
+\mathnormal{a}	ok
+\mathopen{(}	ok
+\mathop{a}	ok
+\mathop{x}	ok
+\mathop{x}\limits_a	ok
+\mathord{a}	ok
+\mathpunct{,}	ok
+\mathrel{a}	ok
+\mathring{a} \breve{a} \check{a} \acute{a} \grave{a}	ok
+\mathring{x}	ok
+\mathrm{\LaTeX}	ok
+\mathrm{a<b}	ok
+\mathrm{d}	ok
+\mathrm{d}x \mathit{ab} \mathsf{S} \mathtt{T}	ok
+\mathrm{e}	ok
+\mathrm{e}^{i\pi}+1=0	ok
+\mathrm{Привет}	ok
+\mathscr{A}	ok
+\mathscr{F}	ok
+\mathscr{L}	ok
+\mathsf{S}	ok
+\mathstrut	ok
+\mathtt{T}	ok
+\max	ok
+\mbox{a}	fails
+\measuredangle	ok
+\mho	ok
+\mid	ok
+\mid \nmid	ok
+\mid \parallel \perp \nmid \nparallel	ok
+\middle|	ok
+\min	ok
+\mkern 3mu \mskip 3mu \kern 3pt	ok
+\mod	ok
+\models	ok
+\mp	ok
+\mu	ok
+\nabla	ok
+\nabla \infty \hbar \ell \Re \Im \aleph	ok
+\natural	ok
+\ncong	ok
+\nearrow	ok
+\neg	ok
+\neg \land	ok
+\negthinspace \thinspace \medspace \thickspace \negmedspace \enspace	ok
+\neq	ok
+\neq \leq \geq	ok
+\newcommand{\R}{\mathbb{R}} \R	ok
+\nexists	ok
+\ni	ok
+\nless	ok
+\nmid	ok
+\nolimits	fails
+\not=	ok
+\not= \not\in \neq	ok
+\not\in	ok
+\notin	ok
+\nparallel	ok
+\nrightarrow \nleq \ngtr \nsubseteq \lneq \precneqq	ok
+\nsim	ok
+\nu	ok
+\nwarrow	ok
+\oint	ok
+\omega	ok
+\operatorname*{argmax}_x f(x)	ok
+\operatorname*{a}	ok
+\operatorname{Hom}	ok
+\operatorname{rank}(A)	ok
+\operatorname{sgn} x	ok
+\oplus	ok
+\oplus \otimes	ok
+\oplus \otimes \partial \cap \langle x \rangle \hbar \mho	ok
+\otimes	ok
+\over \atop	fails
+\over b	ok
+\overbrace{a+b}^{n}	ok
+\overbrace{a}^{b}	ok
+\overleftarrow{AB}	ok
+\overleftrightarrow{AB}	ok
+\overline{ab}	ok
+\overline{x}	ok
+\overrightarrow{AB}	ok
+\overrightarrow{AB} \overleftarrow{AB} \overleftrightarrow{AB}	ok
+\overset{a}{b}	ok
+\overset{def}{=} \underset{a}{b} \stackrel{a}{=}	ok
+\owns	ok
+\parallel	ok
+\partial	ok
+\partial \nabla	ok
+\partial \nabla \infty \hbar \ell \Re \Im \aleph	ok
+\perp	ok
+\phantom{x}	ok
+\phase{a}	fails
+\pi	ok
+\pitchfork	ok
+\pm	ok
+\pmb{x}	ok
+\pmod{n}	ok
+\pod{n}	ok
+\pounds	ok
+\prec	ok
+\preccurlyeq	ok
+\preceq	ok
+\precsim	ok
+\prescript{a}{b}{X}	fails
+\prime	ok
+\projlim	ok
+\propto	ok
+\psi	ok
+\qquad	ok
+\qty(x) \abs{x} \norm{x} \dv{x}{y} \pdv{f}{x}	fails
+\quad	ok
+\quad \qquad	ok
+\quad \qquad \, \; \: \! \ \hspace{1em} \phantom{x} \vphantom{x}	ok
+\rVert	ok
+\raisebox{1em}{x}	ok
+\rangle	ok
+\rbrace	ok
+\rbrack	ok
+\rgroup	ok
+\rhd	ok
+\rho	ok
+\right)	fails
+\rightarrow	ok
+\rightarrow \Rightarrow \leftrightarrow \Leftrightarrow \mapsto \to \gets \implies \iff \longrightarrow	ok
+\rightharpoonup	ok
+\rightleftharpoons	ok
+\rightrightarrows	ok
+\rightsquigarrow	ok
+\rm x \bf y \it z \cal L	ok
+\rtimes	ok
+\rule{1em}{1pt}	fails
+\rvert	ok
+\scriptstyle	fails
+\searrow	ok
+\sec	ok
+\setminus	ok
+\sharp	ok
+\shortmid	fails
+\sideset{_a^b}{_c^d}\sum	fails
+\sigma	ok
+\sim	ok
+\simeq	ok
+\sin	ok
+\sinh	ok
+\slash	fails
+\smallsetminus	ok
+\smash{x}	ok
+\smile	ok
+\spadesuit	ok
+\sphericalangle	ok
+\sqcap	ok
+\sqcup	ok
+\sqrt[3]{x}	ok
+\sqrt{	ok
+\sqrt{x	ok
+\sqrt{x} \sqrt[3]{x}	ok
+\sqsubset	ok
+\sqsubseteq	ok
+\sqsupset	ok
+\sqsupseteq	ok
+\square	ok
+\stackrel{a}{=}	ok
+\stackrel{a}{b}	ok
+\star	ok
+\strut	fails
+\subset	ok
+\subseteq	ok
+\subsetneq	ok
+\substack{a \\ b}	ok
+\substack{a\\b}	ok
+\succ	ok
+\succeq	ok
+\sum\limits_{i=1}^n	ok
+\sum\limits_{i} \sum\nolimits_{i}	ok
+\sum_{i=0}^{n} \prod_{j} \int_0^\infty \oint \iint \lim_{x \to 0} \limsup	ok
+\sum_{i=1}^{n} \frac{x_i}{\sqrt{1 - x_i^2}} = \int_0^1 f(t)\,dt	ok
+\sum_{i=1}^{n} i	ok
+\sum_{n=1}^{\infty} \frac{1}{n^2} = \frac{\pi^2}{6}	ok
+\sup	ok
+\supset	ok
+\supset \cup \cap	ok
+\supseteq	ok
+\supsetneq	ok
+\surd	ok
+\swarrow	ok
+\tag{1}	ok
+\tag{1} x	ok
+\tan	ok
+\tanh	ok
+\tau	ok
+\tbinom{a}{b}	ok
+\tbinom{n}{k}	ok
+\textbf{a}	ok
+\textcolor{red}{x}	ok
+\textit{a}	ok
+\textnormal{a}	ok
+\textrm{a}	ok
+\textsf{a}	ok
+\textstyle	fails
+\textstyle\sum	ok
+\texttt{a}	ok
+\text{"quoted"}	ok
+\text{</math><script>alert(1)</script>}	ok
+\text{</span><img src=x onerror=alert(1)>}	fails
+\text{<a>}	ok
+\text{\textbackslash}	ok
+\text{a < b}	ok
+\text{a <b}	fails
+\text{a<1}	fails
+\text{a<b} 	fails
+\text{ab}	ok
+\text{a}	ok
+\text{hello world} \textbf{b} \textit{i} \mathrm{ab}	ok
+\text{if } x<y	ok
+\text{x<-y}	fails
+\text{ünï 中文 Привет}	ok
+\tfrac{a}{b}	ok
+\therefore	ok
+\theta	ok
+\thickapprox	ok
+\thicksim	ok
+\tilde{x}	ok
+\times	ok
+\to	ok
+\top	ok
+\triangle	ok
+\triangleleft	ok
+\triangleq	ok
+\triangleright	ok
+\twoheadrightarrow	ok
+\ulcorner	ok
+\underbrace{\overbrace{a}^{b}}_{c}	ok
+\underbrace{a+b}_{n}	ok
+\underbrace{a+b}_{n} \overbrace{x}^{y}	ok
+\underbrace{a}_{b}	ok
+\underline{ab}	ok
+\underset{a}{b}	ok
+\unknowncmd{x}	fails
+\uparrow	ok
+\uparrow \downarrow \Uparrow \nearrow \searrow \hookrightarrow \rightharpoonup \leadsto	ok
+\updownarrow	ok
+\uplus	ok
+\upsilon	ok
+\urcorner	ok
+\url{http://a.b}	fails
+\varDelta \varGamma \digamma \varkappa \Finv	ok
+\varepsilon	ok
+\varinjlim	fails
+\varliminf	fails
+\varnothing	ok
+\varpi	ok
+\varrho	ok
+\varsigma	ok
+\vartheta	ok
+\vartriangle	ok
+\vcenter{x}	fails
+\vdash	ok
+\vdots	ok
+\vec x	ok
+\vec{x}	ok
+\vee	ok
+\veebar	ok
+\verb|x|	fails
+\vert	ok
+\vphantom{x}	ok
+\wedge	ok
+\wedge \vee \oplus \otimes	ok
+\widehat{xy}	ok
+\widetilde{xy}	ok
+\wp	ok
+\wr	ok
+\xcancel{x}	ok
+\xi	ok
+\xleftarrow{a}	ok
+\xrightarrow{a}	ok
+\xrightarrow{a} \xleftarrow{b} \xrightarrow[c]{d}	ok
+\xrightarrow{f}	ok
+\zeta	ok
+\{	ok
+\|	ok
+\}	ok
+^x	ok
+`\alpha + \beta`	ok
+a & b	ok
+a < b	ok
+a < b > c & d	ok
+a \& b \% c \# d \$ e \_ f \{ g \}	ok
+a \\ b	ok
+a \atop b	ok
+a \cap b	ok
+a \lor b	ok
+a \over b	ok
+a \pmod{n} b \bmod n c \mod d	ok
+a<b	ok
+a\\b	ok
+angle	ok
+a}}	fails
+n \choose k	ok
+x := y	ok
+x \coloneq y	ok
+x \coloneqq y	ok
+x \limits	ok
+x \partial y	ok
+x\,\text{км}	ok
+x^	ok
+x^2	ok
+x^{	ok
+x_	ok
+x_{	ok
+{	ok
+{a \atop b}	ok
+{a \choose b}	ok
+{a \over b}	ok
+{a \over}	fails
+{{a}	ok
+{}	ok
+}	fails
+}{	fails
+Привет x	ok
+中文 x	ok

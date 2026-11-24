@@ -18,6 +18,7 @@ comrak = { version = "1.2", default-features = false, features = ["shortcodes"] 
 unic-emoji-char = "0.9"
 emojis = "0.9"
 math-core = "0.9"
+saphyr-parser = { version = "0.4", default-features = false }
 
 [profile.release]
 opt-level = "z"

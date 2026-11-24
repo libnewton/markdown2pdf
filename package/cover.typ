@@ -22,11 +22,20 @@
   rub: (primary: rgb("#17365C"), secondary: rgb("#8DAE10"), tint: rgb("#E7E7E7")),
 )
 
-// A palette name, or any hex colour — tints are derived from it.
+// `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`: what `rgb()` accepts without
+// failing the compile.
+#let _is-hex(v) = (
+  v.starts-with("#") and v.len() in (4, 5, 7, 9) and v.slice(1).clusters().all(
+    c => "0123456789abcdefABCDEF".contains(c),
+  )
+)
+
+// A palette name, or any hex colour — tints are derived from it. Anything
+// else gets the default palette.
 #let resolve-palette(name) = {
   if type(name) != str or name == "" { return cover-palettes.ocean }
   if name in cover-palettes { return cover-palettes.at(name) }
-  if not name.starts-with("#") { return cover-palettes.ocean }
+  if not _is-hex(name) { return cover-palettes.ocean }
   let c = rgb(name)
   (primary: c, secondary: c.lighten(25%), tint: c.lighten(75%))
 }
@@ -37,7 +46,7 @@
   if type(value) == color { return value }
   if type(value) != str or value.trim() == "" { return black }
   let v = value.trim()
-  if v.starts-with("#") { return rgb(v) }
+  if _is-hex(v) { return rgb(v) }
   (white: white, black: black).at(lower(v), default: black)
 }
 
