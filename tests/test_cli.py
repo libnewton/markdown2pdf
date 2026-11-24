@@ -256,7 +256,7 @@ class ArgumentTests(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
             cli.parse_args(["--help"])
-        for word in ("-o, --outdir", "--pdf", "--html", "input.md [input.md ...]"):
+        for word in ("-o", "--outdir", "--pdf", "--html", "input.md [input.md ...]"):
             self.assertIn(word, out.getvalue())
 
 

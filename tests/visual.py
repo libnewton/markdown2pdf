@@ -108,7 +108,10 @@ def main():
         packages = tmp / "packages"
         (packages / "local" / "md2pdf").mkdir(parents=True)
         os.symlink(ROOT / "package", packages / "local" / "md2pdf" / "0.1.0")
-        env = dict(os.environ, TYPST_PACKAGE_PATH=str(packages))
+        # Remote images must fail the same way everywhere, or the goldens would
+        # depend on the network: route every fetch to a closed local port.
+        offline = {k: "http://127.0.0.1:9" for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")}
+        env = dict(os.environ, TYPST_PACKAGE_PATH=str(packages), no_proxy="", NO_PROXY="", **offline)
 
         for fixture in fixtures:
             workdir = tmp / fixture.stem

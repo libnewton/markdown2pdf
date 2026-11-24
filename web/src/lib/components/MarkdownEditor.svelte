@@ -2,14 +2,13 @@
   import { onMount } from 'svelte'
   import { EditorView, basicSetup } from 'codemirror'
   import { keymap } from '@codemirror/view'
-  import { Compartment, EditorState, EditorSelection } from '@codemirror/state'
+  import { EditorState, EditorSelection } from '@codemirror/state'
   import { markdown as langMarkdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
   import { indentWithTab, isolateHistory } from '@codemirror/commands'
   import { linkAround, slashCommand, toggleWrap } from '#lib/editor/commands.ts'
   import { taskMarker } from '#lib/utils/task-marker.ts'
-  import { settingsStore, type Theme } from '#lib/stores/settingsStore.svelte.ts'
 
   interface Props {
     markdown: string
@@ -28,11 +27,9 @@
 
   let editorView = $state<EditorView | null>(null)
 
-  // One Dark's gutter grey is about 3.9:1 on its background; this one clears
-  // 4.5:1. The light theme is CodeMirror's own, whose gutter already does.
+  // The editor is dark in both app themes. One Dark's gutter grey is about
+  // 3.9:1 on its background; this one clears 4.5:1.
   const darkGutter = EditorView.theme({ '.cm-gutters': { color: '#9da5b4' } }, { dark: true })
-  const editorTheme = new Compartment()
-  const themeExtension = (theme: Theme) => (theme === 'dark' ? [oneDark, darkGutter] : [])
   let editorContainerEl = $state<HTMLDivElement | null>(null)
   let suppressEditorUpdate = false
   // The last string handed upward. Also lets the external-sync effect below
@@ -168,7 +165,8 @@
         keymap.of([...editorCommands, indentWithTab]),
         basicSetup,
         langMarkdown({ codeLanguages: languages }),
-        editorTheme.of(themeExtension(settingsStore.theme)),
+        oneDark,
+        darkGutter,
         EditorView.lineWrapping,
         // `readOnly` refuses the edit; `editable` also takes away the caret,
         // so the reference view never looks like something you can type in.
@@ -211,10 +209,6 @@
       if (emitTimer !== null) clearTimeout(emitTimer)
       editorView?.destroy()
     }
-  })
-
-  $effect(() => {
-    editorView?.dispatch({ effects: editorTheme.reconfigure(themeExtension(settingsStore.theme)) })
   })
 
   // Sync external markdown changes into the editor. We compare against the

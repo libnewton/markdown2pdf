@@ -5,7 +5,7 @@ test.beforeEach(async ({ page }) => {
 	await page.waitForSelector('.cm-content');
 });
 
-test('the editor follows the light and dark theme', async ({ page }) => {
+test('the editor stays dark in both themes', async ({ page }) => {
 	const background = () =>
 		page.locator('.cm-editor').evaluate((el) => getComputedStyle(el).backgroundColor);
 	const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
@@ -14,9 +14,8 @@ test('the editor follows the light and dark theme', async ({ page }) => {
 		await page.getByRole('button', { name: 'Switch to light' }).click();
 	const light = await background();
 	await page.getByRole('button', { name: 'Switch to dark' }).click();
-	await expect.poll(background).not.toBe(light);
-	await page.getByRole('button', { name: 'Switch to light' }).click();
-	await expect.poll(background).toBe(light);
+	expect(await background()).toBe(light);
+	expect(light).toBe('rgb(40, 44, 52)');
 });
 
 test('the logo keeps its size on a phone', async ({ page }) => {
