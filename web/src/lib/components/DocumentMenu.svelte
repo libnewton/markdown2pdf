@@ -126,9 +126,9 @@
             >
               <span class="doc-item-name">{doc.name}</span>
               <span class="doc-item-time">{relativeTime(doc.updatedAt)}</span>
-              <button class="doc-item-delete" onclick={(e) => handleDelete(e, doc)} title="Delete"
-                >&times;</button
-              >
+              <button class="doc-item-delete" onclick={(e) => handleDelete(e, doc)} title="Delete">
+                &times;
+              </button>
             </div>
           {/each}
         </div>

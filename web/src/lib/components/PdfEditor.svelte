@@ -1075,22 +1075,28 @@
                 isExportOpen = false
                 void downloadPdf()
               }}
-              disabled={!previewDoc}>PDF</button
+              disabled={!previewDoc}
             >
+              PDF
+            </button>
             <button
               class="menu-item"
               onclick={() => {
                 isExportOpen = false
                 downloadMarkdown()
-              }}>Markdown</button
+              }}
             >
+              Markdown
+            </button>
             <button
               class="menu-item"
               onclick={() => {
                 isExportOpen = false
                 void downloadHtml()
-              }}>HTML</button
+              }}
             >
+              HTML
+            </button>
           </div>
         {/if}
       </div>
@@ -1153,8 +1159,10 @@
           target="_blank"
           rel="noopener"
           title="Reference — every feature, source next to result"
-          aria-label="Reference">?</a
+          aria-label="Reference"
         >
+          ?
+        </a>
       {/if}
 
       <button
@@ -1287,9 +1295,10 @@
               </div>
             {/if}
             {#if previewMode === 'pages'}
-              <span class="page-info"
-                >{svgPageCount || '—'} {svgPageCount === 1 ? 'page' : 'pages'}</span
-              >
+              <span class="page-info">
+                {svgPageCount || '—'}
+                {svgPageCount === 1 ? 'page' : 'pages'}
+              </span>
             {/if}
             {#if status === 'error'}
               <div class="error-badge">
@@ -1387,10 +1396,13 @@
             class="btn btn-secondary btn-sm"
             href="https://github.com/libnewton/markdown2pdf"
             target="_blank"
-            rel="noopener noreferrer">Source on GitHub</a
+            rel="noopener noreferrer"
           >
-          <button class="btn btn-primary btn-sm" onclick={() => (isAboutOpen = false)}>Close</button
-          >
+            Source on GitHub
+          </a>
+          <button class="btn btn-primary btn-sm" onclick={() => (isAboutOpen = false)}>
+            Close
+          </button>
         </div>
       </div>
     </div>

@@ -97,7 +97,7 @@ jobs:
     # Browsers and their system libraries come with the image. Keep the tag
     # equal to the @playwright/test version in web/package.json.
     container:
-      image: mcr.microsoft.com/playwright:v1.62.1-noble
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
       options: --ipc=host
     defaults:
       run:
@@ -120,6 +120,6 @@ jobs:
           want=$(node -p "require('@playwright/test/package.json').version")
           case "$PLAYWRIGHT_IMAGE" in *"v$want-"*) ;; *) echo "::error::container is $PLAYWRIGHT_IMAGE, package wants $want"; exit 1 ;; esac
         env:
-          PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.62.1-noble
+          PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.1-noble
       - run: npm run build
       - run: npm run test:e2e
