@@ -42,6 +42,8 @@ let compilerPromise: Promise<TypstCompiler> | null = null;
 const CORE_FONTS: string[] = [
 	'/fonts/IBMPlexSans-Regular.ttf',
 	'/fonts/IBMPlexSans-Bold.ttf',
+	'/fonts/IBMPlexSans-Italic.ttf',
+	'/fonts/IBMPlexSans-BoldItalic.ttf',
 	'/fonts/NewCMMath-Regular.otf',
 	'/fonts/NewCMMath-Book.otf',
 	'/fonts/DejaVuSansMono.ttf',

@@ -109,7 +109,12 @@ fn is_bibtex_entry_open(line: &str) -> bool {
     kind_len > 0 && rest.as_bytes().get(kind_len) == Some(&b'{')
 }
 
-pub(crate) fn preprocess_citations(src: &str) -> String {
+/// Mark `[@key]` citations for the renderers, outside code. Only keys in
+/// `known` are cited: an unknown key stays literal `[@key]` text, and in a
+/// group the known keys are cited together with each unknown one following as
+/// text. Returns the marked source and the unknown keys, in order.
+pub(crate) fn preprocess_citations(src: &str, known: &HashSet<String>) -> (String, Vec<String>) {
+    let mut unknown = Vec::new();
     let mut out = String::with_capacity(src.len());
     let mut fence: Option<(char, usize)> = None;
     for line in src.split_inclusive('\n') {
@@ -124,13 +129,21 @@ pub(crate) fn preprocess_citations(src: &str) -> String {
         } else if fence.is_some() {
             out.push_str(line);
         } else {
-            out.push_str(&replace_citations_outside_code_spans(line));
+            out.push_str(&replace_citations_outside_code_spans(
+                line,
+                known,
+                &mut unknown,
+            ));
         }
     }
-    out
+    (out, unknown)
 }
 
-fn replace_citations_outside_code_spans(line: &str) -> String {
+fn replace_citations_outside_code_spans(
+    line: &str,
+    known: &HashSet<String>,
+    unknown: &mut Vec<String>,
+) -> String {
     let mut out = String::with_capacity(line.len());
     let mut rest = line;
     let mut code_ticks = 0;
@@ -149,10 +162,21 @@ fn replace_citations_outside_code_spans(line: &str) -> String {
         if code_ticks == 0 && rest.starts_with("[@") {
             if let Some(end) = rest.find(']') {
                 let group = &rest[1..end];
-                if citation_keys(group).is_some() {
-                    out.push_str(CITATION_OPEN_TOKEN);
-                    out.push_str(group);
-                    out.push_str(CITATION_CLOSE_TOKEN);
+                if let Some(keys) = citation_keys(group) {
+                    let (cited, missing): (Vec<&str>, Vec<&str>) =
+                        keys.into_iter().partition(|k| known.contains(*k));
+                    if cited.is_empty() {
+                        out.push_str(&rest[..=end]);
+                    } else {
+                        out.push_str(CITATION_OPEN_TOKEN);
+                        let cited: Vec<String> = cited.iter().map(|k| format!("@{k}")).collect();
+                        out.push_str(&cited.join(", "));
+                        out.push_str(CITATION_CLOSE_TOKEN);
+                        for key in &missing {
+                            out.push_str(&format!(" [@{key}]"));
+                        }
+                    }
+                    unknown.extend(missing.iter().map(|k| k.to_string()));
                     rest = &rest[end + 1..];
                     continue;
                 }

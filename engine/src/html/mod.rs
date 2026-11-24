@@ -29,7 +29,7 @@ use comrak::nodes::{AstNode, ListType, NodeValue, TableAlignment};
 use comrak::Arena;
 use math::Math;
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Stand-in for the outline, substituted once every heading is known.
 const TOC_SLOT: &str = "\u{e010}md2pdf-toc\u{e011}";
@@ -102,6 +102,7 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
         math: Math::new(),
         german: fm.text("lang").is_some_and(|l| l.starts_with("de")),
         citations: !bib_src.is_empty(),
+        cite_keys: bibtex_keys(&bib_src),
         cites: Vec::new(),
         notes: Vec::new(),
         note_index: HashMap::new(),
@@ -361,6 +362,8 @@ struct Doc<'b> {
     math: Math,
     german: bool,
     citations: bool,
+    /// The keys of the inline bibliography; only these are cited.
+    cite_keys: HashSet<String>,
     /// Citation keys in order of first use — that order is the numbering.
     cites: Vec<String>,
     notes: Vec<Note>,
@@ -480,7 +483,7 @@ impl<'a> Frame<'a> {
 /// author typed. It is applied once here rather than at every use.
 fn render_source(src: &str, doc: &mut Doc, strip_h1: bool, base: &[u32]) -> String {
     let prepared = if doc.citations {
-        preprocess_citations(src)
+        preprocess_citations(src, &doc.cite_keys).0
     } else {
         src.to_string()
     };
@@ -1239,6 +1242,11 @@ fn bibliography(bibtex: &str, doc: &Doc) -> String {
     }
     out.push_str("</ol></section>");
     out
+}
+
+/// The entry keys of a BibTeX source.
+pub(crate) fn bibtex_keys(bib: &str) -> HashSet<String> {
+    parse_bibtex(bib).into_keys().collect()
 }
 
 /// Minimal BibTeX reader: entry key plus `field = {value}` / `field = "value"`.

@@ -27,6 +27,7 @@ A comment needs two slashes: foo // bar /* baz.
 
 Broken: $\frac{a$, unsupported: $\href{https://example.org}{x}$, a label: $\text{a<b}$.
 Colon-equals: $x \coloneq y$ and $a \eqqcolon b$.
+Bars: $|K|$, $K[i \bmod |K|]$ and $x |K| y$ are delimiters; $a | b$ stays a relation.
 
 ## Emoji
 

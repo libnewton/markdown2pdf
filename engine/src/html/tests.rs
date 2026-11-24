@@ -2013,7 +2013,7 @@ fn image_width_sets_the_default_size_in_both_outputs() {
         "{typst}"
     );
     assert!(
-        typst.contains("#md-image(\"b.png\", width: 40pt)"),
+        typst.contains("#md-image(\"b.png\", width: 30pt)"),
         "{typst}"
     );
     let out = render(md, "", "a.png\t8\n", PNG);
@@ -2112,7 +2112,7 @@ fn hedgedoc_bylines_are_small_grey_text() {
 fn a_size_inside_the_parentheses_sizes_the_image() {
     let typst = convert_str("![a](pic.png =200x100)", false);
     assert!(
-        typst.contains("#md-image(\"pic.png\", width: 200pt, height: 100pt)"),
+        typst.contains("#md-image(\"pic.png\", width: 150pt, height: 75pt)"),
         "{typst}"
     );
     let out = render("![a](pic.png =200x)", "", "pic.png\t12\n", PNG);
@@ -2123,7 +2123,7 @@ fn a_size_inside_the_parentheses_sizes_the_image() {
 fn a_size_at_the_end_of_an_image_title_sizes_the_image() {
     let typst = convert_str("![](p.png \"My caption =300x200\")", false);
     assert!(
-        typst.contains("#md-image(\"p.png\", width: 300pt, height: 200pt)"),
+        typst.contains("#md-image(\"p.png\", width: 225pt, height: 150pt)"),
         "{typst}"
     );
 }
@@ -2212,4 +2212,20 @@ fn code_keeps_byline_tags_and_sizes_verbatim() {
     );
     assert!(typst.contains("[time=now]"), "{typst}");
     assert!(!typst.contains("#v(0.5em)"), "{typst}");
+}
+
+#[test]
+fn an_unknown_citation_key_stays_text_without_an_entry() {
+    let md = "---\nbibliography: inline\n---\n\nSee [@a], [@nope] and [@a; @gone].\n\n@misc{a, title={A}}\n";
+    let out = html(md);
+    assert!(out.contains("[@nope]"), "{out}");
+    assert!(out.contains("[1]</a> [@gone]"), "{out}");
+    assert!(
+        !out.contains("md2pdf-ref-nope") && !out.contains("md2pdf-ref-gone"),
+        "{out}"
+    );
+    assert_eq!(
+        String::from_utf8(crate::unknown_citations(md.as_bytes()).unwrap()).unwrap(),
+        "nope\ngone"
+    );
 }

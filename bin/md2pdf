@@ -63,6 +63,7 @@ MAIN_TEMPLATE = """#import "@local/md2pdf:0.1.0": prepare, prepare-html
 )
 #metadata(_d.remotes) <md2pdf-remote-images>
 #metadata(_d.images) <md2pdf-images>
+#metadata(_d.unknown-cites) <md2pdf-unknown-cites>
 #if _html [
   #metadata(prepare-html(
     _src,
@@ -79,9 +80,15 @@ MAIN_TEMPLATE = """#import "@local/md2pdf:0.1.0": prepare, prepare-html
 
 EVAL_REMOTES = "query(<md2pdf-remote-images>).first().value"
 EVAL_IMAGES = "query(<md2pdf-images>).first().value"
+EVAL_CITES = "query(<md2pdf-unknown-cites>).first().value"
 EVAL_HTML = "query(<md2pdf-html>).first().value"
-EVAL_MANIFEST = "(remotes: %s, images: %s)" % (EVAL_REMOTES, EVAL_IMAGES)
-EVAL_BOTH = "(remotes: %s, images: %s, html: %s)" % (EVAL_REMOTES, EVAL_IMAGES, EVAL_HTML)
+EVAL_MANIFEST = "(remotes: %s, images: %s, cites: %s)" % (EVAL_REMOTES, EVAL_IMAGES, EVAL_CITES)
+EVAL_BOTH = "(remotes: %s, images: %s, cites: %s, html: %s)" % (
+    EVAL_REMOTES,
+    EVAL_IMAGES,
+    EVAL_CITES,
+    EVAL_HTML,
+)
 
 MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdown", ".mkd")
 
@@ -740,7 +747,11 @@ def render_file(exe, fonts, args, source, output, fmt):
             html = manifest and manifest["html"]
         if manifest is None:
             manifest, _ = evaluate(EVAL_MANIFEST, dict(base, **{"md2pdf-query": "1"}))
-        remotes, images = (manifest["remotes"], manifest["images"]) if manifest else ([], [])
+        remotes, images, cites = (
+            (manifest["remotes"], manifest["images"], manifest["cites"]) if manifest else ([], [], [])
+        )
+        for key in cites:
+            warn("unknown citation key %s in %s" % (key, source))
         missing = [i for i in images if not (docdir / i.lstrip("/")).is_file()]
         for image in missing:
             warn("missing image %s in %s" % (image, source))

@@ -14,6 +14,8 @@ use std::collections::{HashMap, HashSet};
 /// spoiler and row body re-parsed inside it.
 pub(crate) struct Doc {
     pub(crate) citations: bool,
+    /// The keys of the inline bibliography; only these are cited.
+    cite_keys: HashSet<String>,
     /// Directory prefix of the `<dir>/<hash>` aliases for remote images.
     pub(crate) remote_dir: String,
     /// Heading ids already emitted, for stable duplicate suffixes.
@@ -33,9 +35,11 @@ pub(crate) struct Doc {
 }
 
 impl Doc {
-    pub(crate) fn new(citations: bool, remote_dir: &str) -> Self {
+    /// `bib` is the inline BibTeX, empty when the document cites nothing.
+    pub(crate) fn new(bib: &str, remote_dir: &str) -> Self {
         Self {
-            citations,
+            citations: !bib.is_empty(),
+            cite_keys: crate::html::bibtex_keys(bib),
             remote_dir: remote_dir.to_string(),
             slugs: RefCell::new(HashMap::new()),
             math: OnceCell::new(),
@@ -60,19 +64,19 @@ pub(crate) fn convert(src: &str, strip_h1: bool, doc: &mut Doc) -> String {
 
 #[cfg(test)]
 pub(crate) fn convert_str(src: &str, strip_h1: bool) -> String {
-    convert_str_with_citations(src, strip_h1, false)
+    convert_str_with_bib(src, strip_h1, "")
 }
 
 #[cfg(test)]
-pub(crate) fn convert_str_with_citations(src: &str, strip_h1: bool, citations: bool) -> String {
-    convert(src, strip_h1, &mut Doc::new(citations, "remote"))
+pub(crate) fn convert_str_with_bib(src: &str, strip_h1: bool, bib: &str) -> String {
+    convert(src, strip_h1, &mut Doc::new(bib, "remote"))
 }
 
 /// Recursive: admonition and spoiler bodies are re-run through it so nested
 /// custom syntax works.
 fn render_source(src: &str, strip_h1: bool, alignment: Option<Alignment>, doc: &Doc) -> String {
     let citation_source = if doc.citations {
-        preprocess_citations(src)
+        preprocess_citations(src, &doc.cite_keys).0
     } else {
         src.to_string()
     };
@@ -607,7 +611,7 @@ impl<'a> Ctx<'a> {
     /// shown as its source instead, as the HTML renderer does.
     fn render_math(&self, display: bool, latex: &str) -> String {
         let alignment = self.visual_alignment();
-        let latex = &mitex_symbols(latex);
+        let latex = &pair_bars(&mitex_symbols(latex));
         if self.doc.math.get_or_init(Math::new).pdf_accepts(latex) {
             return render_math(display, latex, alignment);
         }
@@ -794,6 +798,83 @@ fn mitex_symbols(latex: &str) -> String {
     out
 }
 
+/// `|x|` as `\lvert x \rvert`. mitex reads every bare `|` as a relation and
+/// spaces it like one, so `|K|` came out as `| K |`; LaTeX itself treats a
+/// pair as delimiters. Bars pair up left to right within one brace group; a
+/// lone `|` (`a | b`, divides) stays a relation. `\|`, and a bar that belongs
+/// to `\left`, `\right`, `\middle` or a `\big` size, are left alone.
+fn pair_bars(latex: &str) -> String {
+    let chars: Vec<char> = latex.chars().collect();
+    // Free bars per open brace group; `None` for an array's column spec,
+    // whose bars are rules, not delimiters.
+    let mut groups: Vec<Option<Vec<usize>>> = vec![Some(Vec::new())];
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+    let close = |group: Option<Vec<usize>>, pairs: &mut Vec<(usize, usize)>| {
+        let bars = group.unwrap_or_default();
+        pairs.extend(bars.as_chunks::<2>().0.iter().map(|&[a, b]| (a, b)));
+    };
+    let mut command = String::new();
+    let mut column_spec_next = false;
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => {
+                let start = i + 1;
+                let mut end = start;
+                while end < chars.len() && chars[end].is_ascii_alphabetic() {
+                    end += 1;
+                }
+                command = chars[start..end].iter().collect();
+                if command == "begin" {
+                    let env: String = chars[end..].iter().take_while(|&&c| c != '}').collect();
+                    let env = env.trim_start().trim_start_matches('{');
+                    column_spec_next = matches!(env, "array" | "subarray" | "tabular");
+                    end += chars[end..]
+                        .iter()
+                        .position(|&c| c == '}')
+                        .map_or(0, |p| p + 1);
+                    command.clear();
+                }
+                // `\|` and other one-character commands are skipped whole.
+                i = if end == start { start + 1 } else { end };
+                continue;
+            }
+            '{' => {
+                groups.push((!column_spec_next).then(Vec::new));
+                column_spec_next = false;
+            }
+            '}' if groups.len() > 1 => {
+                let group = groups.pop().flatten();
+                close(group, &mut pairs);
+            }
+            '|' => {
+                let sized = matches!(command.as_str(), "left" | "right" | "middle")
+                    || command.starts_with("big")
+                    || command.starts_with("Big");
+                if let (false, Some(Some(bars))) = (sized, groups.last_mut()) {
+                    bars.push(i);
+                }
+            }
+            c if c.is_whitespace() => {
+                i += 1;
+                continue;
+            }
+            _ => column_spec_next = false,
+        }
+        command.clear();
+        i += 1;
+    }
+    while let Some(group) = groups.pop() {
+        close(group, &mut pairs);
+    }
+    let mut out = chars.iter().map(char::to_string).collect::<Vec<_>>();
+    for (open, close) in pairs {
+        out[open] = "\\lvert ".to_string();
+        out[close] = " \\rvert ".to_string();
+    }
+    out.concat()
+}
+
 /// Math is delegated to the Typst package's `md-math` helper (mitex-backed),
 /// so the engine carries no LaTeX->Typst conversion.
 fn render_math(display: bool, latex: &str, alignment: Alignment) -> String {
@@ -843,10 +924,10 @@ fn render_image(url: &str, title: &str, alt: &str, alignment: Alignment, doc: &D
     match &dims {
         Some((w, h)) => {
             if let Some(w) = w {
-                args.push(format!("width: {w}pt"));
+                args.push(format!("width: {}", px_to_pt(w)));
             }
             if let Some(h) = h {
-                args.push(format!("height: {h}pt"));
+                args.push(format!("height: {}", px_to_pt(h)));
             }
         }
         None => args.push(format!("width: {}", doc.image_width)),
@@ -858,7 +939,7 @@ fn render_image(url: &str, title: &str, alt: &str, alignment: Alignment, doc: &D
     let figure_width = dims
         .as_ref()
         .and_then(|(width, _)| width.as_ref())
-        .map(|width| format!("{width}pt"))
+        .map(|width| px_to_pt(width))
         .unwrap_or_else(|| doc.image_width.clone());
 
     // Alt text becomes a small centered caption, unless it is just a dim spec.
@@ -907,6 +988,13 @@ fn typst_lang(lang: &str) -> &str {
         }
         _ => "",
     }
+}
+
+/// An image size is in CSS pixels, as in the HTML output; Typst wants points.
+fn px_to_pt(px: &str) -> String {
+    let pt = px.parse::<f64>().unwrap_or(0.0) * 0.75;
+    let pt = format!("{pt:.2}");
+    format!("{}pt", pt.trim_end_matches('0').trim_end_matches('.'))
 }
 
 fn max_backtick_run(s: &str) -> usize {
@@ -1011,14 +1099,31 @@ mod tests {
         let ordinary = convert_str(source, false);
         assert!(ordinary.contains(r"\[\@first\]"), "{ordinary}");
 
-        let cited = convert_str_with_citations(source, false, true);
+        let cited = convert_str_with_bib(source, false, BIB);
         assert_eq!(cited.matches("#cite(label(\"first\"))").count(), 2);
-        assert!(cited.contains("#cite(label(\"missing\"))"), "{cited}");
+        // A key the bibliography lacks stays text instead of failing the PDF.
+        assert!(cited.contains(r"\[\@missing\]"), "{cited}");
+        assert!(!cited.contains("label(\"missing\")"), "{cited}");
+    }
+
+    const BIB: &str = "@misc{first, title={F}}\n@misc{second, title={S}}";
+
+    /// In a group the known keys are cited together and each unknown one
+    /// follows as literal text.
+    #[test]
+    fn an_unknown_key_in_a_group_stays_text() {
+        let out = convert_str_with_bib("See [@first; @nope; @second].", false, BIB);
+        assert!(
+            out.contains("#md-cite-group((label(\"first\"), label(\"second\"))) \\[\\@nope\\]."),
+            "{out}"
+        );
+        let all = convert_str_with_bib("See [@a; @b].", false, BIB);
+        assert!(all.contains(r"\[\@a; \@b\]"), "{all}");
     }
 
     #[test]
     fn grouped_citations_become_one_typst_citation() {
-        let out = convert_str_with_citations("See [@first, @second].", false, true);
+        let out = convert_str_with_bib("See [@first, @second].", false, BIB);
         assert!(
             out.contains("#md-cite-group((label(\"first\"), label(\"second\")))"),
             "{out}"
@@ -1028,7 +1133,7 @@ mod tests {
 
     #[test]
     fn semicolon_grouped_citations_work_like_commas() {
-        let out = convert_str_with_citations("See [@first; @second].", false, true);
+        let out = convert_str_with_bib("See [@first; @second].", false, BIB);
         assert!(
             out.contains("#md-cite-group((label(\"first\"), label(\"second\")))"),
             "{out}"
@@ -1058,14 +1163,14 @@ mod tests {
 
     #[test]
     fn malformed_citation_syntax_remains_text() {
-        let out = convert_str_with_citations("See [@two keys] and [@].", false, true);
+        let out = convert_str_with_bib("See [@two keys] and [@].", false, BIB);
         assert!(out.contains(r"\[\@two keys\]"), "{out}");
         assert!(out.contains(r"\[\@\]"), "{out}");
     }
 
     #[test]
     fn citations_in_code_remain_literal() {
-        let out = convert_str_with_citations("`[@inline]`\n\n```txt\n[@fenced]\n```", false, true);
+        let out = convert_str_with_bib("`[@inline]`\n\n```txt\n[@fenced]\n```", false, BIB);
         assert!(out.contains("`[@inline]`"), "{out}");
         assert!(out.contains("[@fenced]"), "{out}");
         assert!(!out.contains("#cite"), "{out}");
@@ -1274,6 +1379,41 @@ mod tests {
     }
 
     #[test]
+    fn bar_pairs_reach_mitex_as_delimiters() {
+        for (latex, want) in [
+            ("|K|", r"\\lvert K \\rvert "),
+            (r"K[i \bmod |K|]", r"K[i \\bmod \\lvert K \\rvert ]"),
+            ("x |K| y", r"x \\lvert K \\rvert  y"),
+            ("|a| + |b|", r"\\lvert a \\rvert  + \\lvert b \\rvert "),
+            ("a | b", "a | b"),
+            (r"\{ x | x > 0 \}", r"\\{ x | x > 0 \\}"),
+            (r"\|v\| + \left| x \right|", r"\\|v\\| + \\left| x \\right|"),
+            ("{|x|} | y", r"{\\lvert x \\rvert } | y"),
+            (
+                r"\begin{array}{|c|c|} |a| & b \end{array}",
+                r"\\begin{array}{|c|c|} \\lvert a \\rvert  & b \\end{array}",
+            ),
+        ] {
+            let out = convert_str(&format!("${latex}$"), false);
+            assert_eq!(
+                out,
+                format!("#md-math(false, \"{}\")", want.trim()),
+                "{latex}"
+            );
+        }
+    }
+
+    #[test]
+    fn image_sizes_are_css_pixels() {
+        assert_eq!(px_to_pt("320"), "240pt");
+        assert_eq!(px_to_pt("22"), "16.5pt");
+        assert_eq!(px_to_pt("1.6"), "1.2pt");
+        let out = convert_str("![](a.png \"=320x200\") ![](b.png \"=x24\")", false);
+        assert!(out.contains("width: 240pt, height: 150pt"), "{out}");
+        assert!(out.contains("#md-image(\"b.png\", height: 18pt)"), "{out}");
+    }
+
+    #[test]
     fn inline_code_with_a_backtick_uses_the_function_form() {
         assert_eq!(render_inline_code("a`b"), "#raw(\"a`b\")");
         assert_eq!(render_inline_code("ab"), "`ab`");
@@ -1287,9 +1427,9 @@ mod tests {
                 "=80x",
                 "",
                 Alignment::Center,
-                &Doc::new(false, "remote")
+                &Doc::new("", "remote")
             ),
-            "#align(center)[#md-image(\"image.png\", width: 80pt)]"
+            "#align(center)[#md-image(\"image.png\", width: 60pt)]"
         );
         assert_eq!(
             render_math(true, "x = 1", Alignment::Center),
@@ -1302,7 +1442,7 @@ mod tests {
         let out = convert_str(":::left\n![Caption](image.png \"=80x\")\n:::\n", false);
         assert!(out.contains("#align(left)[\n  #align(left)["), "{out}");
         assert!(
-            out.contains("#block(width: 80pt, breakable: false)"),
+            out.contains("#block(width: 60pt, breakable: false)"),
             "{out}"
         );
         assert!(out.contains("#align(center, text(size: 0.85em"), "{out}");
@@ -1317,11 +1457,11 @@ mod tests {
         assert!(out.contains("#align(right)["), "{out}");
         assert!(out.contains("#admonition(kind: \"tip\")"), "{out}");
         assert!(
-            out.contains("#align(right)[#md-image(\"right.png\", width: 80pt)]"),
+            out.contains("#align(right)[#md-image(\"right.png\", width: 60pt)]"),
             "{out}"
         );
         assert!(
-            out.contains("#align(center)[#md-image(\"center.png\", width: 80pt)]"),
+            out.contains("#align(center)[#md-image(\"center.png\", width: 60pt)]"),
             "{out}"
         );
     }
@@ -1334,7 +1474,7 @@ mod tests {
         );
         assert!(row.contains("#grid("), "{row}");
         assert!(
-            row.contains("#align(right)[#md-image(\"row.png\", width: 80pt)]"),
+            row.contains("#align(right)[#md-image(\"row.png\", width: 60pt)]"),
             "{row}"
         );
 
@@ -1347,7 +1487,7 @@ mod tests {
             "{spoiler}"
         );
         assert!(
-            spoiler.contains("#align(left)[#md-image(\"spoiler.png\", width: 80pt)]"),
+            spoiler.contains("#align(left)[#md-image(\"spoiler.png\", width: 60pt)]"),
             "{spoiler}"
         );
     }

@@ -256,8 +256,8 @@ The path may be a file next to the document or an `http(s)` URL — both take th
 | ---------------------------++ | --------------------------------+ |
 | `![Alt](img.png)`            | full text width, alt as caption   |
 | `![](img.png)`               | full text width, no caption       |
-| `![Alt](img.png "=320x200")` | 320 pt wide, 200 pt tall          |
-| `![Alt](img.png "=320x")`    | 320 pt wide, height follows       |
+| `![Alt](img.png "=320x200")` | 320 px wide, 200 px tall          |
+| `![Alt](img.png "=320x")`    | 320 px wide, height follows       |
 | `![Alt](<img.png =320x200>)` | same sizing, angle-bracket form   |
 
 :::right
@@ -409,7 +409,7 @@ Anything unrecognised is left as written.
 A slot can hold a graphic instead of text, using ordinary Markdown image syntax. A remote `https://` URL works there too, and is fetched exactly like a body image:
 
 ```yaml
-header-right: "![](logo.png =x22)"   # =WxH in points; =x22 sets height only
+header-right: "![](logo.png =x22)"   # =WxH in CSS pixels; =x22 sets height only
 ```
 
 ---

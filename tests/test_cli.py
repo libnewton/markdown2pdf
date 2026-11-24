@@ -340,7 +340,7 @@ class RenderFileTests(unittest.TestCase):
         output = self.root / "new" / "deep" / "in.html"
         with patch.object(
             cli, "typst_eval",
-            return_value=({"remotes": [], "images": [], "html": "<p>hi</p>"}, None),
+            return_value=({"remotes": [], "images": [], "cites": [], "html": "<p>hi</p>"}, None),
         ) as evaluate:
             self.render(output)
         self.assertEqual(evaluate.call_count, 1)
@@ -353,7 +353,7 @@ class RenderFileTests(unittest.TestCase):
         def evaluate(exe, expression, main, docdir, fonts, inputs, system_fonts=True):
             if "md2pdf-fetched" in inputs and inputs["md2pdf-fetched"] == "0":
                 remotes = [{"url": "http://x/p.png", "alias": "d/h"}]
-                return {"remotes": remotes, "images": [], "html": "old"}, None
+                return {"remotes": remotes, "images": [], "cites": [], "html": "old"}, None
             seen.append(inputs["md2pdf-remote-dir"])
             return "<p>new</p>", None
 
@@ -528,6 +528,29 @@ class RealRenderTests(unittest.TestCase):
             self.assertEqual(code, 0, err)
             self.assertIn("WARN missing image gone.png", err)
             self.assertTrue((self.root / name).stat().st_size > 0)
+
+    def test_unknown_bibliography_style_falls_back(self):
+        md = (
+            "---\nbibliography: inline\nbibliography-style: no-such-style\n---\n\n"
+            "See [@known].\n\n@misc{known, title = {Known}}\n"
+        )
+        (self.root / "in.md").write_text(md, encoding="utf-8")
+        code, _, err = self.run_cli(self.root / "in.md", self.root / "out.pdf")
+        self.assertEqual(code, 0, err)
+        self.assertTrue((self.root / "out.pdf").read_bytes().startswith(b"%PDF"))
+
+    def test_unknown_citation_key_renders_with_a_warning(self):
+        md = (
+            "---\nbibliography: inline\n---\n\nSee [@known] and [@nope].\n\n"
+            "@misc{known, title = {Known}}\n"
+        )
+        (self.root / "in.md").write_text(md, encoding="utf-8")
+        for name in ("out.pdf", "out.html"):
+            code, _, err = self.run_cli(self.root / "in.md", self.root / name)
+            self.assertEqual(code, 0, err)
+            self.assertIn("WARN unknown citation key nope in", err)
+            self.assertNotIn("key known", err)
+        self.assertIn("[@nope]", (self.root / "out.html").read_text(encoding="utf-8"))
 
     def test_awkward_file_names(self):
         for name in ('q"uote.md', "back\\slash.md"):

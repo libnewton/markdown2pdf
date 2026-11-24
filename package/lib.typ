@@ -15,6 +15,7 @@
 // One plugin instance for the whole package — `tokens.typ` owns it so the
 // palette is decoded once and the engine is loaded once.
 #import "tokens.typ": engine as _engine, tokens
+#import "bibliography-styles.typ": bibliography-styles
 
 // Helpers handed to the engine output via `eval` scope.
 #let _md-math(display, src) = if display { mitex(src) } else { mi(src) }
@@ -279,9 +280,10 @@
 
 // Prepare a Markdown string for rendering.
 //
-// Returns `(skip, remotes, images, body, template, scope)`. The caller
-// (`main.typ`) does the final `eval`, so `image()` paths resolve against the
-// document root. `images` lists the local image paths the document uses.
+// Returns `(skip, remotes, images, unknown-cites, body, template, scope)`. The
+// caller (`main.typ`) does the final `eval`, so `image()` paths resolve against
+// the document root. `images` lists the local image paths the document uses,
+// `unknown-cites` the citation keys its inline bibliography lacks.
 //
 // Named `..opts`: `title` / `authors` override frontmatter, `page-numbers` is a
 // default frontmatter can override, and `asset` loads a document-relative image
@@ -293,16 +295,29 @@
 // renders as a blank stand-in instead of failing the compile.
 #let prepare(markdown, remote-dir: "remote", missing-images: (), ..opts) = {
   let (remotes, images) = _discover(markdown, remote-dir)
+  let fm = _frontmatter(markdown)
+  let bibliography-mode = _text-of(fm.at("bibliography", default: none))
+  let inline-bibliography = bibliography-mode != none and lower(bibliography-mode.trim()) == "inline"
+  // Cited keys the inline bibliography lacks; they stay text, and a host can
+  // warn about them.
+  let unknown-cites = if inline-bibliography {
+    str(_engine.unknown_citations(bytes(markdown))).split("\n").filter(k => k != "")
+  } else { () }
   if _querying {
     // Pass-1 query run: only the manifests are needed.
-    (skip: true, remotes: remotes, images: images, body: "", template: none, scope: (:))
+    (
+      skip: true,
+      remotes: remotes,
+      images: images,
+      unknown-cites: unknown-cites,
+      body: "",
+      template: none,
+      scope: (:),
+    )
   } else {
     let asset = _guarded-asset(opts.named().at("asset", default: image), missing-images)
-    let fm = _frontmatter(markdown)
     let named = opts.named()
     let doc-lang = _lang-of(fm)
-    let bibliography-mode = _text-of(fm.at("bibliography", default: none))
-    let inline-bibliography = bibliography-mode != none and lower(bibliography-mode.trim()) == "inline"
     let bib = if inline-bibliography {
       str(_engine.inline_bibliography(bytes(markdown)))
     } else {
@@ -314,7 +329,7 @@
       markdown
     }
     let bibliography-style = _text-of(fm.at("bibliography-style", default: none))
-    if bibliography-style == none { bibliography-style = "ieee" }
+    if bibliography-style not in bibliography-styles { bibliography-style = "ieee" }
     let language = if doc-lang.at(0) == "de" { "de" } else { "en" }
     let bibliography-title = {
       let v = fm.at("bibliography-title", default: none)
@@ -336,10 +351,11 @@
       skip: false,
       remotes: remotes,
       images: images,
+      unknown-cites: unknown-cites,
       body: str(_engine.convert(
         bytes(source),
         bytes(if from-h1 { "1" } else { "" }),
-        bytes(if bib != "" { "1" } else { "" }),
+        bytes(bib),
         bytes(remote-dir),
       )) + if bib != "" { "\n\n#md-bibliography()" } else { "" },
       template: article.with(

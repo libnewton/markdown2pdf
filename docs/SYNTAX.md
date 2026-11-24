@@ -183,7 +183,7 @@ HedgeDoc's form, without angle brackets, works too:
 ![Alt](pic.png =320x200)
 ```
 
-Sizes are points in the PDF and CSS pixels in HTML.
+Sizes are CSS pixels in both outputs; the PDF converts them at 0.75 pt per pixel.
 
 The target may be a file next to the document or an `http(s)` URL. The host
 (CLI or web app) fetches remote images with limits on size, time and address.
@@ -384,7 +384,7 @@ header-right: "[![](logo.png =x24)](https://example.org)"
 footer-left: "![](logo.png =x22)"
 ```
 
-Image sizes in slots are points. `=x22` sets the height only. A remote
+Image sizes in slots are CSS pixels too. `=x22` sets the height only. A remote
 `https://` image works there too. Content taller than a set
 `header-height`/`footer-height` stops the PDF build instead of overlapping the
 body.
@@ -424,7 +424,7 @@ Letter mode turns the cover off.
 | Key | Value | Default |
 |---|---|---|
 | `bibliography` | `inline` enables trailing BibTeX | off |
-| `bibliography-style` | a Typst bibliography style | `ieee` |
+| `bibliography-style` | a Typst bibliography style; an unknown name falls back to `ieee` | `ieee` |
 | `bibliography-title` | heading of the reference list, `false` for none | "References" |
 
 ### Example

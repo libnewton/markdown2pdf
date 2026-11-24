@@ -5,7 +5,8 @@
 // scan runs over the raw source — frontmatter included — so a remote logo is
 // prefetched by the host exactly like a body image.
 
-// `=200x120`, `=200x`, `=x120` -> `(width, height)` in pt, or `none`.
+// `=200x120`, `=200x`, `=x120` -> `(width, height)`, or `none`. The numbers
+// are CSS pixels, as everywhere else an image is sized: 0.75pt each.
 #let _parse-dims(raw) = {
   let s = raw.trim().trim("=", at: start, repeat: false)
   let x = s.position("x")
@@ -16,7 +17,7 @@
     for c in part.clusters() {
       if not "0123456789.".contains(c) { return "bad" }
     }
-    float(part) * 1pt
+    float(part) * 0.75pt
   }
   let w = num(s.slice(0, x))
   let h = num(s.slice(x + 1))

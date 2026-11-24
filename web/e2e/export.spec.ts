@@ -7,8 +7,18 @@ const PNG = Buffer.from(
 );
 
 // A citation key the bibliography does not have: a hard Typst error.
-const BROKEN =
-	'---\nbibliography: inline\n---\n\n# Broken\n\nSee [@nope].\n\n@misc{real,\n  title = {Real},\n  year = {2026}\n}\n';
+
+// A corrupt image is one of the few inputs Typst cannot degrade gracefully:
+// decoding it fails the whole compile.
+async function breakDocument(page: Page) {
+	await replaceDocument(page, '# Broken\n\n');
+	await page.locator('input[type="file"]').setInputFiles({
+		name: 'broken.png',
+		mimeType: 'image/png',
+		buffer: Buffer.from('not a png'),
+	});
+	await expect(page.locator('.cm-content')).toContainText('![broken](images/');
+}
 
 async function replaceDocument(page: Page, md: string) {
 	await page.locator('.cm-content').click();
@@ -71,7 +81,7 @@ test('a failed PDF export says so and opens nothing', async ({ page }) => {
 		.poll(() => page.locator('.page-slot').count(), { timeout: 80_000 })
 		.toBeGreaterThan(0);
 	await page.getByRole('button', { name: 'Web', exact: true }).click();
-	await replaceDocument(page, BROKEN);
+	await breakDocument(page);
 
 	await page.keyboard.press('ControlOrMeta+p');
 	await expect(page.locator('.error-bar')).toContainText('Export failed', { timeout: 60_000 });
@@ -80,9 +90,9 @@ test('a failed PDF export says so and opens nothing', async ({ page }) => {
 });
 
 test('a compile error reads as a message, not a stack of internal paths', async ({ page }) => {
-	await replaceDocument(page, BROKEN);
+	await breakDocument(page);
 	const bar = page.locator('.error-bar');
-	await expect(bar).toContainText('nope', { timeout: 80_000 });
+	await expect(bar).toContainText('decode image', { timeout: 80_000 });
 	const text = (await bar.textContent()) ?? '';
 	expect(text).not.toContain('/md2pdf/');
 	expect(text).not.toContain('main.typ');

@@ -1,4 +1,5 @@
 E = mc^2	ok
+K[i \bmod |K|]	ok
 \!	ok
 \,	ok
 \,\;\!	ok
@@ -310,6 +311,7 @@ E = mc^2	ok
 \leftarrow	ok
 \leftrightarrow	ok
 \leftrightarrows	ok
+\left| \frac{a}{b} \right|	ok
 \leq	ok
 \leq \geq \neq \approx \equiv \sim \simeq \cong \propto \ll \gg	ok
 \leqq	ok
@@ -639,7 +641,9 @@ E = mc^2	ok
 \xrightarrow{f}	ok
 \zeta	ok
 \{	ok
+\{ x | x > 0 \}	ok
 \|	ok
+\|v\| = \sqrt{v \cdot v}	ok
 \}	ok
 ^x	ok
 `\alpha + \beta`	ok
@@ -663,6 +667,7 @@ x \coloneq y	ok
 x \coloneqq y	ok
 x \limits	ok
 x \partial y	ok
+x |K| y	ok
 x\,\text{км}	ok
 x^	ok
 x^2	ok
@@ -676,6 +681,8 @@ x_{	ok
 {a \over}	fails
 {{a}	ok
 {}	ok
+|K|	ok
+|a| + |b|	ok
 }	fails
 }{	fails
 Привет x	ok

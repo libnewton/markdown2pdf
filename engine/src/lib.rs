@@ -24,7 +24,7 @@ initiate_protocol!();
 
 /// Convert Markdown (UTF-8 bytes) to Typst markup (UTF-8 bytes).
 /// `strip_h1` non-empty drops a leading level-1 heading; `citations` non-empty
-/// enables `[@key]` citation rendering for an extracted inline bibliography;
+/// is the extracted inline BibTeX, which enables `[@key]` for its keys;
 /// `remote_dir` names the directory of the remote-image aliases.
 #[wasm_func]
 pub fn convert(
@@ -34,7 +34,8 @@ pub fn convert(
     remote_dir: &[u8],
 ) -> Result<Vec<u8>, String> {
     let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
-    let mut doc = typst::Doc::new(!citations.is_empty(), remote_dir_of(remote_dir)?);
+    let bib = std::str::from_utf8(citations).map_err(|e| e.to_string())?;
+    let mut doc = typst::Doc::new(bib, remote_dir_of(remote_dir)?);
     Ok(typst::convert(src, !strip_h1.is_empty(), &mut doc).into_bytes())
 }
 
@@ -85,6 +86,24 @@ pub fn leading_h1(markdown: &[u8]) -> Result<Vec<u8>, String> {
 pub fn twemojis(markdown: &[u8]) -> Result<Vec<u8>, String> {
     let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
     Ok(collect_twemoji_codepoints(src).join("\n").into_bytes())
+}
+
+/// The citation keys the document uses that its inline bibliography lacks,
+/// one per line; they stay literal text in both outputs.
+#[wasm_func]
+pub fn unknown_citations(markdown: &[u8]) -> Result<Vec<u8>, String> {
+    let src = std::str::from_utf8(markdown).map_err(|e| e.to_string())?;
+    let (body, bib) = split_inline_bibliography(src);
+    if bib.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (_, unknown) = preprocess::preprocess_citations(&body, &html::bibtex_keys(&bib));
+    let mut seen = HashSet::new();
+    let keys: Vec<String> = unknown
+        .into_iter()
+        .filter(|k| seen.insert(k.clone()))
+        .collect();
+    Ok(keys.join("\n").into_bytes())
 }
 
 /// The frontmatter block as a JSON object with normalised keys (lowercase,
