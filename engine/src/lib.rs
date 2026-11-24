@@ -569,10 +569,7 @@ fn should_preserve_blank(line: &str) -> bool {
     }
     // Ordered list item: digits then `.`.
     let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
-    if digits > 0 && t[digits..].starts_with('.') {
-        return false;
-    }
-    true
+    !(digits > 0 && t[digits..].starts_with('.'))
 }
 
 /// A thematic break: 3+ of a single `-`/`*`/`_`, only whitespace otherwise.
@@ -1163,7 +1160,7 @@ impl<'a> Ctx<'a> {
 
     fn render_list(&self, node: &'a AstNode<'a>, indent: usize) -> String {
         let nl = match &node.data.borrow().value {
-            NodeValue::List(nl) => nl.clone(),
+            NodeValue::List(nl) => *nl,
             _ => return String::new(),
         };
         if nl.is_task_list {

@@ -23,6 +23,8 @@ web/vite.config.ts.timestamp-*
 # Sources of truth are the repo-root package/ and fonts/ directories.
 web/static/md2pdf
 web/static/fonts
+# Downloaded CJK fonts, reused across builds (and cached in CI).
+web/.cache
 
 # GitLab Pages build artifact
 /public
@@ -32,6 +34,7 @@ engine/target
 
 # --- CLI scratch + test output ---
 tests/*.pdf
+tests/golden-diff
 remote
 .md2pdf-main-*.typ
 

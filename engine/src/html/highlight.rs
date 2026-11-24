@@ -615,9 +615,7 @@ fn generic(lang: &Lang, code: &str) -> String {
                 Tok::Property
             } else if lang.keywords.contains(&word) {
                 Tok::Keyword
-            } else if lang.types.contains(&word) {
-                Tok::Type
-            } else if lang.builtins.contains(&word) {
+            } else if lang.types.contains(&word) || lang.builtins.contains(&word) {
                 Tok::Type
             } else if calls(&rest[len..]) {
                 // A name with a `(` after it is being called or defined —
@@ -707,9 +705,8 @@ fn number_end(rest: &str, i: usize) -> usize {
             && n > 0
             && matches!(bytes[n - 1] | 32, b'e')
             && !rest[..n].starts_with("0x");
-        if c.is_ascii_alphanumeric() || c == b'_' || exponent {
-            n += 1;
-        } else if c == b'.' && n + 1 < rest.len() && bytes[n + 1].is_ascii_digit() {
+        let decimal_point = c == b'.' && n + 1 < rest.len() && bytes[n + 1].is_ascii_digit();
+        if c.is_ascii_alphanumeric() || c == b'_' || exponent || decimal_point {
             n += 1;
         } else {
             break;

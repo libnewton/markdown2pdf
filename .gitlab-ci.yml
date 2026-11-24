@@ -6,7 +6,7 @@
 
 pages:
   stage: deploy
-  image: node:20-alpine
+  image: node:24-alpine
   cache:
     key:
       files:
@@ -14,6 +14,8 @@ pages:
     paths:
       - web/.npm/
       - web/node_modules/
+      # Downloaded CJK fonts (see web/vite.config.ts).
+      - web/.cache/
   script:
     # The Vite plugins copy the md2pdf package + fonts from the repo (no
     # network, no Rust) — engine.wasm is committed, so a plain npm build works.

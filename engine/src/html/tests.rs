@@ -481,11 +481,7 @@ fn frontmatter_title_leaves_a_leading_h1_in_the_body() {
     assert!(out.contains("<span>Ada</span><span>Grace</span>"), "{out}");
     assert!(out.contains("<span>2026-01-01</span>"), "{out}");
     assert!(
-        body(&format!(
-            "{}",
-            "---\ntitle: From Frontmatter\n---\n\n# Kept\n\nbody"
-        ))
-        .contains("Kept"),
+        body("---\ntitle: From Frontmatter\n---\n\n# Kept\n\nbody").contains("Kept"),
         "{out}"
     );
 }

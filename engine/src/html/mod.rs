@@ -927,7 +927,7 @@ fn link(url: &str, label: &str) -> String {
             } else {
                 ""
             };
-            format!("<a href=\"{}\"{rel}>{label}</a>", esc_attr(&href))
+            format!("<a href=\"{}\"{rel}>{label}</a>", esc_attr(href))
         }
         // A rejected scheme still shows its text; it just is not clickable.
         None => format!("<span class=\"md2pdf-missing\">{label}</span>"),
@@ -1351,7 +1351,7 @@ fn format_reference(fields: &HashMap<String, String>) -> String {
         if let Some(href) = safe_url(url) {
             out.push_str(&format!(
                 " <a href=\"{}\">{}</a>",
-                esc_attr(&href),
+                esc_attr(href),
                 esc_text(url)
             ));
         }
