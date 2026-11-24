@@ -88,7 +88,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-      - run: npx prettier --check .
+      - run: npm run format:check
       - run: npm run check
       - run: npm test
 

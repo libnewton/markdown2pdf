@@ -4,153 +4,266 @@
 
 # md2pdf
 
-**Markdown → PDF or HTML with perfect typesetting — all Markdown processing
-lives in one engine.**
+md2pdf turns Markdown into a typeset PDF or into one self-contained HTML file.
+It runs where the document is: in a browser tab or on your own machine. There
+is no account, no upload and no server.
 
-The Markdown engine is a Rust/[`comrak`](https://github.com/kivikakk/comrak)
-parser compiled to a WebAssembly [Typst](https://typst.app/) plugin and shipped
-as a Typst package (`@local/md2pdf`). Both front-ends — the browser app and the
-command-line tool — feed raw Markdown to the *same* engine, so output is
-identical.
+You can use it in three ways:
+
+- the web app, an editor with live preview that works offline once loaded
+- the command-line tool `bin/md2pdf`, for single files or batches
+- a local MCP server, so an AI client can render files in a folder you choose
+
+All three use the same Markdown engine, so a document renders the same way in
+each. The full syntax is in [docs/SYNTAX.md](docs/SYNTAX.md).
+
+## What you get
+
+- CommonMark and GFM: tables, task lists, strikethrough, footnotes, autolinks.
+- Extras: `==highlight==`, `^sup^`, `~sub~`, `__underline__`, inline
+  footnotes, callouts (`:::info`, `:::warning`, …), spoilers, alignment and
+  column layouts, `+` column widths in tables, `=WxH` image sizes.
+- Math (LaTeX syntax), Mermaid diagrams, Twemoji for emoji and
+  `:shortcodes:`.
+- YAML frontmatter for the title, authors, date and language, a running
+  header and footer, page numbers, a cover page, a DIN 5008 letter layout and
+  inline BibTeX citations.
+- `[toc]` for a table of contents, `[[pagebreak]]` for a new page, and stable
+  heading anchors with `## Heading {#id}`.
+
+The PDF is typeset by [Typst](https://typst.app/). The HTML file embeds its
+images, diagrams and math font, so it opens anywhere without a network. It
+adapts to screen width, has light and dark themes and a collapsible outline.
+Math is MathML, set in New Computer Modern Math, the face the PDF uses. Page
+features (cover, letter layout, header, footer, page numbers) have no HTML
+counterpart and are skipped there.
+
+## Web app
+
+The preview has two tabs. **Pages** shows the PDF page by page. **Web** shows
+the HTML version, which needs no Typst compile and updates as you type.
+
+Documents are saved in the browser (IndexedDB). You can paste or drop images
+into the editor, open several tabs (edits sync between them) and export PDF,
+HTML or Markdown. Press `?` for the keyboard shortcuts.
+
+Once loaded, the app works offline. The service worker caches about 40 MB,
+mostly the Typst compiler. Emoji images and the Chinese, Japanese and Korean
+fonts are fetched only when a document needs them. At runtime the app only
+contacts the hosts of remote images that a document links to.
+
+The `/reference` page shows the feature demo, [tests/extended.md](tests/extended.md),
+with source and result side by side. The same file is the welcome document.
+
+## Command-line tool
+
+`bin/md2pdf` is a Python script (3.9 or newer, standard library only) that runs
+on Linux, macOS and Windows. It needs the `typst` binary, version 0.15 or newer
+(CI uses 0.15.1), and the md2pdf Typst package installed by `./build.sh
+install` (see [Development](#development)).
 
 ```
-                        ┌─ Typst markup ─▶ Typst compile ─▶ PDF
-Markdown ─▶ engine.wasm ─┤                 └── typst / typst.ts ──┘
-                        └─ HTML ─────────▶ one self-contained .html file
+usage: md2pdf [options] input.md [output]
+       md2pdf [options] [-o OUTDIR] input.md [input.md ...]
+       md2pdf mcp [--root DIR]
 ```
 
-The engine has two renderers over one parse. PDF goes through Typst for
-typesetting; HTML comes straight out of the engine, styled, self-contained
-(images and diagrams embedded as `data:` URIs) and responsive, in light and
-dark. Page-only features — cover page, DIN letter mode, running header/footer,
-page numbers — have no HTML counterpart and are skipped there. HTML also gets a
-collapsible outline, hidden behind a button in the corner, and real math: the
-MathML is laid out with New Computer Modern Math, the same face the PDF uses,
-embedded in the file as a subsetted `woff2`.
+| Option | Meaning |
+|---|---|
+| `--pdf` | write PDF (the default) |
+| `--html` | write a standalone HTML file |
+| `-o`, `--outdir OUTDIR` | directory for the results, created if missing |
+| `--timeout SEC` | total time allowed per remote image, default 20 |
+| `--max-size MB` | reject a remote image larger than this, default 32 |
+| `--allow-private-hosts` | allow remote images on private or link-local addresses |
+| `--no-system-fonts` | use only the bundled fonts, so output does not vary by machine |
+| `--html-theme {system,light,dark}` | initial theme of the HTML file, default `system` |
+
+```sh
+./bin/md2pdf notes.md                        # -> notes.pdf
+./bin/md2pdf notes.md out.html               # the extension picks the format
+./bin/md2pdf --html notes.md                 # -> notes.html
+./bin/md2pdf --html-theme dark notes.md out.html
+./bin/md2pdf --html notes.md /dev/stdout     # HTML on stdout, status on stderr
+```
+
+With one input, `output` names the file. Its extension picks the format
+(`.html` or `.htm` for HTML) unless `--pdf` or `--html` is given. An output
+with any other extension is written as PDF. Status lines and warnings go to
+stderr.
+
+### Batch mode
+
+Pass several files, or use `-o`, to render a batch:
+
+```sh
+./bin/md2pdf chapter1.md chapter2.md chapter3.md
+./bin/md2pdf --pdf --html -o out/ docs/*.md
+```
+
+Each input becomes `<name>.pdf` and/or `<name>.html` in OUTDIR, or next to the
+input when there is no `-o`. `--pdf --html` writes both. If a file fails, md2pdf
+reports it and renders the rest. The exit status is 1 if any file failed.
+
+Two Markdown files (`.md`, `.markdown`, `.mdown`, `.mkd`) are a batch of two,
+not an input and an output.
+
+### Remote images
+
+md2pdf downloads remote images fresh on every run into a hidden folder next to
+the document, `.md2pdf-<id>-remote`, and deletes it afterwards. Nothing is
+cached between runs, so one document cannot read another's downloads.
+
+Downloads are limited to public `http(s)` hosts, 32 MB and 20 seconds per
+image. `--allow-private-hosts`, `--max-size` and `--timeout` change these
+limits. A URL that fails, or that returns an HTML page instead of an image,
+becomes a blank placeholder. A local image that is missing produces a warning
+and a placeholder. In both cases the rest of the document still renders.
+
+The web app applies the same 32 MB and 20 second limits. It also fetches at
+most 64 remote images per document, 6 at a time, and never sends credentials.
+
+## MCP server
+
+```sh
+./bin/md2pdf mcp --root /path/to/workspace
+```
+
+This starts a local MCP server over stdio. Configure your client with the
+absolute path to `bin/md2pdf` as the command and `mcp --root <workspace>` as
+the arguments. The server offers:
+
+- the tool `render_file`, which renders a Markdown file to PDF or HTML.
+  Input and output paths must be inside the root.
+- the resource `md2pdf://syntax`, which is [docs/SYNTAX.md](docs/SYNTAX.md)
+- the resource `md2pdf://example`, which is [tests/extended.md](tests/extended.md)
+
+## HedgeDoc and Outline
+
+Markdown copied from HedgeDoc or from Outline ("Copy as Markdown") renders
+without changes. That covers HedgeDoc's `++inserted++`, `:::spoiler`, bylines,
+`{%youtube …%}` style embeds (as links), `=WxH` image
+sizes and `js=101` fence flags, and Outline's notices, nested `+++` toggles,
+empty `\` paragraphs and captioned image sizes. The details are in
+[docs/SYNTAX.md](docs/SYNTAX.md#hedgedoc-and-outline).
+
+## Limits
+
+- Raw HTML is shown as text, except a short list of formatting tags such as
+  `<b>`, `<kbd>`, `<sup>` and `<br>`.
+- Only `mermaid` fences become diagrams. Other diagram languages are shown as
+  code.
+- Embeds (`{%youtube …%}` and others) become links, not players.
+- The HTML file uses the reader's system fonts, so it does not look exactly
+  like the PDF. The content is the same.
+- The PDF uses A4 paper.
+- In the web app, a remote image whose host does not allow cross-origin
+  requests (CORS) becomes a placeholder.
+
+## Scripts other than Latin
+
+Both outputs are UTF-8 throughout, and heading anchors keep Unicode letters,
+so `# 你好` gets a working link. Fonts are where a script can go missing, and
+each front-end handles this differently:
+
+- HTML uses the reader's system fonts, so their system supplies the glyphs.
+- The web app's PDF and Pages preview use only the fonts it hands Typst, and
+  the bundled ones are Latin. When a document contains Chinese, Japanese or
+  Korean, the app fetches Noto Sans SC or KR (about 8 MB per weight) once per
+  session.
+- The CLI uses installed system fonts, so whatever CJK font the machine has is
+  used. `--no-system-fonts` turns this off for reproducible output, at the cost
+  of missing glyphs.
+
+`tests/unicode.md` covers Chinese, Japanese, Korean, Arabic, combining marks
+and CJK headings.
+
+## How it works
+
+The Markdown engine is a Rust crate built on
+[`comrak`](https://github.com/kivikakk/comrak). It is compiled to WebAssembly,
+loaded as a Typst plugin and shipped in a Typst package (`@local/md2pdf`). The
+web app and the CLI both hand raw Markdown to this engine.
+
+```
+                         ┌─ Typst markup ─▶ Typst compile ─▶ PDF
+Markdown ─▶ engine.wasm ─┤                 (typst / typst.ts)
+                         └─ HTML ─────────▶ one self-contained .html file
+```
+
+The engine parses once and has two renderers. The PDF path produces Typst
+markup. The HTML path produces the finished file. The CLI uses the `typst`
+binary (0.15.1 in CI). The web app runs Typst 0.15.1 in the browser through
+typst.ts 0.8.0-rc4.
+
+Design notes are in [docs/DESIGN.md](docs/DESIGN.md), engineering notes in
+[docs/ENG.md](docs/ENG.md).
 
 ## Repository layout
 
-| Path         | What it is |
-|--------------|------------|
-| `web/`       | The SvelteKit web app (live editor + preview). Deployed to GitLab Pages. |
-| `engine/`    | Rust crate — builds `engine.wasm`, the Markdown engine. |
-| `package/`   | The `md2pdf` Typst package: `lib.typ`, `styles/`, `admonitions.typ`, vendored `mitex`/`mmdr`, bundled Twemoji SVGs, and the built `engine.wasm`. |
-| `bin/md2pdf`  | CLI host shim — discovers remote images, fetches them, then runs Typst. Pure stdlib Python. |
-| `fonts/`     | Fonts shared by the CLI and the web app. |
-| `build.sh`   | Builds `engine.wasm` and installs the package to `@local/md2pdf`. |
-| `tests/`     | Markdown fixtures. |
+| Path | What it is |
+|---|---|
+| `web/` | The SvelteKit web app, deployed to GitLab Pages. See [web/README.md](web/README.md). |
+| `engine/` | The Rust crate that builds `engine.wasm`. |
+| `package/` | The `md2pdf` Typst package: `lib.typ`, styles, cover, header and footer, callouts, vendored `mitex` and `mmdr`, Twemoji SVGs and the built `engine.wasm`. |
+| `bin/md2pdf` | The CLI and MCP server. It fetches remote images and runs Typst. |
+| `fonts/` | Fonts shared by the CLI and the web app. |
+| `build.sh` | Builds `engine.wasm` and installs the package as `@local/md2pdf`. |
+| `tests/` | Markdown fixtures, CLI tests, HTML checks and render goldens. |
+| `docs/` | Syntax reference, design and engineering notes. |
 
-`package/engine.wasm` is committed (so the web build needs no Rust toolchain);
-rerun `./build.sh` after changing anything in `engine/`.
+## Development
 
-## Web app
+```sh
+./build.sh                  # build engine.wasm and install @local/md2pdf
+./build.sh engine           # only rebuild package/engine.wasm
+./build.sh install          # only install package/ as @local/md2pdf
+cd engine && cargo test     # engine tests
+python3 -m unittest discover -s tests -p "test_*.py"   # CLI tests
+python3 tests/visual.py     # compare renders with tests/golden/
+python3 tests/visual.py --update                        # rewrite the goldens
+python3 tests/check_html.py out.html                    # check an HTML export
+```
+
+Building the engine needs Rust. The toolchain is pinned in
+`engine/rust-toolchain.toml`, including the `wasm32-unknown-unknown` target,
+and `rustup` installs it on first use. `tests/visual.py` needs `typst`,
+`pdftoppm` (poppler) and Pillow.
+
+`package/engine.wasm` is committed, so the web build needs no Rust. After any
+change in `engine/`, run `./build.sh engine` and commit the new
+`engine.wasm`. The build is reproducible, and CI fails if the committed file
+does not match the source.
+
+For the web app:
 
 ```sh
 cd web
 npm install
 npm run dev          # local dev server
 npm test             # unit tests
-npm run build        # static build → web/build/
+npm run test:e2e     # browser tests (Playwright)
+npm run build        # static build -> web/build/
 ```
 
-The preview pane has two tabs: **Pages** is the paged SVG preview of the PDF,
-**Web** is the pageless HTML view. The HTML view needs no Typst compile,
-so it updates as you type.
+The build reads `PUBLIC_SITE_URL` (the absolute base URL for social-preview
+tags) at build time through `web/src/env.ts`. More in
+[web/README.md](web/README.md).
 
-The `web/vite.config.ts` plugins copy `package/` and `fonts/` into
-`web/static/` at build time — the app is fully offline, no CDN calls.
+`tests/check_html.py` checks an exported HTML file: WCAG AA contrast for every
+colour token, syntax colours included, in both themes; an `alt` on every image;
+every in-page link resolves; no external resource, no remote `url()`, no inline
+event handler and no `javascript:` or `data:` link. The only web font it allows
+is the math face, embedded as a `data:` URI.
 
-## CLI
+CI (GitHub Actions) runs five jobs: `engine` (format, clippy, tests and the
+`engine.wasm` check), `cli`, `render` (the goldens), `web-lint` (Prettier,
+svelte-check, unit tests) and `web-e2e`.
 
-`bin/md2pdf` runs on Windows, macOS and Linux with a stock Python 3.9+ and
-no third-party packages. It needs the `typst` binary (v0.15+, for `typst eval`)
-and, to rebuild the engine, Rust with the `wasm32-unknown-unknown` target
-(`rustup target add wasm32-unknown-unknown`, or the `rust-wasm` package on Arch).
-
-```sh
-./build.sh                                     # build engine.wasm + install @local/md2pdf
-python3 bin/md2pdf tests/sample.md             # → tests/sample.pdf
-python3 bin/md2pdf tests/sample.md out.html    # → HTML (the extension picks the format)
-./bin/md2pdf --html tests/sample.md            # → tests/sample.html
-./bin/md2pdf --html-theme dark tests/sample.md out.html
-./bin/md2pdf mcp --root /path/to/workspace     # local stdio MCP server
-cd engine && cargo test                        # engine unit tests
-python3 tests/check_html.py out.html           # assert the rendered artefact
-```
-
-`tests/check_html.py` checks the file that actually ships: WCAG AA contrast for
-every colour token *including the syntax-highlighting ones*, in both themes; an
-`alt` on every image; every in-page link resolving; no external resource, no
-remote `url()`, no inline event handler and no `javascript:`/`data:` anchor.
-The one webfont it allows is the math face, and only as a `data:` URI.
-
-Remote images are fetched fresh each run — nothing is cached between runs, so
-no document can read another's downloads. The fetch is limited to public
-http(s) hosts, capped at 32 MB and 20 s per image; `--allow-private-hosts`,
-`--max-size` and `--timeout` adjust that. A URL that cannot be fetched becomes
-a blank placeholder rather than failing the render.
-
-The browser applies the same 32 MB and 20 s ceilings, and additionally caps a
-document at 64 remote images fetched 6 at a time, so a long image list cannot
-spend the tab's memory and connections on the document author's behalf. Those
-requests never carry credentials.
-
-## Markdown coverage
-
-Core CommonMark + GFM (tables incl. `+` column-width markers, task lists,
-strikethrough, footnotes, autolinks); `==highlight==`, super/subscript,
-`__underline__`; language-aware admonitions (`:::info` …, including `caution` and
-`important`), spoilers (`+++++`), `:::row/center`
-layout; math via `mitex`; Mermaid via `mmdr`; HackMD `=WxH` image sizing;
-remote images; Twemoji emoji (unicode and `:shortcodes:`); YAML frontmatter
-(title / authors / date / `lang` / page numbers); running header and footer
-(`header-*` / `footer-*`, optional `header-height` / `footer-height`, and
-`{page}`-style placeholders); optional title
-cover page (`cover-*`); opt-in inline BibTeX citations (`bibliography: inline`,
-`[@key]`, blue citation numerals, and `bibliography-style`, default `ieee`);
-DIN 5008 letter mode (`letter-*` fields);
-`[toc]` → `#outline()`; `hide-toc-button: true` to drop the HTML outline
-drawer without touching an explicit `[toc]`; automatic heading jump links and
-stable `## Heading {#custom-id}` anchors; a standalone HTML light/dark toggle,
-hidden with `hide-theme-toggle: true`.
-
-The MCP server exposes the file-only `render_file` tool plus
-`md2pdf://syntax` and `md2pdf://example` resources. Configure its command as
-the absolute path to `bin/md2pdf` with arguments `mcp --root <workspace>`.
-
-Every source newline is a visible line break in both outputs. `<br>` is the
-only raw HTML tag either renderer honours and is useful inside table cells;
-everything else is shown as text.
-
-## Non-Latin scripts
-
-Both renderers are UTF-8 end to end, and heading slugs are built from Unicode
-alphanumerics, so `# 你好` gets a real anchor. Type is the only place a script
-can go missing, and the two front-ends solve it differently:
-
-- **HTML** — nothing to solve. The sheet asks for the system UI stack, and the
-  reader's own system supplies the face.
-- **Web app, paged preview and PDF export** — Typst only sees the faces we hand
-  it, and `fonts/` is Latin. The app therefore detects CJK, kana and Hangul in
-  the source and fetches Noto Sans SC or KR (~8 MB per weight, from
-  `web/static/fonts/`, populated at build time) once per session, only for
-  documents that contain those scripts.
-- **CLI** — installed system fonts are used, so whatever the machine has for
-  CJK is picked up. `--no-system-fonts` restores the hermetic behaviour for
-  reproducible builds, at the cost of tofu where the bundled fonts have no
-  glyph.
-
-`tests/unicode.md` is the fixture: Chinese, Japanese, Korean, Arabic RTL,
-combining marks, wide characters inside a code fence, and CJK headings.
-
-Everything above renders in both targets. `tests/html-edge.md` is the
-adversarial fixture for the HTML renderer (injection attempts, broken input,
-structural extremes).
-
-`tests/extended.md` is the feature demo — it exercises every syntax above and
-documents every frontmatter key, header/footer placeholder and cover option.
-It is also the web app's welcome document (`web/src/lib/templates/pdf-templates.ts`
-holds a copy that must stay in sync).
+Fixtures worth knowing: `tests/extended.md` is the feature demo and documents
+every frontmatter key. `tests/html-edge.md` holds hostile input for the HTML
+renderer. `tests/hedgedoc.md` and `tests/outline.md` cover the imported
+syntax, and `tests/regressions.md` collects inputs that once broke a render.
 
 ## License
 
