@@ -127,6 +127,8 @@ export default defineConfig({
 		withPwa(
 			{
 				adapter: adapter(),
+				// Deprecated in Kit 3 in favour of #lib subpath imports, which would
+				// need explicit .ts extensions on every import.
 				alias: { $lib: 'src/lib' },
 				prerender: { handleHttpError: 'fail' },
 			},
@@ -134,7 +136,7 @@ export default defineConfig({
 				registerType: 'autoUpdate',
 				// engine.wasm and the Typst compiler are past the 2 MB default.
 				maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
-				workbox: {
+				generateSW: {
 					// The twemoji mirror is ~3700 files and 17 MB, fetched one glyph
 					// at a time only by documents that use emoji. Precaching it would
 					// mean downloading all of it to install the app.
