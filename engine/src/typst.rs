@@ -950,7 +950,7 @@ fn render_image(url: &str, title: &str, alt: &str, alignment: Alignment, doc: &D
         return format!("#align({})[{image_call}]", alignment.typst());
     }
     format!(
-        "#align({})[\n  #block(width: {figure_width}, breakable: false)[\n    #align(center)[{image_call}]\n    #v(0.3em, weak: true)\n    #align(center, text(size: 0.85em, fill: luma(120), [{}]))\n  ]\n]",
+        "#align({})[\n  #block(width: {figure_width}, breakable: false)[\n    #set par(justify: false)\n    #align(center)[{image_call}]\n    #v(0.3em, weak: true)\n    #align(center, text(size: 0.85em, fill: luma(120), [{}]))\n  ]\n]",
         alignment.typst(),
         esc_text(caption)
     )
