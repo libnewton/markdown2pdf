@@ -11,13 +11,14 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-wasm-minimal-protocol = "0.1"
+wasm-minimal-protocol = "0.2"
 # `shortcodes` enables `:emoji:` parsing (pulls in the small `emojis` crate).
-comrak = { version = "0.41", default-features = false, features = ["shortcodes"] }
+comrak = { version = "1.2", default-features = false, features = ["shortcodes"] }
 # Emoji detection -> Twemoji codepoints.
 unic-emoji-char = "0.9"
-emojis = "0.6"
-math-core = "0.7"
+emojis = "0.9"
+math-core = "0.9"
+saphyr-parser = { version = "0.4", default-features = false }
 
 [profile.release]
 opt-level = "z"

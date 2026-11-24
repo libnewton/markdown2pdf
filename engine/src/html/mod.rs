@@ -1,7 +1,7 @@
 //! Markdown -> self-contained HTML.
 //!
 //! The second renderer in the engine. It walks the *same* comrak AST and the
-//! same pre-parse passes as the Typst renderer in `lib.rs`, so a syntax
+//! same pre-parse passes as the Typst renderer in `typst.rs`, so a syntax
 //! feature cannot exist in one output and not the other. Everything the host
 //! cannot be asked to do lives here: styling, the table of contents, math,
 //! syntax highlighting and asset embedding.
@@ -12,45 +12,39 @@
 mod assets;
 mod css;
 mod highlight;
-mod math;
-mod tokens;
+pub(crate) mod math;
+pub(crate) mod tokens;
 
+use crate::frontmatter::Frontmatter;
+use crate::preprocess::{
+    parse_placeholder, preprocess, preprocess_citations, split_inline_bibliography, Admonition,
+    ListStyle, Preprocessed, Spoiler, CITATION_CLOSE_TOKEN, CITATION_OPEN_TOKEN,
+};
 use crate::{
-    build_options, hash_url, heading_parts, is_remote, leading_h1_index, match_emoji, parse_dims,
-    parse_placeholder, plain_text, preprocess, preprocess_citations, safe_url,
-    split_inline_bibliography, task_checked, unique_heading_id, Admonition, Preprocessed, Spoiler,
-    CITATION_CLOSE_TOKEN, CITATION_OPEN_TOKEN,
+    hash_url, heading_parts, is_remote, leading_h1_index, match_emoji, parse, parse_dims,
+    plain_text, safe_url, task_checked, unique_heading_id,
 };
 use assets::Assets;
 use comrak::nodes::{AstNode, ListType, NodeValue, TableAlignment};
-use comrak::{parse_document, Arena};
+use comrak::Arena;
 use math::Math;
 use std::cell::Cell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Stand-in for the outline, substituted once every heading is known.
 const TOC_SLOT: &str = "\u{e010}md2pdf-toc\u{e011}";
 
-/// Local (non-remote) image paths the document references. The hosts read
-/// these off disk / out of their asset store and hand back the bytes.
-///
-/// Parsed rather than scanned: the CLI feeds each path straight to Typst's
-/// `read()`, which is fatal on a miss, so a path that only appears as an
-/// example inside a code span must not show up here.
-pub(crate) fn local_images(src: &str) -> Vec<String> {
-    crate::image_targets(src)
-        .into_iter()
-        .filter(|path| !is_remote(path))
-        .collect()
-}
-
 /// Split a HackMD `=WxH` size hint off an image target. It rides either in the
-/// title field (`![a](p "=200x120")`) or at the end of an angle-bracketed URL
-/// (`![a](<p =200x120>)`).
+/// title field (`![a](p "=200x120")`, also after a title) or at the end of an
+/// angle-bracketed URL (`![a](<p =200x120>)`).
 type Dims = (Option<String>, Option<String>);
 pub(crate) fn split_dims(url: &str, title: &str) -> (String, Option<Dims>) {
     let mut url = url.trim().to_string();
-    let mut dims = parse_dims(title);
+    // Outline appends the size to a real title: `"My caption =300x200"`.
+    let mut dims = parse_dims(title).or_else(|| {
+        let (_, size) = title.trim().rsplit_once(' ')?;
+        parse_dims(size).filter(|_| size.starts_with('='))
+    });
     if dims.is_none() {
         if let Some(sp) = url.rfind(char::is_whitespace) {
             let (head, tail) = url.split_at(sp);
@@ -90,8 +84,13 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     // line they came from, and task checkboxes are live. A download has no
     // source to point at, so it never sets this.
     let editable = flag("editable");
+    let remote_dir = option(options, "remote-dir")
+        .filter(|d| !d.is_empty())
+        .unwrap_or(crate::DEFAULT_REMOTE_DIR);
     let fm = Frontmatter::parse(src);
-    let inline_bib = fm.first("bibliography").is_some_and(|v| v == "inline");
+    let inline_bib = fm
+        .text("bibliography")
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("inline"));
     let (body_src, bib_src) = if inline_bib {
         split_inline_bibliography(src)
     } else {
@@ -101,30 +100,39 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     let mut doc = Doc {
         assets: Assets::decode(manifest, blob),
         math: Math::new(),
-        german: fm.first("lang").is_some_and(|l| l.starts_with("de")),
+        german: fm.text("lang").is_some_and(|l| l.starts_with("de")),
         citations: !bib_src.is_empty(),
+        cite_keys: bibtex_keys(&bib_src),
         cites: Vec::new(),
         notes: Vec::new(),
         note_index: HashMap::new(),
+        note_refs: HashMap::new(),
+        note_sources: crate::footnote_sources(&body_src),
         headings: Vec::new(),
         slugs: HashMap::new(),
         editable,
+        remote_dir: remote_dir.to_string(),
+        bibliography_title: None,
+        title_h1: None,
+        image_width: crate::image_width(&fm).unwrap_or_else(|| "100%".to_string()),
+        soft_breaks: fm.get("breaks").is_some_and(crate::frontmatter::is_off),
+    };
+    doc.bibliography_title = match fm.get("bibliography-title") {
+        None => Some(tokens::string("references", doc.german).to_string()),
+        Some(v) if crate::frontmatter::is_off(v) => None,
+        Some(v) => v.text().filter(|t| !t.trim().is_empty()),
     };
 
     // Title precedence mirrors `lib.typ`: frontmatter beats a leading H1, and
     // the H1 is dropped only when it is the thing that became the title. A
     // frontmatter title does not consume it — that heading belongs to the body
     // and nothing else would take its place.
-    let fm_title = fm
-        .first("title")
-        .filter(|t| !t.is_empty())
-        .map(str::to_string);
-    let h1 = leading_h1_text(&body_src);
-    let from_h1 = fm_title.is_none() && h1.is_some();
-    let title = fm_title.clone().or_else(|| h1.clone());
+    let fm_title = fm.text("title").filter(|t| !t.is_empty());
+
     // The top level is its own baseline: line N is line N.
     let base: Vec<u32> = (1..=body_src.lines().count() as u32 + 1).collect();
-    let body = render_source(&body_src, &mut doc, from_h1, &base);
+    let body = render_source(&body_src, &mut doc, fm_title.is_none(), &base);
+    let title = fm_title.or_else(|| doc.title_h1.take());
 
     let mut main = String::new();
     main.push_str(&title_block(&fm, title.as_deref(), &doc));
@@ -147,8 +155,8 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
     let main = main.replace(TOC_SLOT, &inline_toc(&doc.headings));
 
     let lang = fm
-        .first("lang")
-        .unwrap_or(if doc.german { "de" } else { "en" });
+        .text("lang")
+        .unwrap_or_else(|| if doc.german { "de" } else { "en" }.to_string());
     // Only the standalone export carries the behaviour script. A fragment is
     // mounted by a host that has to re-execute it to make it run at all, and
     // "take the first <script> out of the document and run it" is not a
@@ -165,12 +173,12 @@ pub(crate) fn render(src: &str, options: &str, manifest: &str, blob: &[u8]) -> S
          {outline}<main class=\"md2pdf-doc\">{main}</main>{theme_toggle}</div>{script}",
         fonts = math_font_faces(&doc, &main),
         style = css::style(),
-        lang = esc_attr(lang),
+        lang = esc_attr(&lang),
     );
     if standalone {
         document(
             &fragment,
-            &esc_attr(lang),
+            &esc_attr(&lang),
             title.as_deref().unwrap_or("Document"),
             theme,
         )
@@ -228,11 +236,7 @@ fn document(fragment: &str, lang: &str, title: &str, theme: Option<&str>) -> Str
 }
 
 fn theme_toggle(german: bool) -> String {
-    let label = if german {
-        "Farbschema wechseln"
-    } else {
-        "Toggle color theme"
-    };
+    let label = tokens::string("theme-toggle", german);
     format!(
         "<button class=\"md2pdf-theme-toggle\" type=\"button\" aria-label=\"{label}\" \
          title=\"{label}\"><span class=\"md2pdf-theme-moon\" aria-hidden=\"true\"></span>\
@@ -242,14 +246,14 @@ fn theme_toggle(german: bool) -> String {
 }
 
 fn title_block(fm: &Frontmatter, title: Option<&str>, doc: &Doc) -> String {
-    let subtitle = fm.first("subtitle").unwrap_or_default();
+    let subtitle = fm.text("subtitle").unwrap_or_default();
     let authors = fm.list("authors");
     let authors = if authors.is_empty() {
         fm.list("author")
     } else {
         authors
     };
-    let date = fm.first("date").unwrap_or_default();
+    let date = fm.text("date").unwrap_or_default();
     if title.is_none_or(str::is_empty)
         && subtitle.is_empty()
         && authors.is_empty()
@@ -264,12 +268,12 @@ fn title_block(fm: &Frontmatter, title: Option<&str>, doc: &Doc) -> String {
     if !subtitle.is_empty() {
         out.push_str(&format!(
             "<p class=\"md2pdf-subtitle\">{}</p>",
-            inline_text(doc, subtitle)
+            inline_text(doc, &subtitle)
         ));
     }
     let mut byline: Vec<String> = authors.iter().map(|a| inline_text(doc, a)).collect();
     if !date.is_empty() {
-        byline.push(esc_text(date));
+        byline.push(esc_text(&date));
     }
     if !byline.is_empty() {
         out.push_str("<p class=\"md2pdf-byline\">");
@@ -289,7 +293,7 @@ fn toc(headings: &[Heading], german: bool) -> String {
     if headings.len() < 2 {
         return String::new();
     }
-    let label = if german { "Inhalt" } else { "Contents" };
+    let label = tokens::string("contents", german);
     format!(
         "<input type=\"checkbox\" class=\"md2pdf-toc-state\" id=\"md2pdf-toc-state\" \
            aria-label=\"{label}\">\
@@ -327,15 +331,6 @@ fn toc_list(headings: &[Heading]) -> String {
     out
 }
 
-fn leading_h1_text(src: &str) -> Option<String> {
-    let pre = preprocess(src);
-    let arena = Arena::new();
-    let root = parse_document(&arena, &pre.markdown, &build_options());
-    let children: Vec<&AstNode> = root.children().collect();
-    let text = heading_parts(&plain_text(children[leading_h1_index(&children)?])).0;
-    (!text.is_empty()).then_some(text)
-}
-
 /// Read one `key=value` line out of the options blob.
 fn option<'a>(options: &'a str, key: &str) -> Option<&'a str> {
     options
@@ -362,21 +357,37 @@ struct Note {
     html: String,
 }
 
-struct Doc {
-    assets: Assets,
+struct Doc<'b> {
+    assets: Assets<'b>,
     math: Math,
     german: bool,
     citations: bool,
+    /// The keys of the inline bibliography; only these are cited.
+    cite_keys: HashSet<String>,
     /// Citation keys in order of first use — that order is the numbering.
     cites: Vec<String>,
     notes: Vec<Note>,
     note_index: HashMap<String, usize>,
+    /// How often each note number has been referenced so far.
+    note_refs: HashMap<usize, usize>,
+    /// Every footnote definition in the document, by name.
+    note_sources: HashMap<String, String>,
     headings: Vec<Heading>,
     slugs: HashMap<String, usize>,
     editable: bool,
+    /// Directory prefix of the `<dir>/<hash>` keys of remote images.
+    remote_dir: String,
+    /// The leading H1's text, once the top-level render promoted it to title.
+    title_h1: Option<String>,
+    /// The reference list's heading, `None` for none at all.
+    bibliography_title: Option<String>,
+    /// `image-width`: the width of an image without a size of its own.
+    image_width: String,
+    /// `breaks: false`: a source line break is a space, not a line break.
+    soft_breaks: bool,
 }
 
-impl Doc {
+impl Doc<'_> {
     fn slug(&mut self, text: &str, custom: Option<&str>) -> String {
         unique_heading_id(&mut self.slugs, text, custom)
     }
@@ -393,7 +404,7 @@ impl Doc {
         if self.notes.is_empty() {
             return String::new();
         }
-        let title = if self.german { "Fußnoten" } else { "Notes" };
+        let title = tokens::string("notes", self.german);
         let mut out = format!("<section class=\"md2pdf-notes\"><h2>{title}</h2><ol>");
         for note in &self.notes {
             let back = format!(
@@ -423,6 +434,9 @@ struct Frame<'a> {
     spoilers: Vec<Spoiler>,
     table_widths: Vec<Vec<usize>>,
     pending_widths: Cell<Option<usize>>,
+    list_styles: Vec<ListStyle>,
+    /// Set by a `liststyle` placeholder, consumed by the list right after it.
+    pending_style: Cell<Option<ListStyle>>,
     /// Original source line per line of the text comrak was handed, already
     /// rebased through any enclosing block.
     origin: Vec<u32>,
@@ -436,6 +450,8 @@ impl<'a> Frame<'a> {
             spoilers: pre.spoilers,
             table_widths: pre.table_widths,
             pending_widths: Cell::new(None),
+            list_styles: pre.list_styles,
+            pending_style: Cell::new(None),
             origin: pre.origin,
         }
     }
@@ -467,28 +483,30 @@ impl<'a> Frame<'a> {
 /// author typed. It is applied once here rather than at every use.
 fn render_source(src: &str, doc: &mut Doc, strip_h1: bool, base: &[u32]) -> String {
     let prepared = if doc.citations {
-        preprocess_citations(src)
+        preprocess_citations(src, &doc.cite_keys).0
     } else {
         src.to_string()
     };
     // Citations are the one pass that rewrites within a line rather than
     // across lines, so it leaves the mapping alone.
-    let mut pre = preprocess(&prepared);
-    pre.origin = crate::rebase(&pre.origin, base);
-    for a in &mut pre.admonitions {
-        a.origin = crate::rebase(&a.origin, base);
-    }
-    for s in &mut pre.spoilers {
-        s.origin = crate::rebase(&s.origin, base);
-    }
+    let pre = preprocess_rebased(&prepared, base);
     let arena = Arena::new();
-    let root = parse_document(&arena, &pre.markdown, &build_options());
+    let markdown = crate::with_note_stubs(&pre.markdown, &doc.note_sources);
+    let root = parse(&arena, &markdown);
     let mut frame = Frame::new(pre);
     frame.collect_notes(root);
 
     let children: Vec<&AstNode> = root.children().collect();
+    // A leading H1 with text becomes the title and leaves the body.
     let skip = if strip_h1 {
-        leading_h1_index(&children)
+        leading_h1_index(&children).filter(|&i| {
+            let text = heading_parts(&plain_text(children[i])).0;
+            let promoted = !text.is_empty();
+            if promoted {
+                doc.title_h1 = Some(text);
+            }
+            promoted
+        })
     } else {
         None
     };
@@ -507,6 +525,21 @@ fn render_source(src: &str, doc: &mut Doc, strip_h1: bool, base: &[u32]) -> Stri
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("")
+}
+
+/// Run the pre-parse passes over a block's source and map every origin they
+/// record — its own lines and those of the blocks it lifted out — into the
+/// original document's coordinates.
+fn preprocess_rebased(src: &str, base: &[u32]) -> Preprocessed {
+    let mut pre = preprocess(src);
+    pre.origin = crate::preprocess::rebase(&pre.origin, base);
+    for a in &mut pre.admonitions {
+        a.origin = crate::preprocess::rebase(&a.origin, base);
+    }
+    for s in &mut pre.spoilers {
+        s.origin = crate::preprocess::rebase(&s.origin, base);
+    }
+    pre
 }
 
 /// Tag a rendered block with the source line it came from.
@@ -535,17 +568,21 @@ fn blocks<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
 }
 
 fn block<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
-    let value = node.data.borrow().value.clone();
+    let data = node.data.borrow();
+    let value = &data.value;
     // A pending width id belongs to the table right after its placeholder.
     if !matches!(value, NodeValue::Table(_) | NodeValue::HtmlBlock(_)) {
         f.pending_widths.set(None);
     }
+    if !matches!(value, NodeValue::List(_) | NodeValue::HtmlBlock(_)) {
+        f.pending_style.set(None);
+    }
     match value {
-        NodeValue::FrontMatter(_) | NodeValue::FootnoteDefinition(_) => String::new(),
+        NodeValue::FootnoteDefinition(_) => String::new(),
         NodeValue::Document => blocks(doc, f, node),
         NodeValue::Heading(h) => heading(doc, f, node, h.level.clamp(1, 6)),
         NodeValue::Paragraph => paragraph(doc, f, node),
-        NodeValue::ThematicBreak => "<hr>".to_string(),
+        NodeValue::ThematicBreak(_) => "<hr>".to_string(),
         NodeValue::BlockQuote | NodeValue::MultilineBlockQuote(_) => {
             format!("<blockquote>{}</blockquote>", blocks(doc, f, node))
         }
@@ -560,10 +597,18 @@ fn block<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
             } else if let Some(id) = parse_placeholder(&hb.literal, "tablewidths") {
                 f.pending_widths.set(Some(id));
                 String::new()
+            } else if let Some(id) = parse_placeholder(&hb.literal, "liststyle") {
+                f.pending_style.set(f.list_styles.get(id).copied());
+                String::new()
             } else {
                 // Raw HTML in the source is shown, not executed — same stance
-                // as the Typst renderer, which escapes it too.
-                format!("<p>{}</p>", esc_text(hb.literal.trim()))
+                // as the Typst renderer, which escapes it too. Comments go.
+                let shown = crate::rawhtml::without_comments(&hb.literal);
+                if shown.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("<p>{}</p>", esc_text(shown.trim()))
+                }
             }
         }
         NodeValue::Table(_) => table(doc, f, node),
@@ -589,22 +634,11 @@ fn heading<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>, level: u8) -
 }
 
 fn heading_inlines<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
-    let children: Vec<&AstNode> = node.children().collect();
-    children
-        .iter()
-        .enumerate()
-        .map(|(i, child)| {
-            if i + 1 == children.len() {
-                if let NodeValue::Text(text) = &child.data.borrow().value {
-                    let (visible, custom) = heading_parts(text);
-                    if custom.is_some() {
-                        return text_run(doc, &visible);
-                    }
-                }
-            }
-            inline(doc, f, child)
-        })
-        .collect()
+    let kids: Vec<&AstNode> = node.children().collect();
+    if let Some((last, visible)) = crate::heading_text_without_id(node, &kids) {
+        return nodes(doc, f, &kids[..last]) + &text_run(doc, &visible);
+    }
+    nodes(doc, f, &kids)
 }
 
 fn paragraph<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
@@ -673,10 +707,10 @@ fn row(doc: &mut Doc, source: &str, base: &[u32]) -> String {
     if source.trim().is_empty() {
         return String::new();
     }
-    let mut pre = preprocess(source);
-    pre.origin = crate::rebase(&pre.origin, base);
+    let pre = preprocess_rebased(source, base);
     let arena = Arena::new();
-    let root = parse_document(&arena, &pre.markdown, &build_options());
+    let markdown = crate::with_note_stubs(&pre.markdown, &doc.note_sources);
+    let root = parse(&arena, &markdown);
     let mut frame = Frame::new(pre);
     frame.collect_notes(root);
     let cells: Vec<String> = root
@@ -701,8 +735,9 @@ fn code_block(doc: &Doc, info: &str, literal: &str) -> String {
     if info.eq_ignore_ascii_case("mermaid") {
         return mermaid(doc, code);
     }
-    let lang = info.split_whitespace().next().unwrap_or_default();
-    let lines: String = highlight::highlight(info, code)
+    let lang = crate::code_language(info);
+    let lang = lang.as_str();
+    let lines: String = highlight::highlight(lang, code)
         .split('\n')
         .map(|l| format!("<span class=\"md2pdf-line\">{l}</span>"))
         .collect();
@@ -711,11 +746,10 @@ fn code_block(doc: &Doc, info: &str, literal: &str) -> String {
     } else {
         format!(" data-lang=\"{}\"", esc_attr(lang))
     };
-    let (copy, done) = if doc.german {
-        ("Kopieren", "Kopiert")
-    } else {
-        ("Copy", "Copied")
-    };
+    let (copy, done) = (
+        tokens::string("copy", doc.german),
+        tokens::string("copied", doc.german),
+    );
     format!(
         "<div class=\"md2pdf-code\"{lang_attr}>\
          <button class=\"md2pdf-copy\" type=\"button\" data-done=\"{done}\">{copy}</button>\
@@ -731,11 +765,7 @@ fn code_block(doc: &Doc, info: &str, literal: &str) -> String {
 /// in the page rather than the shadow root. Loaded through `<img>` it cannot
 /// script or fetch, whatever it contains.
 fn mermaid(doc: &Doc, code: &str) -> String {
-    let label = if doc.german {
-        "Mermaid-Diagramm"
-    } else {
-        "Mermaid diagram"
-    };
+    let label = tokens::string("mermaid", doc.german);
     match doc.assets.data_uri(&mermaid_key(code)) {
         Some(src) => format!(
             "<figure class=\"md2pdf-mermaid\"><img src=\"{src}\" alt=\"{label}\" \
@@ -766,7 +796,12 @@ fn list<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
         } else {
             String::new()
         };
-        format!("<ol{start}>{items}</ol>")
+        let kind = f
+            .pending_style
+            .take()
+            .map(|style| format!(" type=\"{}\"", style.kind))
+            .unwrap_or_default();
+        format!("<ol{kind}{start}>{items}</ol>")
     } else {
         format!("<ul>{items}</ul>")
     }
@@ -880,27 +915,48 @@ fn table<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
 // ==========================================================================
 
 fn inlines<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
-    node.children().map(|c| inline(doc, f, c)).collect()
+    nodes(doc, f, &node.children().collect::<Vec<_>>())
+}
+
+/// Sibling inline nodes, pairing raw formatting tags as `render_nodes` does
+/// in `typst.rs`. The tag is rebuilt from its name, so no attribute survives.
+fn nodes<'a>(doc: &mut Doc, f: &Frame<'a>, kids: &[&'a AstNode<'a>]) -> String {
+    let mut out = String::new();
+    let mut i = 0;
+    while i < kids.len() {
+        if let Some((tag, close)) = crate::open_tag(kids, i) {
+            let body = nodes(doc, f, &kids[i + 1..close]);
+            out.push_str(&format!("<{tag}>{body}</{tag}>"));
+            i = close + 1;
+            continue;
+        }
+        out.push_str(&inline(doc, f, kids[i]));
+        i += 1;
+    }
+    out
 }
 
 fn inline<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
-    let value = node.data.borrow().value.clone();
-    match value {
-        NodeValue::Text(t) => text_run(doc, &t),
+    let data = node.data.borrow();
+    match &data.value {
+        NodeValue::Text(t) => text_run(doc, t),
+        NodeValue::SoftBreak if doc.soft_breaks => "\n".to_string(),
         NodeValue::SoftBreak => "<br>".to_string(),
         NodeValue::LineBreak => "<br>".to_string(),
         NodeValue::Escaped => inlines(doc, f, node),
-        NodeValue::Emph => format!("<em>{}</em>", inlines(doc, f, node)),
-        NodeValue::Strong => format!("<strong>{}</strong>", inlines(doc, f, node)),
-        NodeValue::Strikethrough => format!("<del>{}</del>", inlines(doc, f, node)),
+        NodeValue::Emph(_) => format!("<em>{}</em>", inlines(doc, f, node)),
+        NodeValue::Strong(_) => format!("<strong>{}</strong>", inlines(doc, f, node)),
+        NodeValue::Strikethrough(_) => format!("<del>{}</del>", inlines(doc, f, node)),
         NodeValue::Superscript => format!("<sup>{}</sup>", inlines(doc, f, node)),
         NodeValue::Subscript => format!("<sub>{}</sub>", inlines(doc, f, node)),
         NodeValue::Underline => format!("<u>{}</u>", inlines(doc, f, node)),
+        NodeValue::Insert => format!("<ins>{}</ins>", inlines(doc, f, node)),
         NodeValue::Code(c) => format!("<code>{}</code>", esc_text(&c.literal)),
         NodeValue::Math(m) => doc.math.render(m.display_math, &m.literal),
-        NodeValue::HtmlInline(h) => match h.trim().to_ascii_lowercase().as_str() {
-            "<br>" | "<br/>" | "<br />" => "<br>".to_string(),
-            _ => esc_text(&h),
+        NodeValue::HtmlInline(h) => match crate::rawhtml::classify(h) {
+            crate::rawhtml::Raw::Comment => String::new(),
+            crate::rawhtml::Raw::Open("br") => "<br>".to_string(),
+            _ => esc_text(h),
         },
         NodeValue::ShortCode(s) => emoji_run(doc, &s.emoji),
         NodeValue::Link(l) => {
@@ -927,7 +983,7 @@ fn link(url: &str, label: &str) -> String {
             } else {
                 ""
             };
-            format!("<a href=\"{}\"{rel}>{label}</a>", esc_attr(&href))
+            format!("<a href=\"{}\"{rel}>{label}</a>", esc_attr(href))
         }
         // A rejected scheme still shows its text; it just is not clickable.
         None => format!("<span class=\"md2pdf-missing\">{label}</span>"),
@@ -937,9 +993,9 @@ fn link(url: &str, label: &str) -> String {
 fn image(doc: &Doc, url: &str, title: &str, alt: &str) -> String {
     let (url, dims) = split_dims(url, title);
     let key = if is_remote(&url) {
-        format!("remote/{}", hash_url(&url))
+        Some(format!("{}/{}", doc.remote_dir, hash_url(&url)))
     } else {
-        url.clone()
+        crate::local_image_path(&url)
     };
 
     let caption = alt.trim();
@@ -948,7 +1004,7 @@ fn image(doc: &Doc, url: &str, title: &str, alt: &str) -> String {
         caption.starts_with('=') || caption.chars().next().is_some_and(|c| c.is_ascii_digit());
     let caption = if caption_is_dims { "" } else { caption };
 
-    let Some(src) = doc.assets.data_uri(&key) else {
+    let Some(src) = key.and_then(|key| doc.assets.data_uri(&key)) else {
         let what = if caption.is_empty() {
             url.as_str()
         } else {
@@ -967,8 +1023,9 @@ fn image(doc: &Doc, url: &str, title: &str, alt: &str) -> String {
                 attrs.push_str(&format!(" height=\"{}\"", esc_attr(h)));
             }
         }
-        // No size given means "as wide as the text", matching the PDF.
-        None => attrs.push_str(" style=\"width:100%\""),
+        // No size given means `image-width`, "as wide as the text" by
+        // default, matching the PDF.
+        None => attrs.push_str(&format!(" style=\"width:{}\"", doc.image_width)),
     }
     let img = format!(
         "<img src=\"{src}\" alt=\"{}\" loading=\"lazy\" decoding=\"async\"{attrs}>",
@@ -988,33 +1045,69 @@ fn footnote<'a>(doc: &mut Doc, f: &Frame<'a>, name: &str) -> String {
     let Some(def) = f.notes.get(name).copied() else {
         return String::new();
     };
-    let number = match doc.note_index.get(name) {
+    // Inline notes are named afresh in every parse; only their node is unique.
+    let key = if name.starts_with("__inline") {
+        format!("{name}@{:p}", def)
+    } else {
+        name.to_string()
+    };
+    let number = match doc.note_index.get(&key) {
         Some(n) => *n,
         None => {
             // Reserve the slot before rendering, so a self-referencing note
             // terminates instead of recursing forever.
             let number = doc.notes.len() + 1;
-            doc.note_index.insert(name.to_string(), number);
+            doc.note_index.insert(key, number);
             let back = format!("md2pdf-fnref-{number}");
             doc.notes.push(Note {
                 number,
                 back: back.clone(),
                 html: String::new(),
             });
-            let html = blocks(doc, f, def);
+            // A note defined in another block is rendered from its source.
+            let html = match doc
+                .note_sources
+                .get(name)
+                .filter(|_| crate::is_note_stub(def))
+            {
+                Some(source) => render_source(&source.clone(), doc, false, &[]),
+                None => blocks(doc, f, def),
+            };
             doc.notes[number - 1].html = html;
             number
         }
     };
+    // Every reference needs an id of its own; the note links back to the first.
+    let seen = doc.note_refs.entry(number).or_insert(0);
+    *seen += 1;
+    let id = match *seen {
+        1 => format!("md2pdf-fnref-{number}"),
+        n => format!("md2pdf-fnref-{number}-{n}"),
+    };
     format!(
-        "<sup class=\"md2pdf-fnref\" id=\"md2pdf-fnref-{number}\">\
+        "<sup class=\"md2pdf-fnref\" id=\"{id}\">\
          <a href=\"#md2pdf-fn-{number}\">[{number}]</a></sup>"
     )
 }
 
-/// A text run: `==mark==` spans, citation tokens and emoji, everything else
-/// escaped. Mirrors `render_text` in `lib.rs`.
+/// A text run: bylines, `==mark==` spans, citation tokens and emoji,
+/// everything else escaped. Mirrors `render_text` in `typst.rs`.
 fn text_run(doc: &mut Doc, s: &str) -> String {
+    let mut out = String::new();
+    for (byline, part) in crate::split_bylines(s) {
+        if byline {
+            out.push_str(&format!(
+                "<span class=\"md2pdf-tag-byline\">{}</span>",
+                emoji_run(doc, part)
+            ));
+        } else {
+            out.push_str(&marks_run(doc, part));
+        }
+    }
+    out
+}
+
+fn marks_run(doc: &mut Doc, s: &str) -> String {
     let mut out = String::new();
     let mut rest = s;
     loop {
@@ -1034,7 +1127,7 @@ fn text_run(doc: &mut Doc, s: &str) -> String {
         if next.1 {
             let after = &rest[next.0 + CITATION_OPEN_TOKEN.len()..];
             if let Some(end) = after.find(CITATION_CLOSE_TOKEN) {
-                if let Some(keys) = crate::citation_keys(&after[..end]) {
+                if let Some(keys) = crate::preprocess::citation_keys(&after[..end]) {
                     out.push_str(&emoji_run(doc, &rest[..next.0]));
                     if keys.len() == 1 {
                         let key = keys[0];
@@ -1122,92 +1215,6 @@ fn inline_text(doc: &Doc, s: &str) -> String {
 // Frontmatter & bibliography
 // ==========================================================================
 
-/// The handful of frontmatter keys HTML cares about. The PDF path reads the
-/// full block with Typst's YAML decoder; the browser never runs Typst, so the
-/// engine has to read these itself.
-pub(crate) struct Frontmatter(HashMap<String, Vec<String>>);
-
-impl Frontmatter {
-    pub(crate) fn parse(src: &str) -> Self {
-        let mut map: HashMap<String, Vec<String>> = HashMap::new();
-        let Some(rest) = src
-            .strip_prefix("---\n")
-            .or_else(|| src.strip_prefix("---\r\n"))
-        else {
-            return Self(map);
-        };
-        let mut key = String::new();
-        for line in rest.lines() {
-            if line.trim_end() == "---" || line.trim_end() == "..." {
-                break;
-            }
-            if let Some(item) = line.trim().strip_prefix("- ") {
-                if !key.is_empty() {
-                    map.entry(key.clone()).or_default().push(unquote(item));
-                }
-                continue;
-            }
-            let indented = line.starts_with(' ') || line.starts_with('\t');
-            let Some((k, v)) = line.split_once(':') else {
-                continue;
-            };
-            if indented || k.trim().is_empty() || k.contains(char::is_whitespace) {
-                continue;
-            }
-            key = k.trim().to_ascii_lowercase();
-            let v = v.trim();
-            let values = match v.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
-                Some(flow) => flow
-                    .split(',')
-                    .map(unquote)
-                    .filter(|s| !s.is_empty())
-                    .collect(),
-                None if v.is_empty() => Vec::new(),
-                None => vec![unquote(v)],
-            };
-            map.insert(key.clone(), values);
-        }
-        Self(map)
-    }
-
-    pub(crate) fn first(&self, key: &str) -> Option<&str> {
-        self.0.get(key)?.first().map(String::as_str)
-    }
-
-    fn list(&self, key: &str) -> Vec<String> {
-        self.0.get(key).cloned().unwrap_or_default()
-    }
-
-    /// A yes/no frontmatter key. YAML's own spelling of true, minus the
-    /// ambiguous ones — a bare `hide-toc-button:` is not a request to hide it.
-    fn flag(&self, key: &str) -> bool {
-        self.first(key)
-            .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "yes" | "on" | "1"))
-    }
-}
-
-fn unquote(s: &str) -> String {
-    let s = s.trim();
-    for q in ['"', '\''] {
-        if s.starts_with(q) {
-            if let Some(end) = s.rfind(q).filter(|end| *end > 0) {
-                let tail = s[end + 1..].trim();
-                if tail.is_empty() || tail.starts_with('#') {
-                    return s[1..end].to_string();
-                }
-            }
-        }
-    }
-    let comment = s
-        .char_indices()
-        .find(|(i, c)| {
-            *c == '#' && (*i == 0 || s[..*i].chars().next_back().is_some_and(char::is_whitespace))
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(s.len());
-    s[..comment].trim_end().to_string()
-}
-
 /// A numbered reference list for `bibliography: inline`.
 ///
 /// Typst renders this with a real CSL style; reproducing CSL in the engine is
@@ -1218,13 +1225,11 @@ fn bibliography(bibtex: &str, doc: &Doc) -> String {
         return String::new();
     }
     let entries = parse_bibtex(bibtex);
-    let title = if doc.german {
-        "Literatur"
-    } else {
-        "References"
+    let heading = match &doc.bibliography_title {
+        Some(title) => format!("<h2>{}</h2>", esc_text(title)),
+        None => String::new(),
     };
-    let mut out =
-        format!("<section class=\"md2pdf-notes md2pdf-bibliography\"><h2>{title}</h2><ol>");
+    let mut out = format!("<section class=\"md2pdf-notes md2pdf-bibliography\">{heading}<ol>");
     for key in &doc.cites {
         let body = match entries.get(key) {
             Some(fields) => format_reference(fields),
@@ -1237,6 +1242,11 @@ fn bibliography(bibtex: &str, doc: &Doc) -> String {
     }
     out.push_str("</ol></section>");
     out
+}
+
+/// The entry keys of a BibTeX source.
+pub(crate) fn bibtex_keys(bib: &str) -> HashSet<String> {
+    parse_bibtex(bib).into_keys().collect()
 }
 
 /// Minimal BibTeX reader: entry key plus `field = {value}` / `field = "value"`.
@@ -1351,7 +1361,7 @@ fn format_reference(fields: &HashMap<String, String>) -> String {
         if let Some(href) = safe_url(url) {
             out.push_str(&format!(
                 " <a href=\"{}\">{}</a>",
-                esc_attr(&href),
+                esc_attr(href),
                 esc_text(url)
             ));
         }

@@ -12,7 +12,6 @@ type LiveGeometry = {
 	containerClientWidth: number;
 };
 
-
 /** Text of the rendered document, which lives inside a shadow root. */
 const documentText = (page: Page) =>
 	page
@@ -57,7 +56,9 @@ test.beforeEach(async ({ page }) => {
 test('a leading heading survives a frontmatter title', async ({ page }) => {
 	// The bug this suite exists for: the headline was deleted from the rendered
 	// document and nothing took its place.
-	await type(page, '---\ntitle: From Frontmatter\n---\n\n# acc\n\nbody\n', 'From Frontmatter');
+	// Wait for the last line typed: the title alone shows up mid-typing. The
+	// marker must not occur in the welcome document this replaces.
+	await type(page, '---\ntitle: From Frontmatter\n---\n\n# acc\n\nlast line\n', 'last line');
 	const text = await documentText(page);
 	expect(text).toContain('From Frontmatter');
 	expect(text).toContain('acc');
@@ -91,7 +92,7 @@ test('the exported document keeps its checkboxes inert', async ({ page }) => {
 	expect(live).toBe(false);
 
 	const download = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Export' }).click();
+	await page.getByRole('button', { name: 'Export', exact: true }).click();
 	await page.getByRole('button', { name: /HTML/ }).click();
 	const file = await (await download).createReadStream();
 	const html = await new Promise<string>((resolve) => {
@@ -119,10 +120,7 @@ test('Web documents widen responsively without outer horizontal scrolling', asyn
 				cap: 56 * Number.parseFloat(getComputedStyle(pageRoot).fontSize),
 				documentWidth: documentBox.width,
 				hostWidth: preview.clientWidth,
-				centerError:
-					documentBox.left +
-					documentBox.width / 2 -
-					(hostBox.left + hostBox.width / 2),
+				centerError: documentBox.left + documentBox.width / 2 - (hostBox.left + hostBox.width / 2),
 				pageScrollWidth: pageRoot.scrollWidth,
 				pageClientWidth: pageRoot.clientWidth,
 				containerScrollWidth: container.scrollWidth,
@@ -157,7 +155,7 @@ test('Web documents widen responsively without outer horizontal scrolling', asyn
 	expectNoLiveOuterOverflow(geometry);
 
 	const download = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Export' }).click();
+	await page.getByRole('button', { name: 'Export', exact: true }).click();
 	await page.getByRole('button', { name: /HTML/ }).click();
 	const stream = await (await download).createReadStream();
 	const html = await new Promise<string>((resolve) => {
@@ -170,7 +168,7 @@ test('Web documents widen responsively without outer horizontal scrolling', asyn
 	try {
 		await standalone.setViewportSize({ width: 1920, height: 1200 });
 		await standalone.setContent(html);
-		let exportGeometry = await standalone.evaluate(() => {
+		const exportGeometry = await standalone.evaluate(() => {
 			const documentRoot = document.querySelector<HTMLElement>('.md2pdf')!;
 			const documentElement = document.querySelector<HTMLElement>('.md2pdf-doc')!;
 			const documentBox = documentElement.getBoundingClientRect();
@@ -181,10 +179,7 @@ test('Web documents widen responsively without outer horizontal scrolling', asyn
 				cap: 56 * Number.parseFloat(getComputedStyle(pageRoot).fontSize),
 				documentWidth: documentBox.width,
 				availableWidth: documentRoot.clientWidth,
-				centerError:
-					documentBox.left +
-					documentBox.width / 2 -
-					(bodyBox.left + bodyBox.width / 2),
+				centerError: documentBox.left + documentBox.width / 2 - (bodyBox.left + bodyBox.width / 2),
 				pageScrollWidth: pageRoot.scrollWidth,
 				pageClientWidth: pageRoot.clientWidth,
 				bodyScrollWidth: document.body.scrollWidth,
@@ -198,7 +193,7 @@ test('Web documents widen responsively without outer horizontal scrolling', asyn
 		expect(exportGeometry.bodyScrollWidth).toBeLessThanOrEqual(exportGeometry.bodyClientWidth);
 
 		await standalone.setViewportSize({ width: 700, height: 1200 });
-		exportGeometry = await standalone.evaluate(() => {
+		const narrowGeometry = await standalone.evaluate(() => {
 			const documentRoot = document.querySelector<HTMLElement>('.md2pdf')!;
 			const documentElement = document.querySelector<HTMLElement>('.md2pdf-doc')!;
 			const documentBox = documentElement.getBoundingClientRect();
@@ -212,9 +207,9 @@ test('Web documents widen responsively without outer horizontal scrolling', asyn
 				bodyClientWidth: document.body.clientWidth,
 			};
 		});
-		expect(exportGeometry.documentWidth).toBeCloseTo(exportGeometry.availableWidth, 1);
-		expect(exportGeometry.pageScrollWidth).toBeLessThanOrEqual(exportGeometry.pageClientWidth);
-		expect(exportGeometry.bodyScrollWidth).toBeLessThanOrEqual(exportGeometry.bodyClientWidth);
+		expect(narrowGeometry.documentWidth).toBeCloseTo(narrowGeometry.availableWidth, 1);
+		expect(narrowGeometry.pageScrollWidth).toBeLessThanOrEqual(narrowGeometry.pageClientWidth);
+		expect(narrowGeometry.bodyScrollWidth).toBeLessThanOrEqual(narrowGeometry.bodyClientWidth);
 	} finally {
 		await standalone.close();
 	}
@@ -314,7 +309,7 @@ test('HTML export captures the selected theme and owns the only theme toggle', a
 	expect(previewToggle).toBe(0);
 
 	const download = page.waitForEvent('download');
-	await page.getByRole('button', { name: 'Export' }).click();
+	await page.getByRole('button', { name: 'Export', exact: true }).click();
 	await page.getByRole('button', { name: /HTML/ }).click();
 	const stream = await (await download).createReadStream();
 	const html = await new Promise<string>((resolve) => {

@@ -1,43 +1,11 @@
-import type { SvgDocument } from '$lib/typst/svg-split';
-import type { HtmlRequest } from './compileProtocol';
-
-type CompileRequest = {
-	type: 'compile';
-	id: string;
-	markdown: string;
-	images?: Record<string, Uint8Array<ArrayBuffer>>;
-	format?: 'pdf' | 'preview';
-};
-
-type CompileResponse =
-	| {
-			type: 'compile-result';
-			id: string;
-			ok: true;
-			pdf: ArrayBuffer;
-			diagnostics: string[];
-	  }
-	| {
-			type: 'compile-result';
-			id: string;
-			ok: true;
-			preview: SvgDocument;
-			diagnostics: string[];
-	  }
-	| {
-			type: 'compile-result';
-			id: string;
-			ok: true;
-			html: string;
-			diagnostics: string[];
-	  }
-	| {
-			type: 'compile-result';
-			id: string;
-			ok: false;
-			error: string;
-			diagnostics: string[];
-	  };
+import type { SvgDocument } from '#lib/typst/svg-split.ts';
+import type {
+	CompileRequest,
+	HtmlRequest,
+	ImageMap,
+	Theme,
+	WorkerResponse,
+} from './compileProtocol';
 
 type CompileResult = {
 	pdf?: Uint8Array<ArrayBuffer>;
@@ -56,12 +24,18 @@ export class TypstWorkerClient {
 	#pending = new Map<string, Pending>();
 	/** Id of the preview compile that has not returned yet, if any. */
 	#pendingPreviewId: string | null = null;
+	/** Called when remote images a render went ahead without have arrived. */
+	onRemotesReady: (() => void) | null = null;
 
 	constructor() {
 		this.#worker = new Worker(new URL('./typst.worker.ts', import.meta.url), { type: 'module' });
-		this.#worker.addEventListener('message', (event: MessageEvent<CompileResponse>) => {
+		this.#worker.addEventListener('message', (event: MessageEvent<WorkerResponse>) => {
 			const message = event.data;
-			if (!message || message.type !== 'compile-result') return;
+			if (message?.type === 'remotes-ready') {
+				this.onRemotesReady?.();
+				return;
+			}
+			if (message?.type !== 'compile-result') return;
 
 			const pending = this.#pending.get(message.id);
 			if (!pending) return;
@@ -98,10 +72,10 @@ export class TypstWorkerClient {
 	 */
 	renderHtml(
 		markdown: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {},
+		images: ImageMap = {},
 		standalone = false,
 		editable = false,
-		theme: 'system' | 'light' | 'dark' = 'system',
+		theme: Theme = 'system',
 	): Promise<{ html: string; diagnostics: string[] }> {
 		const id = this.#nextId();
 		const request: HtmlRequest = {
@@ -132,7 +106,7 @@ export class TypstWorkerClient {
 
 	compilePdf(
 		markdown: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {},
+		images: ImageMap = {},
 	): Promise<{ pdf: Uint8Array<ArrayBuffer>; diagnostics: string[] }> {
 		return this.#compile(markdown, images, 'pdf').then((r) => ({
 			pdf: r.pdf!,
@@ -143,7 +117,7 @@ export class TypstWorkerClient {
 	/** Compile and render the preview: page markup, ready to display. */
 	compilePreview(
 		markdown: string,
-		images: Record<string, Uint8Array<ArrayBuffer>> = {},
+		images: ImageMap = {},
 	): Promise<{ preview: SvgDocument; diagnostics: string[] }> {
 		return this.#compile(markdown, images, 'preview').then((r) => ({
 			preview: r.preview!,
@@ -157,11 +131,7 @@ export class TypstWorkerClient {
 			: String(Date.now()) + Math.random().toString(36).slice(2);
 	}
 
-	#compile(
-		markdown: string,
-		images: Record<string, Uint8Array<ArrayBuffer>>,
-		format: 'pdf' | 'preview',
-	): Promise<CompileResult> {
+	#compile(markdown: string, images: ImageMap, format: 'pdf' | 'preview'): Promise<CompileResult> {
 		const id = this.#nextId();
 		const request: CompileRequest = { type: 'compile', id, markdown, images, format };
 		if (format === 'preview') this.#pendingPreviewId = id;

@@ -9,49 +9,117 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TYPST_VERSION: "0.15.1"
+
 jobs:
   engine:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             engine/target
-          key: cargo-${{ hashFiles('engine/Cargo.lock') }}
+          key: cargo-${{ hashFiles('engine/Cargo.lock', 'engine/rust-toolchain.toml') }}
           restore-keys: cargo-
+      # rustup installs the toolchain pinned in engine/rust-toolchain.toml.
+      - run: rustup show active-toolchain
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
-        working-directory: engine
+      - name: package/engine.wasm matches the source
+        working-directory: .
+        run: |
+          ./build.sh engine
+          git diff --exit-code --stat -- package/engine.wasm ||
+            { echo "::error::package/engine.wasm is stale. Run ./build.sh engine and commit it."; exit 1; }
 
   cli:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests -p "test_*.py"
 
-  web:
+  # Renders every tests/*.md through bin/md2pdf and compares the pages with
+  # tests/golden/. Refresh with `python3 tests/visual.py --update`.
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install pillow
+      - run: sudo apt-get install -y --no-install-recommends poppler-utils
+      - name: Install Typst ${{ env.TYPST_VERSION }}
+        run: |
+          curl -fsSL "https://github.com/typst/typst/releases/download/v$TYPST_VERSION/typst-x86_64-unknown-linux-musl.tar.xz" |
+            sudo tar -xJ --strip-components=1 -C /usr/local/bin typst-x86_64-unknown-linux-musl/typst
+      - run: python tests/visual.py
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: golden-diff
+          path: tests/golden-diff
+
+  web-lint:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
-      - run: npx prettier --check .
+      - run: npm run format:check
       - run: npm run check
       - run: npm test
+
+  web-e2e:
+    runs-on: ubuntu-latest
+    # Browsers and their system libraries come with the image. Keep the tag
+    # equal to the @playwright/test version in web/package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/cache@v6
+        with:
+          path: web/.cache/cjk
+          key: cjk-${{ hashFiles('web/vite.config.ts') }}
+          restore-keys: cjk-
+      - run: npm ci
+      - name: Playwright matches the container
+        run: |
+          want=$(node -p "require('@playwright/test/package.json').version")
+          case "$PLAYWRIGHT_IMAGE" in *"v$want-"*) ;; *) echo "::error::container is $PLAYWRIGHT_IMAGE, package wants $want"; exit 1 ;; esac
+        env:
+          PLAYWRIGHT_IMAGE: mcr.microsoft.com/playwright:v1.65.1-noble
       - run: npm run build
-      # The browser tests cover what unit tests structurally cannot: the
-      # document the app actually renders.
-      - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

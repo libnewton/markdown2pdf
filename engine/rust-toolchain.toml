@@ -1,0 +1,7 @@
+# Pinned so the committed package/engine.wasm can be rebuilt byte for byte
+# (CI checks it). Bump together with a rebuilt engine.wasm.
+[toolchain]
+channel = "1.100.0"
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"
+components = ["clippy", "rustfmt"]

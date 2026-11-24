@@ -89,15 +89,15 @@
     header-ascent: 6mm,
     footer-descent: 6mm,
     // A cover stays clean. Without one, the document starts on page one and
-    // its page number belongs there even though the running head starts later.
+    // its header and footer belong there too.
     header: context {
-      if here().page() > 1 { bar(..header-slots, vars, remotes, asset, height: header-height) }
+      if here().page() > 1 or not cover-mode {
+        bar(..header-slots, vars, remotes, asset, height: header-height)
+      }
     },
     footer: context {
-      if here().page() > 1 {
+      if here().page() > 1 or not cover-mode {
         bar(..footer-slots, vars, remotes, asset, height: footer-height)
-      } else if not cover-mode and custom-footer-center == none {
-        bar(none, number-template, none, vars, remotes, asset, height: footer-height)
       }
     },
   )

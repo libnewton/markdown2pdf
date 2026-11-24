@@ -6,12 +6,19 @@
 //! Keys are canonical: `images/<name>`, `remote/<hash>`, `twemoji/<cp>.svg`,
 //! `mermaid/<n>.svg`.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
-pub(crate) struct Assets(HashMap<String, Vec<u8>>);
+/// The host's assets, borrowed from its blob. Each `data:` URI is encoded once
+/// however often the document shows the asset — an emoji, a logo.
+pub(crate) struct Assets<'b> {
+    bytes: HashMap<String, &'b [u8]>,
+    uris: RefCell<HashMap<String, Rc<str>>>,
+}
 
-impl Assets {
-    pub(crate) fn decode(manifest: &str, blob: &[u8]) -> Self {
+impl<'b> Assets<'b> {
+    pub(crate) fn decode(manifest: &str, blob: &'b [u8]) -> Self {
         let mut map = HashMap::new();
         let mut offset = 0usize;
         for line in manifest.lines() {
@@ -25,28 +32,29 @@ impl Assets {
             if offset >= end && len > 0 {
                 break; // truncated blob — drop the rest rather than misalign
             }
-            map.insert(key.to_string(), blob[offset..end].to_vec());
+            map.insert(key.to_string(), &blob[offset..end]);
             offset = end;
         }
-        Self(map)
+        Self {
+            bytes: map,
+            uris: RefCell::new(HashMap::new()),
+        }
     }
 
     #[cfg(test)]
     fn bytes(&self, key: &str) -> Option<&[u8]> {
-        self.0.get(key).map(Vec::as_slice)
+        self.bytes.get(key).copied()
     }
 
     /// A `data:` URI for `key`, or `None` when the host could not supply it.
-    pub(crate) fn data_uri(&self, key: &str) -> Option<String> {
-        let data = self.0.get(key)?;
-        if data.is_empty() {
-            return None;
+    pub(crate) fn data_uri(&self, key: &str) -> Option<Rc<str>> {
+        if let Some(uri) = self.uris.borrow().get(key) {
+            return Some(uri.clone());
         }
-        Some(format!(
-            "data:{};base64,{}",
-            mime_for(key, data),
-            base64(data)
-        ))
+        let data = self.bytes.get(key).filter(|d| !d.is_empty())?;
+        let uri: Rc<str> = format!("data:{};base64,{}", mime_for(key, data), base64(data)).into();
+        self.uris.borrow_mut().insert(key.to_string(), uri.clone());
+        Some(uri)
     }
 }
 
@@ -169,7 +177,7 @@ mod tests {
     fn data_uri_uses_the_key_extension() {
         let a = Assets::decode("images/a.png\t3\n", b"abc");
         assert_eq!(
-            a.data_uri("images/a.png").unwrap(),
+            &*a.data_uri("images/a.png").unwrap(),
             "data:image/png;base64,YWJj"
         );
     }

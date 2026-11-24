@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 type MockSavedDocument = {
 	id: string;
 	name: string;
-	mode: 'pdf';
 	content: string;
 	assets?: Record<string, { bytes: Uint8Array; mimeType: string }>;
 	creationSource?: 'template' | 'blank' | 'import';
@@ -21,8 +20,9 @@ function createDocumentsMock() {
 	return {
 		docs,
 		module: {
-			saveDocument: vi.fn(async (doc: MockSavedDocument) => {
-				docs.set(doc.id, cloneDoc(doc));
+			saveDocument: vi.fn(async (doc: MockSavedDocument, assets?: MockSavedDocument['assets']) => {
+				// Images are a separate store: a save without them keeps the old ones.
+				docs.set(doc.id, cloneDoc({ ...doc, assets: assets ?? docs.get(doc.id)?.assets }));
 			}),
 			getDocument: vi.fn(async (id: string) => {
 				const doc = docs.get(id);
@@ -44,9 +44,9 @@ async function loadStoreWithMock() {
 	const documentsMock = createDocumentsMock();
 
 	vi.resetModules();
-	vi.doMock('$lib/storage/documents', () => documentsMock.module);
+	vi.doMock('#lib/storage/documents.ts', () => documentsMock.module);
 
-	const storeModule = await import('$lib/stores/documentStore.svelte');
+	const storeModule = await import('#lib/stores/documentStore.svelte.ts');
 
 	return {
 		documentsMock,
@@ -69,9 +69,10 @@ describe('documentStore persistence guards', () => {
 		);
 
 		vi.resetModules();
-		vi.doMock('$lib/storage/documents', () => ({
-			saveDocument: vi.fn(async (doc: MockSavedDocument) => {
-				docs.set(doc.id, cloneDoc(doc));
+		vi.doMock('#lib/storage/documents.ts', () => ({
+			saveDocument: vi.fn(async (doc: MockSavedDocument, assets?: MockSavedDocument['assets']) => {
+				// Images are a separate store: a save without them keeps the old ones.
+				docs.set(doc.id, cloneDoc({ ...doc, assets: assets ?? docs.get(doc.id)?.assets }));
 			}),
 			getDocument: vi.fn(async (id: string) => {
 				const doc = docs.get(id);
@@ -87,7 +88,7 @@ describe('documentStore persistence guards', () => {
 			}),
 		}));
 
-		const restoredModule = await import('$lib/stores/documentStore.svelte');
+		const restoredModule = await import('#lib/stores/documentStore.svelte.ts');
 
 		await restoredModule.documentStore.init();
 

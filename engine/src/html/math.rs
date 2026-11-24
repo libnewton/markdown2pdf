@@ -44,6 +44,70 @@ const ENVIRONMENTS: &[(&str, &str)] = &[
 /// the whole formula instead.
 const BOXES: &[&str] = &["boxed", "fbox", "framebox"];
 
+/// Commands and environments the PDF's LaTeX converter (mitex) rejects, which
+/// abort the whole Typst compile. math-core is no judge of these: it accepts
+/// some of them (`\href`, after `rewrite`) and knows others mitex does not.
+const PDF_UNSUPPORTED: &[&str] = &[
+    "Bbbk",
+    "DeclareMathOperator",
+    "SI",
+    "ce",
+    "char",
+    "def",
+    "enclose",
+    "eqnarray",
+    "eqref",
+    "gather*",
+    "genfrac",
+    "href",
+    "idotsint",
+    "iiiint",
+    "label",
+    "lmoustache",
+    "mathchoice",
+    "mathds",
+    "mbox",
+    "multline",
+    "phase",
+    "prescript",
+    "qty",
+    "ref",
+    "rule",
+    "shortmid",
+    "sideset",
+    "slash",
+    "strut",
+    "url",
+    "varinjlim",
+    "varliminf",
+    "vcenter",
+    "verb",
+];
+
+/// Commands mitex renders that math-core reports as unknown.
+const PDF_ONLY: &[&str] = &[
+    "LaTeX",
+    "TeX",
+    "boxed",
+    "centerdot",
+    "colorbox",
+    "dotsb",
+    "dotsc",
+    "fbox",
+    "framebox",
+    "hline",
+    "mathnormal",
+    "newcommand",
+    "pmb",
+    "pod",
+    "raisebox",
+    "smallsetminus",
+    "tag",
+    "textnormal",
+    "thickapprox",
+    "thicksim",
+];
+
 pub(crate) struct Math(LatexToMathML);
 
 impl Math {
@@ -54,7 +118,7 @@ impl Math {
             ..Default::default()
         };
         // `new` only fails on malformed custom macros, and we define none.
-        Self(LatexToMathML::new(config).expect("no custom macros"))
+        Self(LatexToMathML::new(config, Vec::new()).expect("no custom macros"))
     }
 
     /// Render one formula. On a parse error, or a command with no MathML
@@ -76,6 +140,12 @@ impl Math {
             class.push_str(" md2pdf-math-boxed");
         }
         match self.0.convert_with_local_state(&rewrite(&body), mode) {
+            // Browsers do not draw `<menclose>` (it is not in MathML Core), so
+            // a box around part of a formula would silently vanish.
+            Ok(result) if result.mathml.contains("<menclose") => error(
+                source,
+                "a box around part of a formula is not supported here",
+            ),
             Ok(result) if !result.mathml.contains(UNKNOWN) => {
                 format!("<span class=\"{class}\">{}</span>", result.mathml)
             }
@@ -86,6 +156,252 @@ impl Math {
             Err(err) => error(source, &err.to_string()),
         }
     }
+}
+
+impl Math {
+    /// Whether the PDF can typeset this formula. mitex runs inside the Typst
+    /// compile, where a failure cannot be caught and takes the whole document
+    /// with it, so the engine decides up front and shows the source instead.
+    pub(crate) fn pdf_accepts(&self, latex: &str) -> bool {
+        let source = latex.trim();
+        if source.is_empty() {
+            return true;
+        }
+        if unclosed_label_in_text(source) || !mitex_structure_ok(source) {
+            return false;
+        }
+        if commands(source).any(|c| PDF_UNSUPPORTED.contains(&c.as_str())) {
+            return false;
+        }
+        match self
+            .0
+            .convert_with_local_state(&rewrite(source), MathDisplay::Block)
+        {
+            Ok(result) => unknown_commands(&result.mathml)
+                .iter()
+                .all(|c| PDF_ONLY.contains(&c.as_str())),
+            // math-core is stricter about structure than mitex, which closes
+            // open groups at the end and tolerates a dangling `^` or `&`; the
+            // structural cases mitex does reject were checked above.
+            Err(_) => true,
+        }
+    }
+}
+
+/// The structural mistakes mitex cannot recover from: a `}` that closes
+/// nothing, an unpaired `\left`/`\right`, a fraction short of an argument, an
+/// infix `\over` with nothing after it, an `\end` with no `\begin`, and a
+/// style or limits switch with nothing to apply to.
+fn mitex_structure_ok(latex: &str) -> bool {
+    let src: Vec<char> = latex.chars().collect();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < src.len() {
+        match src[i] {
+            '\\' => i += 1,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let names: Vec<String> = commands(latex).collect();
+    let count = |n: &str| names.iter().filter(|c| *c == n).count();
+    if count("left") != count("right") {
+        return false;
+    }
+    if latex.starts_with("\\limits") || latex.starts_with("\\nolimits") {
+        return false;
+    }
+    let switches = [
+        "displaystyle",
+        "textstyle",
+        "scriptstyle",
+        "scriptscriptstyle",
+    ];
+    let mut words = latex.split('\\').map(str::trim).filter(|w| !w.is_empty());
+    let only_switches = words.clone().next().is_some() && words.all(|w| switches.contains(&w));
+    if only_switches {
+        return false;
+    }
+    if names
+        .iter()
+        .any(|n| matches!(n.as_str(), "over" | "atop" | "choose"))
+        && split_infix(latex)[1..].iter().any(|side| {
+            side.trim_matches(|c: char| c.is_whitespace() || c == '}')
+                .is_empty()
+        })
+    {
+        return false;
+    }
+    if latex.matches("\\end{").count() > latex.matches("\\begin{").count() {
+        return false;
+    }
+    fraction_arguments_ok(&src)
+}
+
+/// The operands around every `\over`, `\atop` and `\choose`. Only an empty
+/// right-hand side is fatal; mitex supplies an empty left one itself.
+fn split_infix(latex: &str) -> Vec<&str> {
+    let mut sides = Vec::new();
+    let mut from = 0;
+    let mut i = 0;
+    while let Some(at) = latex[i..].find('\\').map(|a| a + i) {
+        let name_end = latex[at + 1..]
+            .find(|c: char| !c.is_ascii_alphabetic())
+            .map_or(latex.len(), |e| at + 1 + e);
+        if matches!(&latex[at + 1..name_end], "over" | "atop" | "choose") {
+            sides.push(&latex[from..at]);
+            from = name_end;
+        }
+        i = name_end.max(at + 2).min(latex.len());
+    }
+    sides.push(&latex[from..]);
+    sides
+}
+
+/// Every `\frac`-like command has two arguments. An unterminated group at the
+/// end still counts as the second one — mitex closes it — but not as the first.
+fn fraction_arguments_ok(src: &[char]) -> bool {
+    let mut i = 0;
+    while i < src.len() {
+        if src[i] != '\\' {
+            i += 1;
+            continue;
+        }
+        let start = i + 1;
+        let mut end = start;
+        while end < src.len() && src[end].is_ascii_alphabetic() {
+            end += 1;
+        }
+        let name: String = src[start..end].iter().collect();
+        i = end.max(start + 1);
+        if !matches!(
+            name.as_str(),
+            "frac" | "dfrac" | "tfrac" | "cfrac" | "binom"
+        ) {
+            continue;
+        }
+        let mut j = i;
+        for arg in 0..2 {
+            skip_space(src, &mut j);
+            match src.get(j) {
+                None => return false,
+                Some('{') => match group_end(src, j) {
+                    Some(end) => j = end,
+                    None if arg == 0 => return false,
+                    None => j = src.len(),
+                },
+                Some('\\') => {
+                    j += 1;
+                    while j < src.len() && src[j].is_ascii_alphabetic() {
+                        j += 1;
+                    }
+                }
+                Some(_) => j += 1,
+            }
+        }
+    }
+    true
+}
+
+/// Command and environment names in a formula, without the backslash.
+fn commands(latex: &str) -> impl Iterator<Item = String> + '_ {
+    let mut rest = latex;
+    std::iter::from_fn(move || loop {
+        let at = rest.find('\\')?;
+        let after = &rest[at + 1..];
+        let len = after
+            .find(|c: char| !c.is_ascii_alphabetic())
+            .unwrap_or(after.len());
+        if len == 0 {
+            rest = after.get(1..).unwrap_or("");
+            continue;
+        }
+        let name = &after[..len];
+        rest = &after[len..];
+        if name == "begin" || name == "end" {
+            if let Some(env) = rest.trim_start().strip_prefix('{') {
+                if let Some(close) = env.find('}') {
+                    return Some(env[..close].to_string());
+                }
+            }
+        }
+        return Some(name.to_string());
+    })
+}
+
+/// Index just past the `}` closing the group that opens at `start`.
+fn group_end(src: &[char], start: usize) -> Option<usize> {
+    let mut depth = 0;
+    let mut i = start;
+    while i < src.len() {
+        match src[i] {
+            '\\' => i += 1,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// A `<label` with no closing `>` inside `\text{…}`: mitex hands the text to
+/// Typst as markup, where it opens a label that never closes.
+fn unclosed_label_in_text(latex: &str) -> bool {
+    let src: Vec<char> = latex.chars().collect();
+    let mut i = 0;
+    while i < src.len() {
+        if src[i] != '\\' {
+            i += 1;
+            continue;
+        }
+        let start = i + 1;
+        let mut end = start;
+        while end < src.len() && src[end].is_ascii_alphabetic() {
+            end += 1;
+        }
+        let name: String = src[start..end].iter().collect();
+        i = end.max(start + 1);
+        if name.starts_with("text") || name == "hbox" {
+            skip_space(&src, &mut i);
+            if has_unclosed_label(&read_group(&src, &mut i)) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn has_unclosed_label(text: &str) -> bool {
+    let is_label = |c: char| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | ':');
+    text.match_indices('<').any(|(at, _)| {
+        let rest = &text[at + 1..];
+        let len = rest.find(|c: char| !is_label(c)).unwrap_or(rest.len());
+        len > 0 && !rest[len..].starts_with('>')
+    })
+}
+
+/// Every command `math-core` marked as unknown.
+fn unknown_commands(mathml: &str) -> Vec<String> {
+    mathml
+        .split(UNKNOWN)
+        .skip(1)
+        .filter_map(|rest| rest.split_once("<mtext>"))
+        .filter_map(|(_, rest)| rest.split_once("</mtext>"))
+        .map(|(name, _)| name.trim().trim_start_matches('\\').to_string())
+        .collect()
 }
 
 fn error(source: &str, why: &str) -> String {
@@ -255,6 +571,24 @@ mod tests {
 
     fn mathml(latex: &str) -> String {
         Math::new().render(true, latex)
+    }
+
+    /// The PDF side of the parity suite. Each formula was rendered through
+    /// the vendored mitex in a real Typst compile (0.15.1): `ok` compiled,
+    /// `fails` aborted it. The engine has to give every `ok` formula to mitex
+    /// unchanged — falling back on one would be a regression the PDF never
+    /// had — and must catch every `fails` one before it reaches the compile.
+    #[test]
+    fn the_pdf_check_agrees_with_mitex() {
+        let m = Math::new();
+        for line in include_str!("math-corpus.tsv").lines() {
+            let (formula, verdict) = line.rsplit_once('\t').unwrap();
+            assert_eq!(
+                m.pdf_accepts(formula),
+                verdict == "ok",
+                "{formula} ({verdict} in the PDF today)"
+            );
+        }
     }
 
     #[test]

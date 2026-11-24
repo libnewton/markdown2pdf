@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { SLASH_COMMANDS } from '$lib/editor/commands'
+  import { SLASH_COMMANDS } from '#lib/editor/commands.ts'
 
   let { onClose }: { onClose: () => void } = $props()
 

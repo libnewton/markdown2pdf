@@ -5,7 +5,8 @@
 // scan runs over the raw source — frontmatter included — so a remote logo is
 // prefetched by the host exactly like a body image.
 
-// `=200x120`, `=200x`, `=x120` -> `(width, height)` in pt, or `none`.
+// `=200x120`, `=200x`, `=x120` -> `(width, height)`, or `none`. The numbers
+// are CSS pixels, as everywhere else an image is sized: 0.75pt each.
 #let _parse-dims(raw) = {
   let s = raw.trim().trim("=", at: start, repeat: false)
   let x = s.position("x")
@@ -16,7 +17,7 @@
     for c in part.clusters() {
       if not "0123456789.".contains(c) { return "bad" }
     }
-    float(part) * 1pt
+    float(part) * 0.75pt
   }
   let w = num(s.slice(0, x))
   let h = num(s.slice(x + 1))
@@ -80,13 +81,42 @@
   )
 }
 
-// One header/footer cell: an image, substituted text, or nothing. `asset` loads
-// a document-relative path — see `prepare()` for why it cannot be `image`.
+// The schemes a slot link may point at; anything else stays plain text.
+#let _linkable(url) = (
+  url.starts-with("https://") or url.starts-with("http://") or url.starts-with("mailto:")
+)
+
+// `[label](url)` -> `(label, url)`, or `none`.
+#let _link-field(value) = {
+  let m = value.trim().match(regex("^\\[(.*)\\]\\(([^)\\s]+)\\)$"))
+  if m == none { none } else { (label: m.captures.at(0), url: m.captures.at(1)) }
+}
+
+// Text with `{placeholder}`s and inline `[label](url)` links.
+#let _slot-text(value, vars) = {
+  let pattern = regex("\\[([^\\]]*)\\]\\(([^)\\s]+)\\)")
+  let parts = ()
+  let at = 0
+  for m in value.matches(pattern) {
+    parts.push(subst(value.slice(at, m.start), vars))
+    let (label, url) = (m.captures.at(0), m.captures.at(1))
+    parts.push(if _linkable(url) { link(url, subst(label, vars)) } else { subst(label, vars) })
+    at = m.end
+  }
+  parts.push(subst(value.slice(at), vars))
+  parts.join()
+}
+
+// One header/footer cell: an image, a linked image, substituted text with
+// optional links, or nothing. `asset` loads a document-relative path — see
+// `prepare()` for why it cannot be `image`.
 #let slot(value, vars, remotes, asset, image-height: 5mm) = {
   if value == none or value == "" { return none }
-  let img = parse-image-field(value)
-  if img == none { return subst(value, vars) }
-  box(asset(resolve-path(img.path, remotes), ..image-args(img, image-height)))
+  let linked = _link-field(value)
+  let img = parse-image-field(if linked != none { linked.label } else { value })
+  if img == none { return _slot-text(value, vars) }
+  let picture = box(asset(resolve-path(img.path, remotes), ..image-args(img, image-height)))
+  if linked != none and _linkable(linked.url) { link(linked.url, picture) } else { picture }
 }
 
 // The three-column bar shared by header and footer. Small, grey, no rule.

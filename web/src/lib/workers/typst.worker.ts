@@ -10,9 +10,19 @@ import {
 } from '@myriaddreamin/typst.ts';
 import typstCompilerWasmUrl from '@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm?url';
 import typstRendererWasmUrl from '@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm?url';
-import { SUPERSEDED, type HtmlRequest } from './compileProtocol';
-import { splitSvgDocument, type SvgDocument } from '$lib/typst/svg-split';
+import {
+	SUPERSEDED,
+	type CompileRequest,
+	type CompileResponse,
+	type ImageMap,
+	type RemotesReady,
+	type Theme,
+	type WorkerRequest,
+} from './compileProtocol';
+import { splitSvgDocument, type SvgDocument } from '#lib/typst/svg-split.ts';
 import { buildAssetBundle, unescapeSource, type Asset } from './assetBundle';
+import { fetchRemotes, lookupRemotes } from './remoteImages';
+import { formatCompileError } from './diagnostics';
 
 // Markdown processing lives entirely in the `md2pdf` Typst package — the
 // Rust/WASM engine runs inside the compile. This worker only feeds raw
@@ -24,22 +34,6 @@ import { buildAssetBundle, unescapeSource, type Asset } from './assetBundle';
 // enough (single-digit milliseconds) to run on every keystroke, which is why it
 // also bypasses the compile queue.
 
-type CompileRequest = {
-	type: 'compile';
-	id: string;
-	markdown: string;
-	images?: Record<string, Uint8Array<ArrayBuffer>>;
-	format?: 'pdf' | 'preview';
-};
-
-type CompileResponse =
-	| { type: 'compile-result'; id: string; ok: true; pdf: ArrayBuffer; diagnostics: string[] }
-	| { type: 'compile-result'; id: string; ok: true; preview: SvgDocument; diagnostics: string[] }
-	| { type: 'compile-result'; id: string; ok: true; html: string; diagnostics: string[] }
-	| { type: 'compile-result'; id: string; ok: false; error: string; diagnostics: string[] };
-
-type CancelRequest = { type: 'cancel'; id: string };
-
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
 
 let compilerPromise: Promise<TypstCompiler> | null = null;
@@ -48,6 +42,8 @@ let compilerPromise: Promise<TypstCompiler> | null = null;
 const CORE_FONTS: string[] = [
 	'/fonts/IBMPlexSans-Regular.ttf',
 	'/fonts/IBMPlexSans-Bold.ttf',
+	'/fonts/IBMPlexSans-Italic.ttf',
+	'/fonts/IBMPlexSans-BoldItalic.ttf',
 	'/fonts/NewCMMath-Regular.otf',
 	'/fonts/NewCMMath-Book.otf',
 	'/fonts/DejaVuSansMono.ttf',
@@ -67,12 +63,29 @@ type Plugin = (fn: string, ...args: Uint8Array[]) => Uint8Array;
 
 const plugins = new Map<string, Promise<Plugin>>();
 
+// Package files by URL. engine.wasm and the Mermaid plugin are both mapped into
+// the compiler VFS and instantiated here, from the one download.
+const packageBytes = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
+
+function fetchBytes(url: string): Promise<Uint8Array<ArrayBuffer>> {
+	let cached = packageBytes.get(url);
+	if (!cached) {
+		cached = fetch(url).then(async (r) => {
+			if (!r.ok) throw new Error(`could not load ${url}: HTTP ${r.status}`);
+			return new Uint8Array(await r.arrayBuffer());
+		});
+		cached.catch(() => packageBytes.delete(url));
+		packageBytes.set(url, cached);
+	}
+	return cached;
+}
+
 /** Instantiate a Typst WASM plugin outside Typst, implementing its host ABI. */
 function loadPlugin(url: string): Promise<Plugin> {
 	let cached = plugins.get(url);
 	if (cached) return cached;
 	cached = (async () => {
-		const bytes = await fetch(url).then((r) => r.arrayBuffer());
+		const bytes = await fetchBytes(url);
 		let pendingArgs: Uint8Array[] = [];
 		let result: Uint8Array | null = null;
 		let instance: WebAssembly.Instance;
@@ -132,12 +145,11 @@ async function registerPackage(compiler: TypstCompiler): Promise<void> {
 	const manifest: string[] = await fetch('/md2pdf/manifest.json').then((r) => r.json());
 	await Promise.all(
 		manifest.map(async (rel) => {
-			const resp = await fetch('/md2pdf/' + rel);
 			const vpath = '/md2pdf/' + rel;
 			if (rel.endsWith('.wasm')) {
-				compiler.mapShadow(vpath, new Uint8Array(await resp.arrayBuffer()));
+				compiler.mapShadow(vpath, await fetchBytes(vpath));
 			} else {
-				compiler.addSource(vpath, await resp.text());
+				compiler.addSource(vpath, await fetch(vpath).then((r) => r.text()));
 			}
 		}),
 	);
@@ -269,29 +281,60 @@ async function fetchTwemoji(codepoints: string[]): Promise<void> {
 	);
 }
 
-// Codepoints already written into the compiler VFS (a superset check would
-// re-map identical bytes and cost Typst its incremental caches).
-const mappedTwemoji = new Set<string>();
+// What the compiler VFS already holds, by path. Re-mapping identical bytes
+// would throw away Typst's incremental caches for that file (images get
+// re-decoded, the emoji scan re-runs) on every keystroke, so a file is only
+// written when its bytes are a different object.
+const mapped = new Map<string, Uint8Array>();
 
-/** Fetch the Twemoji SVGs the document needs into the compiler VFS. */
-async function loadTwemoji(compiler: TypstCompiler, markdown: string): Promise<void> {
+function mapOnce(compiler: TypstCompiler, path: string, bytes: Uint8Array): void {
+	if (mapped.get(path) === bytes) return;
+	compiler.mapShadow('/' + path, bytes);
+	mapped.set(path, bytes);
+}
+
+type AssetRows = Record<string, string[][]>;
+
+/**
+ * Everything the document needs from the host, from one engine parse: one
+ * `kind<TAB>value…` row per image, remote, emoji, font and diagram.
+ */
+async function assetRows(markdown: string): Promise<AssetRows> {
 	const engine = await getEngine();
-	const list = lines(engine('twemojis', encode(markdown)));
-	await fetchTwemoji(list);
-	for (const cp of list) {
-		const bytes = twemojiCache.get(cp);
-		if (!bytes || mappedTwemoji.has(cp)) continue;
-		compiler.mapShadow('/md2pdf/twemoji/' + cp + '.svg', bytes);
-		mappedTwemoji.add(cp);
+	const rows: AssetRows = {};
+	for (const line of lines(engine('html_assets', encode(markdown)))) {
+		const [kind, ...rest] = line.split('\t');
+		(rows[kind] ??= []).push(rest);
 	}
+	return rows;
+}
+
+const remoteRows = (rows: AssetRows) =>
+	(rows.remote ?? []).map(([url, alias]) => [url, alias] as const);
+
+/**
+ * Remote images with no verdict yet. A download waits for them; a preview
+ * renders without them now and is told to render again once they are in.
+ */
+async function resolveRemotes(missing: string[], wait: boolean): Promise<void> {
+	if (missing.length === 0) return;
+	const fetched = fetchRemotes(missing);
+	if (wait) {
+		await fetched;
+		return;
+	}
+	void fetched.then((gotNew) => {
+		if (gotNew) ctx.postMessage({ type: 'remotes-ready' } satisfies RemotesReady);
+	});
 }
 
 // --------------------------------------------------------------------------
 // HTML target — engine only, no Typst compile
 // --------------------------------------------------------------------------
 
-// Image bytes seen so far. Requests carry only what changed, mirroring how the
-// compiler VFS accumulates, so the store has to remember the rest.
+// Image bytes seen so far, from either kind of request. Requests carry only
+// what changed, so the store has to remember the rest — and both targets read
+// from it, so an image first sent for the Web view reaches the PDF too.
 const imageStore = new Map<string, Uint8Array>();
 // Rendered Mermaid diagrams, keyed the way the engine asks for them.
 const mermaidCache = new Map<string, Uint8Array>();
@@ -312,6 +355,10 @@ async function renderMermaid(rows: string[][]): Promise<Asset[]> {
 			}
 		}
 	}
+	// Only the diagrams of the latest render are worth keeping; a document
+	// edited for an hour would otherwise keep every intermediate drawing.
+	const keep = new Set(wanted.map((d) => d.key));
+	for (const key of mermaidCache.keys()) if (!keep.has(key)) mermaidCache.delete(key);
 	return wanted.flatMap((d) => {
 		const svg = mermaidCache.get(d.key);
 		return svg ? [[d.key, svg] as Asset] : [];
@@ -350,7 +397,7 @@ async function renderHtml(
 	standalone: boolean,
 	id = '',
 	editable = false,
-	theme: 'system' | 'light' | 'dark' = 'system',
+	theme: Theme = 'system',
 ): Promise<{ html: string; diagnostics: string[] }> {
 	const superseded = () => !standalone && id !== '' && id !== latestHtmlId;
 	const engine = await getEngine();
@@ -359,11 +406,10 @@ async function renderHtml(
 	// One parse for the whole list. Asking for images, remotes, emoji, fonts
 	// and diagrams separately meant re-parsing the document five times before
 	// the render itself parsed it a sixth.
-	const wanted: Record<string, string[][]> = {};
-	for (const line of lines(engine('html_assets', md))) {
-		const [kind, ...rest] = line.split('\t');
-		(wanted[kind] ??= []).push(rest);
-	}
+	const wanted = await assetRows(markdown);
+	const remotes = remoteRows(wanted);
+	await resolveRemotes(lookupRemotes(remotes).missing, standalone);
+	if (superseded()) throw new Error(SUPERSEDED);
 
 	const assets: Asset[] = [];
 	// What the document asked for and did not get. The engine already degrades
@@ -380,11 +426,9 @@ async function renderHtml(
 		if (bytes) assets.push([path, bytes]);
 		else diagnostics.push(`image not found: ${path}`);
 	}
-	for (const [url, alias] of wanted.remote ?? []) {
-		const bytes = imageStore.get(alias);
-		if (bytes) assets.push([alias, bytes]);
-		else diagnostics.push(`could not fetch: ${url}`);
-	}
+	const { images: remoteImages, failed, missing } = lookupRemotes(remotes);
+	assets.push(...remoteImages);
+	for (const url of [...failed, ...missing]) diagnostics.push(`could not fetch: ${url}`);
 	const codepoints = (wanted.emoji ?? []).map(([cp]) => cp);
 	await fetchTwemoji(codepoints);
 	if (superseded()) throw new Error(SUPERSEDED);
@@ -425,48 +469,63 @@ async function renderHtml(
 	return { html, diagnostics };
 }
 
+const typstString = (s: string) => '"' + s.replace(/[\\"]/g, '\\$&') + '"';
+
 /**
  * The entry document: hand the Markdown to the `md2pdf` package and eval it.
  * `asset` must be defined here, not in the package: an `image()` call written
  * inside a Typst package resolves against the package root, not the document
- * root.
+ * root. `missing` are local images the document names but nobody added; the
+ * package draws a placeholder for them instead of failing the compile.
  */
-const MAIN = `#import "/md2pdf/lib.typ": prepare
-#let _d = prepare(read("/doc.md"), asset: (p, ..a) => image(p, ..a))
+function mainSource(missing: readonly string[]): string {
+	const list = missing.map(typstString).join(', ');
+	return `#import "/md2pdf/lib.typ": prepare
+#let _d = prepare(read("/doc.md"), asset: (p, ..a) => image(p, ..a), missing-images: (${list}${missing.length === 1 ? ',' : ''}))
 #if not _d.skip { show: _d.template; eval(_d.body, mode: "markup", scope: _d.scope) }
 `;
+}
 
-// What the VFS already holds, so a live-preview recompile only writes what
-// actually changed. Re-mapping identical bytes would throw away Typst's
-// incremental caches for those files (images get re-decoded, the emoji scan
-// re-runs) on every keystroke.
+// The Markdown last written to the VFS, and the asset rows the engine listed
+// for it, so a recompile of unchanged text neither re-maps it nor re-parses.
 let mappedMarkdown: string | null = null;
-let mainMapped = false;
+let mappedRows: AssetRows = {};
+let mappedMain = '';
 
 async function compileTypst(
 	markdown: string,
-	images: Record<string, Uint8Array<ArrayBuffer>> = {},
 	format: 'pdf' | 'preview' = 'pdf',
 ): Promise<{ result: Uint8Array; diagnostics: string[] }> {
 	const compiler = await getCompiler();
 	await ensureScriptFonts(compiler, markdown);
 
 	if (markdown !== mappedMarkdown) {
-		await loadTwemoji(compiler, markdown);
+		mappedRows = await assetRows(markdown);
+		const codepoints = (mappedRows.emoji ?? []).map(([cp]) => cp);
+		await fetchTwemoji(codepoints);
+		for (const cp of codepoints) {
+			const bytes = twemojiCache.get(cp);
+			if (bytes) mapOnce(compiler, 'md2pdf/twemoji/' + cp + '.svg', bytes);
+		}
 		// The Markdown is a data file read via `read()` — it must live in the
 		// shadow VFS (mapShadow), not the source set (addSource).
-		compiler.mapShadow('/doc.md', new TextEncoder().encode(markdown));
+		compiler.mapShadow('/doc.md', encode(markdown));
 		mappedMarkdown = markdown;
 	}
 
-	if (!mainMapped) {
-		compiler.addSource('/main.typ', MAIN);
-		mainMapped = true;
+	const missing = (mappedRows.image ?? [])
+		.map(([path]) => path)
+		.filter((path) => !imageStore.has(path));
+	const main = mainSource(missing);
+	if (main !== mappedMain) {
+		compiler.addSource('/main.typ', main);
+		mappedMain = main;
 	}
 
-	for (const [path, data] of Object.entries(images)) {
-		compiler.mapShadow('/' + path, data);
-	}
+	for (const [path, bytes] of imageStore) mapOnce(compiler, path, bytes);
+	const remotes = remoteRows(mappedRows);
+	await resolveRemotes(lookupRemotes(remotes).missing, format === 'pdf');
+	for (const [alias, bytes] of lookupRemotes(remotes).images) mapOnce(compiler, alias, bytes);
 
 	const compileResult = await compiler.compile({
 		mainFilePath: '/main.typ',
@@ -476,7 +535,7 @@ async function compileTypst(
 
 	const diagnostics = (compileResult.diagnostics ?? []).map(String);
 	if (!compileResult.result) {
-		throw new Error(diagnostics.join('\n') || 'Typst compilation failed (no diagnostics)');
+		throw new Error(formatCompileError(diagnostics) || 'Typst compilation failed (no diagnostics)');
 	}
 	return { result: compileResult.result, diagnostics };
 }
@@ -499,7 +558,7 @@ function reply(id: string, error: string) {
 async function runOne(message: CompileRequest): Promise<void> {
 	const fmt = message.format || 'pdf';
 	try {
-		const { result, diagnostics } = await compileTypst(message.markdown, message.images, fmt);
+		const { result, diagnostics } = await compileTypst(message.markdown, fmt);
 		if (fmt === 'pdf') {
 			const copy = new Uint8Array(result.length);
 			copy.set(result);
@@ -528,13 +587,13 @@ async function drain(): Promise<void> {
 	}
 }
 
-function rememberImages(images?: Record<string, Uint8Array<ArrayBuffer>>): void {
+function rememberImages(images?: ImageMap): void {
 	for (const [path, data] of Object.entries(images ?? {})) {
 		imageStore.set(path, data);
 	}
 }
 
-ctx.onmessage = (event: MessageEvent<CompileRequest | HtmlRequest | CancelRequest>) => {
+ctx.onmessage = (event: MessageEvent<WorkerRequest>) => {
 	const message = event.data;
 	if (!message) return;
 

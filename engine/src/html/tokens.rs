@@ -8,15 +8,14 @@
 
 use std::sync::OnceLock;
 
-/// One callout kind: its accent, its background and its default label.
+/// One callout kind: its accent and its background. Its default label is in
+/// `STRINGS`, under the kind's name.
 pub(crate) struct Admonition {
     pub kind: &'static str,
     /// `(light, dark)`.
     pub accent: (&'static str, &'static str),
     /// `(light, dark)`.
     pub bg: (&'static str, &'static str),
-    pub en: &'static str,
-    pub de: &'static str,
 }
 
 /// The callout palette. `info` is also the fallback for an unknown kind, so it
@@ -33,59 +32,76 @@ pub(crate) const ADMONITIONS: &[Admonition] = &[
         kind: "success",
         accent: ("#16a34a", "#4ade80"),
         bg: ("#f0fdf4", "#10241a"),
-        en: "HIGHLIGHT",
-        de: "Hervorhebung",
     },
     Admonition {
         kind: "warning",
         accent: ("#d97706", "#f5b544"),
         bg: ("#fffbeb", "#2a1f08"),
-        en: "WARNING",
-        de: "Warnung",
     },
     Admonition {
         kind: "tip",
         accent: ("#0ea5e9", "#56c6f5"),
         bg: ("#f0f9ff", "#0b2130"),
-        en: "TIP",
-        de: "Tipp",
     },
     Admonition {
         kind: "info",
         accent: ("#2563eb", "#7aa6ff"),
         bg: ("#eff6ff", "#111e35"),
-        en: "INFO",
-        de: "Info",
     },
     Admonition {
         kind: "danger",
         accent: ("#dc2626", "#ff8080"),
         bg: ("#fef2f2", "#2b1414"),
-        en: "DANGER",
-        de: "Gefahr",
     },
     Admonition {
         kind: "note",
         accent: ("#6b7280", "#a3adba"),
         bg: ("#f9fafb", "#1b1f26"),
-        en: "NOTE",
-        de: "Hinweis",
     },
     Admonition {
         kind: "caution",
         accent: ("#b91c1c", "#ff8f8f"),
         bg: ("#fef2f2", "#2b1414"),
-        en: "CAUTION",
-        de: "Vorsicht",
     },
     Admonition {
         kind: "important",
         accent: ("#7e22ce", "#cd96f7"),
         bg: ("#faf5ff", "#21132f"),
-        en: "IMPORTANT",
-        de: "Wichtig",
     },
 ];
+
+/// Every localised string either output shows, as `(key, English, German)`.
+/// The callout labels are keyed by kind.
+pub(crate) const STRINGS: &[(&str, &str, &str)] = &[
+    ("success", "Success", "Erfolg"),
+    ("warning", "WARNING", "Warnung"),
+    ("tip", "TIP", "Tipp"),
+    ("info", "INFO", "Info"),
+    ("danger", "DANGER", "Gefahr"),
+    ("note", "NOTE", "Hinweis"),
+    ("caution", "CAUTION", "Vorsicht"),
+    ("important", "IMPORTANT", "Wichtig"),
+    ("references", "References", "Referenzen"),
+    ("notes", "Notes", "Fußnoten"),
+    ("contents", "Contents", "Inhalt"),
+    ("copy", "Copy", "Kopieren"),
+    ("copied", "Copied", "Kopiert"),
+    ("mermaid", "Mermaid diagram", "Mermaid-Diagramm"),
+    ("theme-toggle", "Toggle color theme", "Farbschema wechseln"),
+];
+
+/// A localised string from `STRINGS`.
+pub(crate) fn string(key: &str, german: bool) -> &'static str {
+    let (_, en, de) = STRINGS
+        .iter()
+        .find(|(k, _, _)| *k == key)
+        .unwrap_or_else(|| panic!("no string {key}"));
+    if german {
+        de
+    } else {
+        en
+    }
+}
 
 /// `(name, light, dark)` -> `--md-<name>: light-dark(<light>, <dark>)`.
 ///
@@ -163,19 +179,12 @@ pub(crate) fn declarations() -> &'static str {
 /// The default label for a callout kind. An unrecognised kind falls back to
 /// `info`, matching `admonitions.typ`.
 pub(crate) fn label(kind: &str, german: bool) -> &'static str {
-    let a = ADMONITIONS
-        .iter()
-        .find(|a| a.kind == kind)
-        .or_else(|| ADMONITIONS.iter().find(|a| a.kind == "info"))
-        .expect("info is always present");
-    if german {
-        a.de
-    } else {
-        a.en
-    }
+    let known = ADMONITIONS.iter().any(|a| a.kind == kind);
+    string(if known { kind } else { "info" }, german)
 }
 
-/// Every token the Typst templates need, as TOML.
+/// Every token the Typst templates need, as TOML: the palette, each callout
+/// with its labels, and the localised strings.
 ///
 /// Only the light values are published: Typst renders the paged output, which
 /// has no dark mode. The dark halves exist solely for the stylesheet.
@@ -188,7 +197,16 @@ pub(crate) fn as_toml() -> String {
     for a in ADMONITIONS {
         out.push_str(&format!(
             "\n[admonition.{}]\naccent = \"{}\"\nbg = \"{}\"\nen = \"{}\"\nde = \"{}\"\n",
-            a.kind, a.accent.0, a.bg.0, a.en, a.de
+            a.kind,
+            a.accent.0,
+            a.bg.0,
+            string(a.kind, false),
+            string(a.kind, true)
+        ));
+    }
+    for (key, en, de) in STRINGS {
+        out.push_str(&format!(
+            "\n[strings.{key}]\nen = \"{en}\"\nde = \"{de}\"\n"
         ));
     }
     out

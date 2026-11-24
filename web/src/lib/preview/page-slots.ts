@@ -1,5 +1,5 @@
-import { buildHeadElement, buildPageElement } from '$lib/typst/svg-utils';
-import type { SvgDocument, SvgPage } from '$lib/typst/svg-split';
+import { buildHeadElement, buildPageElement } from '#lib/typst/svg-utils.ts';
+import type { SvgDocument, SvgPage } from '#lib/typst/svg-split.ts';
 
 /**
  * Mount only the pages near the viewport.

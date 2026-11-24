@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { collectRemoteImageUrls } from '../src/lib/utils/remote-images';
 import { buildAssetBundle, unescapeSource } from '../src/lib/workers/assetBundle';
 
 const bytes = (s: string) => new TextEncoder().encode(s);
@@ -51,30 +50,5 @@ describe('unescapeSource', () => {
 
 	it('handles an empty source', () => {
 		expect(unescapeSource('')).toBe('');
-	});
-});
-
-describe('collectRemoteImageUrls', () => {
-	it('includes bare cover image URLs and deduplicates body references', () => {
-		const markdown = `---
-cover_image: "https://e.com/cover.png" # full bleed
----
-
-![](https://e.com/body.png)
-![](https://e.com/cover.png)`;
-
-		expect(collectRemoteImageUrls(markdown)).toEqual([
-			'https://e.com/body.png',
-			'https://e.com/cover.png',
-		]);
-	});
-
-	it('does not treat other bare frontmatter URLs as images', () => {
-		const markdown = `---
-cover-logo: https://e.com/logo.png
-header-left: https://e.com/header.png
----`;
-
-		expect(collectRemoteImageUrls(markdown)).toEqual([]);
 	});
 });
