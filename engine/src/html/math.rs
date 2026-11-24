@@ -54,7 +54,7 @@ impl Math {
             ..Default::default()
         };
         // `new` only fails on malformed custom macros, and we define none.
-        Self(LatexToMathML::new(config).expect("no custom macros"))
+        Self(LatexToMathML::new(config, Vec::new()).expect("no custom macros"))
     }
 
     /// Render one formula. On a parse error, or a command with no MathML
@@ -76,6 +76,12 @@ impl Math {
             class.push_str(" md2pdf-math-boxed");
         }
         match self.0.convert_with_local_state(&rewrite(&body), mode) {
+            // Browsers do not draw `<menclose>` (it is not in MathML Core), so
+            // a box around part of a formula would silently vanish.
+            Ok(result) if result.mathml.contains("<menclose") => error(
+                source,
+                "a box around part of a formula is not supported here",
+            ),
             Ok(result) if !result.mathml.contains(UNKNOWN) => {
                 format!("<span class=\"{class}\">{}</span>", result.mathml)
             }

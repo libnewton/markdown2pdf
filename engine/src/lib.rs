@@ -1014,7 +1014,7 @@ impl<'a> Ctx<'a> {
                 )
             }
             NodeValue::Paragraph => self.render_paragraph(node),
-            NodeValue::ThematicBreak => "#line(length: 100%, stroke: 0.6pt)".to_string(),
+            NodeValue::ThematicBreak(_) => "#line(length: 100%, stroke: 0.6pt)".to_string(),
             NodeValue::BlockQuote | NodeValue::MultilineBlockQuote(_) => {
                 let body = self.render_block_children(node);
                 if body.trim().is_empty() {
@@ -1160,7 +1160,7 @@ impl<'a> Ctx<'a> {
 
     fn render_list(&self, node: &'a AstNode<'a>, indent: usize) -> String {
         let nl = match &node.data.borrow().value {
-            NodeValue::List(nl) => *nl,
+            NodeValue::List(nl) => nl.clone(),
             _ => return String::new(),
         };
         if nl.is_task_list {
@@ -1331,9 +1331,9 @@ impl<'a> Ctx<'a> {
             NodeValue::SoftBreak => "\\\n".to_string(),
             NodeValue::LineBreak => "\\\n".to_string(),
             NodeValue::Escaped => self.render_inlines(node),
-            NodeValue::Emph => format!("#emph[{}]", self.render_inlines(node)),
-            NodeValue::Strong => format!("#strong[{}]", self.render_inlines(node)),
-            NodeValue::Strikethrough => format!("#strike[{}]", self.render_inlines(node)),
+            NodeValue::Emph(_) => format!("#emph[{}]", self.render_inlines(node)),
+            NodeValue::Strong(_) => format!("#strong[{}]", self.render_inlines(node)),
+            NodeValue::Strikethrough(_) => format!("#strike[{}]", self.render_inlines(node)),
             NodeValue::Superscript => format!("#super[{}]", self.render_inlines(node)),
             NodeValue::Subscript => format!("#sub[{}]", self.render_inlines(node)),
             NodeValue::Underline => format!("#underline[{}]", self.render_inlines(node)),
@@ -1997,7 +1997,7 @@ fn plain_text<'a>(node: &'a AstNode<'a>) -> String {
 fn task_checked<'a>(item: &'a AstNode<'a>) -> bool {
     fn walk<'a>(node: &'a AstNode<'a>) -> bool {
         if let NodeValue::TaskItem(sym) = &node.data.borrow().value {
-            if sym.is_some() {
+            if sym.symbol.is_some() {
                 return true;
             }
         }

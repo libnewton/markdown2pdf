@@ -545,7 +545,7 @@ fn block<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
         NodeValue::Document => blocks(doc, f, node),
         NodeValue::Heading(h) => heading(doc, f, node, h.level.clamp(1, 6)),
         NodeValue::Paragraph => paragraph(doc, f, node),
-        NodeValue::ThematicBreak => "<hr>".to_string(),
+        NodeValue::ThematicBreak(_) => "<hr>".to_string(),
         NodeValue::BlockQuote | NodeValue::MultilineBlockQuote(_) => {
             format!("<blockquote>{}</blockquote>", blocks(doc, f, node))
         }
@@ -890,9 +890,9 @@ fn inline<'a>(doc: &mut Doc, f: &Frame<'a>, node: &'a AstNode<'a>) -> String {
         NodeValue::SoftBreak => "<br>".to_string(),
         NodeValue::LineBreak => "<br>".to_string(),
         NodeValue::Escaped => inlines(doc, f, node),
-        NodeValue::Emph => format!("<em>{}</em>", inlines(doc, f, node)),
-        NodeValue::Strong => format!("<strong>{}</strong>", inlines(doc, f, node)),
-        NodeValue::Strikethrough => format!("<del>{}</del>", inlines(doc, f, node)),
+        NodeValue::Emph(_) => format!("<em>{}</em>", inlines(doc, f, node)),
+        NodeValue::Strong(_) => format!("<strong>{}</strong>", inlines(doc, f, node)),
+        NodeValue::Strikethrough(_) => format!("<del>{}</del>", inlines(doc, f, node)),
         NodeValue::Superscript => format!("<sup>{}</sup>", inlines(doc, f, node)),
         NodeValue::Subscript => format!("<sub>{}</sub>", inlines(doc, f, node)),
         NodeValue::Underline => format!("<u>{}</u>", inlines(doc, f, node)),

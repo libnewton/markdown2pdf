@@ -29,10 +29,42 @@
 #let get-tex-color-from-arr(arr) = {
   mitex-color-map.at(lower(get-tex-str-from-arr(arr)), default: none)
 }
-#let get-tex-color(texcolor) = if texcolor.has("children") {
-  get-tex-color-from-arr(texcolor.children)
-} else {
-  texcolor.text
+#let get-tex-color(model, spec) = {
+  let model = if type(model) == content and model.has("text") {
+    model.text
+  } else if type(model) == str {
+    model
+  } else {
+    model
+  }
+
+  let s = if type(spec) == str {
+    spec
+  } else if type(spec) == content and spec.has("text") {
+    spec.text
+  } else if (
+    type(spec) == content and spec.has("children")
+  ) {
+    spec.children.map(it => if it.has("text") { it.text } else { "" }).join("")
+  } else {
+    ""
+  }
+
+  if model == none {
+    mitex-color-map.at(lower(s), default: none)
+  } else if model == "gray" {
+    luma(float(s) * 100%)
+  } else if model == "rgb" {
+    rgb(..s.split(",").map(x => float(x) * 100%))
+  } else if model == "RGB" {
+    rgb(..s.split(",").map(x => int(x)))
+  } else if model == "HTML" {
+    rgb("#" + s)
+  } else if model == "cmyk" {
+    cmyk(..s.split(",").map(x => float(x) * 100%))
+  } else {
+    none
+  }
 }
 
 // 1. functions created to make it easier to define a spec
@@ -114,6 +146,7 @@
   phantom: define-cmd(1, handle: hide),
   hphantom: define-cmd(1, handle: it => box(height: 0pt, hide(it))),
   vphantom: define-cmd(1, handle: it => box(width: 0pt, hide(it))),
+  smash: define-cmd(1, handle: it => box(height: 0pt, align(bottom, $#it$))),
   // Escape symbols
   "_": define-sym("\\_"),
   "^": define-sym("hat"),
@@ -165,6 +198,10 @@
   Bbb: define-cmd(1, alias: "bb"),
   mathbb: define-cmd(1, alias: "bb"),
   mathcal: define-cmd(1, alias: "cal"),
+  mathscr: define-cmd(1, handle: it => {
+    let s = get-tex-str(it)
+    s.clusters().map(x => $scr(#x)$).join()
+  }),
   mathbin: define-cmd(1, handle: it => math.class("binary", it)),
   mathclose: define-cmd(1, handle: it => math.class("closing", it)),
   mathinner: define-cmd(1, handle: it => math.class("fence", it)),
@@ -201,26 +238,26 @@
   large: ignore-sym,
   tiny: ignore-sym,
   // Colors
-  color: define-greedy-cmd("mitexcolor", handle: (texcolor, ..args) => {
-    let color = get-tex-color(texcolor)
+  color: define-greedy-cmd("#mitexcolor", handle: (model, texcolor, ..args) => {
+    let color = get-tex-color(model, texcolor)
     if color != none {
       text(fill: color, args.pos().sum())
     } else {
       args.pos().sum()
     }
   }),
-  textcolor: define-cmd(2, alias: "colortext", handle: (texcolor, body) => {
-    let color = get-tex-color(texcolor)
+  textcolor: define-glob-cmd("{,b}tt", "#colortext", handle: (model, texcolor, body) => {
+    let color = get-tex-color(model, texcolor)
     if color != none {
-      text(fill: get-tex-color(texcolor), body)
+      text(fill: color, body)
     } else {
       body
     }
   }),
-  colorbox: define-cmd(2, handle: (texcolor, body) => {
-    let color = get-tex-color(texcolor)
+  colorbox: define-glob-cmd("{,b}tt", "#mitexcolorbox", handle: (model, texcolor, body) => {
+    let color = get-tex-color(model, texcolor)
     if color != none {
-      box(fill: get-tex-color(texcolor), $body$)
+      box(fill: color, inset: (x: 3pt), outset: (y: 3pt), radius: 2pt, body)
     } else {
       body
     }
@@ -385,14 +422,14 @@
   cdotp: define-sym("dot.c"),
   sdot: define-sym("dot.c"),
   times: define-sym("times"),
-  oplus: define-sym("plus.circle"),
-  ominus: define-sym("minus.circle"),
+  oplus: define-sym("plus.o"),
+  ominus: define-sym("minus.o"),
   pm: define-sym("plus.minus"),
   plusmn: define-sym("plus.minus"),
   mp: define-sym("minus.plus"),
   div: define-sym("div"),
   star: define-sym("star"),
-  cap: define-sym("sect"),
+  cap: define-sym("inter"),
   cup: define-sym("union"),
   "in": define-sym("in"),
   isin: define-sym("in"),
@@ -444,24 +481,24 @@
   rbrack: define-sym("bracket.r"),
   lgroup: define-sym("⟮"),
   rgroup: define-sym("⟯"),
-  llbracket: define-sym("bracket.l.double"),
-  rrbracket: define-sym("bracket.r.double"),
+  llbracket: define-sym("bracket.stroked.l"),
+  rrbracket: define-sym("bracket.stroked.r"),
   angle: define-sym("angle"),
-  lang: define-sym("angle.l"),
-  rang: define-sym("angle.r"),
-  langle: define-sym("angle.l"),
-  rangle: define-sym("angle.r"),
+  lang: define-sym("chevron.l"),
+  rang: define-sym("chevron.r"),
+  langle: define-sym("chevron.l"),
+  rangle: define-sym("chevron.r"),
   measuredangle: define-sym("angle.arc"),
   sphericalangle: define-sym("angle.spheric"),
   ast: define-sym("ast"),
   checkmark: define-sym("checkmark"),
-  circledast: define-sym("ast.circle"),
+  circledast: define-sym("convolve.o"),
   backslash: define-sym("backslash"),
   dagger: define-sym("dagger"),
   ddagger: define-sym("dagger.double"),
-  circleddash: define-sym("dash.circle"),
-  odot: define-sym("dot.circle"),
-  bigodot: define-sym("dot.circle.big"),
+  circleddash: define-sym("dash.o"),
+  odot: define-sym("dot.o"),
+  bigodot: define-sym("dot.o.big"),
   boxdot: define-sym("dot.square"),
   dots: define-sym("dots.h"),
   cdots: define-sym("dots.h.c"),
@@ -482,13 +519,13 @@
   backsim: define-sym("tilde.rev"),
   prime: define-sym("prime"),
   backprime: define-sym("prime.rev"),
-  bigoplus: define-sym("plus.circle.big"),
+  bigoplus: define-sym("plus.o.big"),
   dotplus: define-sym("plus.dot"),
   boxplus: define-sym("plus.square"),
   boxminus: define-sym("minus.square"),
   eqsim: define-sym("minus.tilde"),
-  otimes: define-sym("times.circle"),
-  bigotimes: define-sym("times.circle.big"),
+  otimes: define-sym("times.o"),
+  bigotimes: define-sym("times.o.big"),
   divideontimes: define-sym("times.div"),
   leftthreetimes: define-sym("times.three.l"),
   rightthreetimes: define-sym("times.three.r"),
@@ -502,8 +539,10 @@
   gg: define-sym("gt.double"),
   gtreqless: define-sym("gt.eq.lt"),
   gtreqqless: define-sym("⪌"),
+  gtrapprox: define-sym("gt.approx"),
   ngeq: define-sym("gt.eq.not"),
   geqq: define-sym("gt.equiv"),
+  ngeqq: of-sym(math.cancel(angle: 20deg, "\u{2267}")),
   gtrless: define-sym("gt.lt"),
   gneqq: define-sym("gt.nequiv"),
   ngtr: define-sym("gt.not"),
@@ -518,7 +557,9 @@
   ll: define-sym("lt.double"),
   lesseqgtr: define-sym("lt.eq.gt"),
   nleq: define-sym("lt.eq.not"),
+  nleqslant: of-sym(math.cancel(angle: 20deg, length: 1em, math.lt.eq.slant)),
   leqq: define-sym("lt.equiv"),
+  nleqq: of-sym(math.cancel(angle: 20deg, "\u{2266}")),
   lessgtr: define-sym("lt.gt"),
   lneqq: define-sym("lt.nequiv"),
   nless: define-sym("lt.not"),
@@ -565,12 +606,14 @@
   notni: define-sym("in.rev.not"),
   Subset: define-sym("subset.double"),
   nsubseteq: define-sym("subset.eq.not"),
+  nsubseteqq: of-sym(math.cancel(angle: 20deg, length: 1em, "\u{2AC5}")),
   sqsubseteq: define-sym("subset.eq.sq"),
   subsetneq: define-sym("subset.neq"),
   supset: define-sym("supset"),
   Supset: define-sym("supset.double"),
   supseteq: define-sym("supset.eq"),
   nsupseteq: define-sym("supset.eq.not"),
+  nsupseteqq: of-sym(math.cancel(angle: 20deg, length: 1em, "\u{2AC6}")),
   sqsupseteq: define-sym("supset.eq.sq"),
   supsetneq: define-sym("supset.neq"),
   bigcup: define-sym("union.big"),
@@ -579,10 +622,10 @@
   biguplus: define-sym("union.plus.big"),
   sqcup: define-sym("union.sq"),
   bigsqcup: define-sym("union.sq.big"),
-  bigcap: define-sym("sect.big"),
-  Cap: define-sym("sect.double"),
-  sqcap: define-sym("sect.sq"),
-  partial: define-sym("diff"),
+  bigcap: define-sym("inter.big"),
+  Cap: define-sym("inter.double"),
+  sqcap: define-sym("inter.sq"),
+  partial: define-sym("partial"),
   nabla: define-sym("nabla"),
   coprod: define-sym("product.co"),
   forall: define-sym("forall"),
@@ -620,7 +663,7 @@
   spadesuit: define-sym("suit.spade"),
   bull: define-sym("bullet"),
   bullet: define-sym("bullet"),
-  circledcirc: define-sym("circle.nested"),
+  circledcirc: define-sym("compose.o"),
   rhd: define-sym("triangle.stroked.r"),
   lhd: define-sym("triangle.stroked.l"),
   triangle: define-sym("triangle.stroked.t"),
@@ -693,8 +736,8 @@
   vDash: define-sym("tack.r.double"),
   nvDash: define-sym("tack.r.double.not"),
   dashv: define-sym("tack.l"),
-  hbar: define-sym("planck.reduce"),
-  hslash: define-sym("planck.reduce"),
+  hbar: define-sym("planck"),
+  hslash: define-sym("planck"),
   Re: define-sym("Re"),
   Im: define-sym("Im"),
   AA: define-sym("circle(A)"),
@@ -755,9 +798,9 @@
   barwedge: define-sym("⊼"),
   beth: define-sym("beth"),
   between: define-sym("≬"),
-  bigdot: define-sym("dot.circle.big"),
-  bigplus: define-sym("plus.circle.big"),
-  bigtimes: define-sym("times.circle.big"),
+  bigdot: define-sym("dot.o.big"),
+  bigplus: define-sym("plus.o.big"),
+  bigtimes: define-sym("times.o.big"),
   blacktriangle: define-sym("triangle.filled.t"),
   blacktriangledown: define-sym("triangle.filled.b"),
   blacktriangleleft: define-sym("triangle.filled.l"),
@@ -800,7 +843,7 @@
   diagup: define-sym("╱"),
   doteqdot: define-sym("≑"),
   doublebarwedge: define-sym("⩞"),
-  doublecap: define-sym("sect.double"),
+  doublecap: define-sym("inter.double"),
   doublecup: define-sym("union.double"),
   eqcirc: define-sym("≖"),
   Eqcolon: define-sym("−::"),
@@ -834,7 +877,6 @@
   llcorner: define-sym("⌞"),
   llless: define-sym("<<<"),
   lnapprox: define-sym("⪉"),
-  gtrapprox: define-sym("⪆"),
   lneq: define-sym("⪇"),
   lrcorner: define-sym("⌟"),
   lq: define-sym("quote.l.single"),
@@ -842,7 +884,7 @@
   maltese: define-sym("maltese"),
   mathellipsis: define-sym("..."),
   mathsterling: define-sym("pound"),
-  mho: define-sym("ohm.inv"),
+  mho: define-sym("Omega.inv"),
   minuscolon: define-sym("dash.colon"),
   minuscoloncolon: define-sym("−::"),
   minuso: define-sym("⦵"),
@@ -973,12 +1015,12 @@
   pod: define-cmd(1, handle: it => $quad (it)$),
   "set": define-cmd(1, handle: it => $\{it\}$),
   Set: define-cmd(1, handle: it => $lr(\{it\})$),
-  bra: define-cmd(1, handle: it => $angle.l it|$),
-  Bra: define-cmd(1, handle: it => $lr(angle.l it|)$),
-  ket: define-cmd(1, handle: it => $|it angle.r$),
-  Ket: define-cmd(1, handle: it => $lr(|it angle.r)$),
-  braket: define-cmd(1, handle: it => $angle.l it angle.r$),
-  Braket: define-cmd(1, handle: it => $lr(angle.l it angle.r)$),
+  bra: define-cmd(1, handle: it => $chevron.l it|$),
+  Bra: define-cmd(1, handle: it => $lr(chevron.l it|)$),
+  ket: define-cmd(1, handle: it => $|it chevron.r$),
+  Ket: define-cmd(1, handle: it => $lr(|it chevron.r)$),
+  braket: define-cmd(1, handle: it => $chevron.l it chevron.r$),
+  Braket: define-cmd(1, handle: it => $lr(chevron.l it chevron.r)$),
   fbox: define-cmd(1, handle: it => box(stroke: 0.5pt, $it$)),
   hbox: define-cmd(1, handle: it => it),
   // Matrices
