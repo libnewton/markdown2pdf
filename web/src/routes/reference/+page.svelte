@@ -1,6 +1,6 @@
 <script lang="ts">
-  import PdfEditor from '$lib/components/PdfEditor.svelte'
-  import { PDF_TEMPLATES } from '$lib/templates/pdf-templates'
+  import PdfEditor from '#lib/components/PdfEditor.svelte'
+  import { PDF_TEMPLATES } from '#lib/templates/pdf-templates.ts'
 </script>
 
 <svelte:head>

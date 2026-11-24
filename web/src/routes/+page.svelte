@@ -1,5 +1,5 @@
 <script lang="ts">
-  import PdfEditor from '$lib/components/PdfEditor.svelte'
+  import PdfEditor from '#lib/components/PdfEditor.svelte'
 </script>
 
 <svelte:head>

@@ -2,13 +2,14 @@
   import { onMount } from 'svelte'
   import { EditorView, basicSetup } from 'codemirror'
   import { keymap } from '@codemirror/view'
-  import { EditorState, EditorSelection } from '@codemirror/state'
+  import { Compartment, EditorState, EditorSelection } from '@codemirror/state'
   import { markdown as langMarkdown } from '@codemirror/lang-markdown'
   import { languages } from '@codemirror/language-data'
   import { oneDark } from '@codemirror/theme-one-dark'
   import { indentWithTab, isolateHistory } from '@codemirror/commands'
-  import { linkAround, slashCommand, toggleWrap } from '$lib/editor/commands'
-  import { taskMarker } from '$lib/utils/task-marker'
+  import { linkAround, slashCommand, toggleWrap } from '#lib/editor/commands.ts'
+  import { taskMarker } from '#lib/utils/task-marker.ts'
+  import { settingsStore, type Theme } from '#lib/stores/settingsStore.svelte.ts'
 
   interface Props {
     markdown: string
@@ -26,6 +27,12 @@
   }: Props = $props()
 
   let editorView = $state<EditorView | null>(null)
+
+  // One Dark's gutter grey is about 3.9:1 on its background; this one clears
+  // 4.5:1. The light theme is CodeMirror's own, whose gutter already does.
+  const darkGutter = EditorView.theme({ '.cm-gutters': { color: '#9da5b4' } }, { dark: true })
+  const editorTheme = new Compartment()
+  const themeExtension = (theme: Theme) => (theme === 'dark' ? [oneDark, darkGutter] : [])
   let editorContainerEl = $state<HTMLDivElement | null>(null)
   let suppressEditorUpdate = false
   // The last string handed upward. Also lets the external-sync effect below
@@ -37,6 +44,12 @@
   // needs the text sooner than this.
   const EMIT_DELAY_MS = 150
   let emitTimer: number | null = null
+  let lastInput = 0
+
+  /** When the reader last changed the text here, including what is still buffered. */
+  export function lastInputAt(): number {
+    return lastInput
+  }
 
   /** Hand any buffered edit upward now — before a compile, save or export. */
   export function flushPendingEdit() {
@@ -155,7 +168,7 @@
         keymap.of([...editorCommands, indentWithTab]),
         basicSetup,
         langMarkdown({ codeLanguages: languages }),
-        oneDark,
+        editorTheme.of(themeExtension(settingsStore.theme)),
         EditorView.lineWrapping,
         // `readOnly` refuses the edit; `editable` also takes away the caret,
         // so the reference view never looks like something you can type in.
@@ -163,6 +176,7 @@
         EditorView.editable.of(!readOnly),
         EditorView.updateListener.of((update) => {
           if (!update.docChanged || suppressEditorUpdate) return
+          lastInput = Date.now()
           if (emitTimer !== null) return
           emitTimer = window.setTimeout(() => {
             emitTimer = null
@@ -199,6 +213,10 @@
     }
   })
 
+  $effect(() => {
+    editorView?.dispatch({ effects: editorTheme.reconfigure(themeExtension(settingsStore.theme)) })
+  })
+
   // Sync external markdown changes into the editor. We compare against the
   // last value the editor emitted upward, NOT against `doc.toString()` — the
   // latter is O(n) and runs on every keystroke through this effect, which is
@@ -206,13 +224,26 @@
   $effect(() => {
     if (!editorView) return
     if (markdown === lastEmittedDoc) return
+    const current = editorView.state.doc.toString()
     lastEmittedDoc = markdown
+    if (current === markdown) return
+    // Only the span that differs, so the caret and scroll position of a reader
+    // in this tab survive an edit made in another one.
+    let start = 0
+    const shorter = Math.min(current.length, markdown.length)
+    while (start < shorter && current[start] === markdown[start]) start++
+    let end = 0
+    while (
+      end < shorter - start &&
+      current[current.length - 1 - end] === markdown[markdown.length - 1 - end]
+    )
+      end++
     suppressEditorUpdate = true
     editorView.dispatch({
       changes: {
-        from: 0,
-        to: editorView.state.doc.length,
-        insert: markdown,
+        from: start,
+        to: current.length - end,
+        insert: markdown.slice(start, markdown.length - end),
       },
     })
     suppressEditorUpdate = false

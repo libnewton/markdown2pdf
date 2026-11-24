@@ -1,11 +1,11 @@
 <script lang="ts">
-  import MarkdownEditor from '$lib/components/MarkdownEditor.svelte'
+  import MarkdownEditor from '#lib/components/MarkdownEditor.svelte'
   import {
     getImageExtension,
     getImageAltText,
     escapeMarkdownImageAlt,
     createAssetId,
-  } from '$lib/utils/image-utils'
+  } from '#lib/utils/image-utils.ts'
 
   interface Props {
     markdown: string
@@ -34,6 +34,10 @@
    */
   export function flushPendingEdit(): void {
     markdownEditor?.flushPendingEdit()
+  }
+
+  export function lastInputAt(): number {
+    return markdownEditor?.lastInputAt() ?? 0
   }
 
   export function setTaskMarker(line: number, checked: boolean): boolean {
@@ -87,5 +91,7 @@
     color: var(--color-danger);
     background: var(--color-danger-bg);
     border-top: 1px solid var(--color-danger);
+    /* Typst reports one message per line, hints included. */
+    white-space: pre-wrap;
   }
 </style>

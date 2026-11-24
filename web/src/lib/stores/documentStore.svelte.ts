@@ -3,10 +3,11 @@ import {
 	getDocument,
 	listDocuments,
 	deleteDocument as deleteDocFromDB,
-	type SavedDocument,
-	type SavedDocumentAsset,
+	type DocumentAssets,
 	type DocumentCreationSource,
-} from '$lib/storage/documents';
+	type DocumentRecord,
+	type SavedDocument,
+} from '#lib/storage/documents.ts';
 
 export type SaveStatus = 'saved' | 'saving';
 
@@ -23,7 +24,7 @@ type InitOptions = {
 
 let currentDocId = $state<string | null>(null);
 let saveStatus = $state<SaveStatus>('saved');
-let recentDocuments = $state<SavedDocument[]>([]);
+let recentDocuments = $state<DocumentRecord[]>([]);
 let isTransitioningDocument = $state(false);
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -31,7 +32,7 @@ let hasLoadedSessionCurrent = false;
 let pendingSave: {
 	id: string;
 	content: string;
-	assets?: Record<string, SavedDocumentAsset>;
+	assets?: DocumentAssets;
 } | null = null;
 
 export function deriveNameFromContent(content: string): string {
@@ -53,11 +54,11 @@ export function deriveNameFromContent(content: string): string {
 	return '';
 }
 
-export function isLegacyImplicitBlankDocument(doc: SavedDocument): boolean {
+export function isLegacyImplicitBlankDocument(doc: DocumentRecord): boolean {
 	return doc.creationSource === undefined && doc.content.trim() === '' && doc.name === '';
 }
 
-export function isBrokenTemplateDocument(doc: SavedDocument): boolean {
+export function isBrokenTemplateDocument(doc: DocumentRecord): boolean {
 	return doc.creationSource === 'template' && doc.content.trim() === '';
 }
 
@@ -72,18 +73,22 @@ function setCurrentDocument(id: string | null, persistSession: boolean) {
 	}
 }
 
-function upsertRecentDocument(doc: SavedDocument) {
+function upsertRecentDocument(doc: DocumentRecord) {
 	recentDocuments = [doc, ...recentDocuments.filter((existing) => existing.id !== doc.id)];
 	docMeta.set(doc.id, doc);
 }
 
-// Last known record per document, so an autosave can `put()` straight away.
-// Re-reading the record first meant deserializing the whole document —
-// including every embedded image — on each save, on the main thread.
-const docMeta = new Map<string, SavedDocument>();
+// Last known record per document, so an autosave can `put()` straight away
+// instead of reading it back first.
+const docMeta = new Map<string, DocumentRecord>();
+
+/** The record without its images, which live in their own store. */
+function recordOf({ assets: _assets, ...record }: SavedDocument): DocumentRecord {
+	return record;
+}
 
 /** Refresh an already-listed document in place, without a new array identity. */
-function touchRecentDocument(doc: SavedDocument) {
+function touchRecentDocument(doc: DocumentRecord) {
 	const existing = recentDocuments.find((d) => d.id === doc.id);
 	if (!existing) {
 		upsertRecentDocument(doc);
@@ -141,7 +146,7 @@ export const documentStore = {
 		await this.flushPendingSave();
 		const doc = await getDocument(id);
 		if (!doc) return null;
-		docMeta.set(doc.id, doc);
+		docMeta.set(doc.id, recordOf(doc));
 		if (saveTimer) {
 			clearTimeout(saveTimer);
 			saveTimer = null;
@@ -153,30 +158,29 @@ export const documentStore = {
 
 	async createDocument(
 		content: string = '',
-		assets?: Record<string, SavedDocumentAsset>,
+		assets?: DocumentAssets,
 		creationSource?: DocumentCreationSource,
 	): Promise<SavedDocument> {
 		await this.flushPendingSave();
 		const now = Date.now();
-		const doc: SavedDocument = {
+		const record: DocumentRecord = {
 			id: crypto.randomUUID(),
 			name: deriveNameFromContent(content) || '',
 			content,
-			assets,
 			creationSource,
 			createdAt: now,
 			updatedAt: now,
 		};
-		await saveDocument(doc);
+		await saveDocument(record, assets);
 		if (saveTimer) {
 			clearTimeout(saveTimer);
 			saveTimer = null;
 		}
 		pendingSave = null;
 		isTransitioningDocument = true;
-		setCurrentDocument(doc.id, true);
-		upsertRecentDocument(doc);
-		return doc;
+		setCurrentDocument(record.id, true);
+		upsertRecentDocument(record);
+		return { ...record, assets };
 	},
 
 	setCurrentDocument(id: string | null, persistSession: boolean = true) {
@@ -187,36 +191,31 @@ export const documentStore = {
 		isTransitioningDocument = false;
 	},
 
-	async saveNow(
-		id: string,
-		content: string,
-		assets?: Record<string, SavedDocumentAsset>,
-	): Promise<void> {
+	async saveNow(id: string, content: string, assets?: DocumentAssets): Promise<void> {
 		if (!id) return;
 		if (saveTimer) {
 			clearTimeout(saveTimer);
 			saveTimer = null;
 		}
 		pendingSave = null;
-		const known = docMeta.get(id) ?? (await getDocument(id));
-		if (!known) {
+		const stored = docMeta.get(id) ?? (await getDocument(id));
+		if (!stored) {
 			saveStatus = 'saved';
 			return;
 		}
-		const next: SavedDocument = {
-			...known,
+		const next: DocumentRecord = {
+			...recordOf(stored),
 			content,
-			assets: assets ?? known.assets,
 			name: deriveNameFromContent(content),
 			updatedAt: Date.now(),
 		};
 		docMeta.set(id, next);
-		await saveDocument(next);
+		await saveDocument(next, assets);
 		saveStatus = 'saved';
 		touchRecentDocument(next);
 	},
 
-	autoSave(id: string, content: string, assets?: Record<string, SavedDocumentAsset>) {
+	autoSave(id: string, content: string, assets?: DocumentAssets) {
 		if (!id) return;
 		if (isTransitioningDocument) return;
 		saveStatus = 'saving';

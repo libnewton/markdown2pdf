@@ -2,34 +2,35 @@
   import { browser } from '$app/env'
   import { page } from '$app/state'
   import { replaceState } from '$app/navigation'
-  import { onMount } from 'svelte'
-  import { pageSlots } from '$lib/preview/page-slots'
-  import type { SvgDocument } from '$lib/typst/svg-split'
-  import { getSharedTypstWorkerClient, TypstWorkerClient } from '$lib/workers/typstClient'
-  import { getMarkdownImportFile, getImageDropFile } from '$lib/utils/image-utils'
-  import { PAGEBREAK_TOKEN } from '$lib/pagebreak'
-  import { cachedRemoteImages, prefetchRemoteImages } from '$lib/utils/remote-images'
-  import { SUPERSEDED } from '$lib/workers/compileProtocol'
+  import { onMount, untrack } from 'svelte'
+  import { pageSlots } from '#lib/preview/page-slots.ts'
+  import { getSharedTypstWorkerClient, type TypstWorkerClient } from '#lib/workers/typstClient.ts'
+  import { getMarkdownImportFile, getImageDropFile } from '#lib/utils/image-utils.ts'
+  import { PAGEBREAK_TOKEN } from '#lib/pagebreak.ts'
+  import { PreviewController, type LocalImageAsset } from '#lib/preview/previewController.svelte.ts'
+  import { downloadHtml, downloadMarkdown, savePdf } from '#lib/exports.ts'
+  import { shortcutHandler } from '#lib/shortcuts.ts'
+  import { trapFocus } from '#lib/utils/focus-trap.ts'
+  import { openTabSync, type TabEdit } from '#lib/stores/tabSync.ts'
   import { useRegisterSW } from 'virtual:pwa-register/svelte'
   import type { RegisterSWOptions } from 'virtual:pwa-register/svelte'
   import { writable, type Readable } from 'svelte/store'
 
-  import StatusHint from '$lib/components/StatusHint.svelte'
-  import HtmlPreview from '$lib/components/HtmlPreview.svelte'
-  import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte'
-  import EditorPane from '$lib/components/EditorPane.svelte'
-  import DocumentMenu from '$lib/components/DocumentMenu.svelte'
-  import { PDF_TEMPLATES } from '$lib/templates/pdf-templates'
+  import StatusHint from '#lib/components/StatusHint.svelte'
+  import HtmlPreview from '#lib/components/HtmlPreview.svelte'
+  import ShortcutOverlay from '#lib/components/ShortcutOverlay.svelte'
+  import EditorPane from '#lib/components/EditorPane.svelte'
+  import DocumentMenu from '#lib/components/DocumentMenu.svelte'
+  import { PDF_TEMPLATES } from '#lib/templates/pdf-templates.ts'
   import {
-    deriveNameFromContent,
     documentStore,
     isBrokenTemplateDocument,
     isLegacyImplicitBlankDocument,
-  } from '$lib/stores/documentStore.svelte'
-  import { settingsStore } from '$lib/stores/settingsStore.svelte'
-  import { SOCIAL_IMAGE } from '$lib/seo'
+  } from '#lib/stores/documentStore.svelte.ts'
+  import { settingsStore } from '#lib/stores/settingsStore.svelte.ts'
+  import { SOCIAL_IMAGE } from '#lib/seo.ts'
 
-  import type { SavedDocument, SavedDocumentAsset } from '$lib/storage/documents'
+  import type { SavedDocument, SavedDocumentAsset } from '#lib/storage/documents.ts'
 
   // Props
   interface Props {
@@ -46,14 +47,7 @@
   let hasInitializedMarkdown = false
   let editorPane = $state<EditorPane | null>(null)
 
-  type LocalImageAsset = {
-    bytes: Uint8Array<ArrayBuffer>
-    mimeType: string
-  }
-
   let imageAssets = $state<Record<string, LocalImageAsset>>({})
-  // Images handed to the Typst worker, keyed by their path in the document.
-  type ImageMap = Record<string, Uint8Array<ArrayBuffer>>
 
   // What gets stored in IndexedDB. Unproxied — IndexedDB cannot clone a
   // `$state` proxy — and a fresh identity on every upload, which is how the
@@ -85,6 +79,9 @@
   }
 
   function applyLoadedDocument(doc: SavedDocument) {
+    // Opening a document is not an edit: other tabs keep what they have,
+    // which may be newer than what was stored.
+    syncedContent = doc.content
     markdown = doc.content
     imageAssets = (doc.assets ?? {}) as Record<string, LocalImageAsset>
     documentStore.finishDocumentTransition()
@@ -195,17 +192,6 @@
   let documentMenu = $state<DocumentMenu | null>(null)
   let isShortcutsOpen = $state(false)
 
-  /** Whether a key event came from somewhere text is being entered. */
-  function isTyping(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null
-    if (!el?.tagName) return false
-    return (
-      el.isContentEditable ||
-      ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ||
-      !!el.closest?.('.cm-editor')
-    )
-  }
-
   /**
    * Follow an outline jump in the URL. Inside a shadow root the browser cannot
    * resolve a fragment itself, so it neither scrolls nor records where the
@@ -222,7 +208,7 @@
   let pendingHash = ''
 
   $effect(() => {
-    if (!browser || !pendingHash || !htmlDoc) return
+    if (!browser || !pendingHash || !preview.htmlDoc) return
     if (htmlPreview?.scrollTo(pendingHash)) pendingHash = ''
   })
 
@@ -231,21 +217,15 @@
   let isAboutOpen = $state(false)
   let isExportOpen = $state(false)
 
-  // Compilation state
-  let status: 'idle' | 'compiling' | 'done' | 'error' = $state('idle')
-  let errorMessage: string | null = $state(null)
   // Loading state
   let isLoading = $state(true)
   let loadingText = $state('Initializing...')
 
-  // Typst client
-  let client = $state<TypstWorkerClient | null>(null)
   let previewContainerEl = $state<HTMLDivElement | null>(null)
   let showPreviewCompilingHint = $state(false)
   let compilingHintTimer: number | null = null
 
   // SVG preview state
-  let previewDoc = $state<SvgDocument | null>(null)
   let svgContainerEl = $state<HTMLDivElement | null>(null)
   let svgPageCount = $state(0)
   let svgScale = $state(1)
@@ -278,32 +258,21 @@
   }
 
   let previewMode = $state<PreviewMode>(initialPreviewMode())
-  let htmlDoc = $state('')
-  // Content the render had to degrade — an image it could not fetch, a diagram
-  // it could not draw. The document still renders, which is why these would
-  // otherwise pass unnoticed.
-  let warnings = $state<string[]>([])
   let isWarningsOpen = $state(false)
-  const unreachable = (url: string) => `could not fetch: ${url}`
-  let htmlTimer: number | null = null
-  const HTML_DEBOUNCE_MS = 120
 
   $effect(() => {
     if (previewMode === 'pages') isWarningsOpen = false
   })
 
-  // Auto-compile
-  let compileSeq = 0
-  let hasEverCompiled = false
+  const preview = new PreviewController({
+    imageAssets: () => imageAssets,
+    markdown: () => markdown,
+    pagesVisible: () => showPreview && previewMode === 'pages',
+    webVisible: () => previewMode === 'document',
+    readOnly: () => readOnly,
+  })
 
-  // Cached last compiled Markdown + images for PDF export (same as preview)
-  // What the paged preview last compiled, so a remote image arriving late can
-  // tell whether the document has moved on since.
-  let compiledMarkdown = ''
   let autoPreviewTimer: number | null = null
-  // The auto-compile debounce follows the last compile's duration, so a slow
-  // document is not re-queued faster than it can be rendered.
-  let lastCycleMs = 0
 
   $effect(() => {
     if (!browser) return
@@ -315,7 +284,7 @@
 
     showPreviewCompilingHint = false
 
-    if (status === 'compiling' && !!previewDoc) {
+    if (preview.status === 'compiling' && !!preview.previewDoc) {
       compilingHintTimer = window.setTimeout(() => {
         showPreviewCompilingHint = true
       }, 180)
@@ -331,7 +300,7 @@
 
   onMount(() => {
     loadingText = 'Initializing rendering engine...'
-    client = getSharedTypstWorkerClient()
+    preview.connect(getSharedTypstWorkerClient())
 
     // A mode in the URL wins over the default split.
     const requested = VIEW_MODES.find((mode) => page.url.searchParams.has(mode))
@@ -351,7 +320,7 @@
 
     // Hide loading overlay and trigger first compile
     isLoading = false
-    void compile(markdown)
+    void preview.compile(markdown)
 
     // Close menus on click outside. Guarded so the global click listener
     // doesn't reactively touch state on every click in the editor — Svelte
@@ -362,79 +331,28 @@
     }
     window.addEventListener('click', handleClickOutside)
 
-    // Capture phase + stopImmediatePropagation, so CodeMirror's own keymap
-    // never sees a shortcut we have claimed and cannot, say, insert a newline
-    // for Ctrl+Enter as well as compiling.
-    const handleKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey
-      const claim = () => {
-        e.preventDefault()
-        e.stopImmediatePropagation()
-        e.stopPropagation()
-      }
-
-      if (e.key === 'Escape') {
-        if (!isShortcutsOpen && !isAboutOpen && !isExportOpen && !replacePrompt) return
-        claim()
+    const handleKey = shortcutHandler({
+      hasOpenOverlay: () => isShortcutsOpen || isAboutOpen || isExportOpen || !!replacePrompt,
+      closeOverlays: () => {
         isShortcutsOpen = false
         isAboutOpen = false
         isExportOpen = false
         replacePrompt?.answer(false)
-        return
-      }
-      // `?` where you are not typing — the usual way to ask for this list.
-      if (!mod && e.key === '?' && !isTyping(e.target)) {
-        claim()
-        isShortcutsOpen = !isShortcutsOpen
-        return
-      }
-      if (!mod) return
-
-      switch (e.key.toLowerCase()) {
-        case 'enter':
-          claim()
-          compileNow()
-          return
-        case 'n':
-          // Cmd/Ctrl+N belongs to the browser, so this one takes Alt too.
-          if (!e.altKey || readOnly) return
-          claim()
-          void documentMenu?.newBlank()
-          return
-        case 's':
-          // Swallowed rather than handled: there is nothing to save, and the
-          // browser's "save page as" is not what anyone means by it here.
-          claim()
-          return
-        case 'e':
-          claim()
-          isExportOpen = !isExportOpen
-          return
-        case 'p':
-          claim()
-          void downloadPdf()
-          return
-        case '1':
-        case '2':
-        case '3':
-          claim()
-          setViewMode(VIEW_MODES[Number(e.key) - 1])
-          return
-        case '\\':
-          claim()
-          if (viewMode !== 'view') selectPreviewMode(previewMode === 'pages' ? 'document' : 'pages')
-          return
-        case 'o':
-          claim()
-          selectPreviewMode('document')
-          htmlPreview?.toggleOutline()
-          return
-        case '/':
-          claim()
-          isShortcutsOpen = !isShortcutsOpen
-          return
-      }
-    }
+      },
+      toggleShortcuts: () => (isShortcutsOpen = !isShortcutsOpen),
+      compileNow,
+      newDocument: readOnly ? undefined : () => void documentMenu?.newBlank(),
+      toggleExport: () => (isExportOpen = !isExportOpen),
+      exportPdf: () => void downloadPdf(),
+      setViewMode: (index) => setViewMode(VIEW_MODES[index]),
+      togglePreviewMode: () => {
+        if (viewMode !== 'view') selectPreviewMode(previewMode === 'pages' ? 'document' : 'pages')
+      },
+      toggleOutline: () => {
+        selectPreviewMode('document')
+        htmlPreview?.toggleOutline()
+      },
+    })
     window.addEventListener('keydown', handleKey, true)
 
     // Debounced resize handler for auto-fit
@@ -456,7 +374,11 @@
     document.addEventListener('visibilitychange', handleHide)
     window.addEventListener('pagehide', handleHide)
 
+    // The reference view edits nothing, so it has nothing to share.
+    if (!readOnly) tabSync = openTabSync(applyRemoteEdit)
+
     return () => {
+      tabSync?.close()
       window.removeEventListener('click', handleClickOutside)
       window.removeEventListener('resize', handleResize)
       document.removeEventListener('visibilitychange', handleHide)
@@ -467,6 +389,26 @@
     }
   })
 
+  // Live sync with other tabs that have the same document open.
+  let tabSync: ReturnType<typeof openTabSync> | null = null
+  // When this tab last edited, or took an edit from another tab.
+  let lastEditAt = 0
+  // Text that arrived rather than was typed here, so it is not sent back.
+  let syncedContent: string | null = null
+  // Images added here since the last broadcast.
+  let assetsChangedHere = false
+
+  function applyRemoteEdit(edit: TabEdit) {
+    if (edit.id !== documentStore.currentDocId || documentStore.isTransitioningDocument) return
+    // Older than what this tab typed, buffered keystrokes included: ours wins,
+    // and reaches the other tab with its own broadcast.
+    if (edit.at <= Math.max(lastEditAt, editorPane?.lastInputAt() ?? 0)) return
+    lastEditAt = edit.at
+    syncedContent = edit.content
+    if (edit.assets) imageAssets = edit.assets as Record<string, LocalImageAsset>
+    markdown = edit.content
+  }
+
   // Auto-save document to IndexedDB. Images are written only when they change:
   // a save without them keeps the stored ones, so ordinary typing does not
   // re-serialize every image in the document on each keystroke.
@@ -474,10 +416,22 @@
   $effect(() => {
     if (!browser || !hasInitializedMarkdown || !documentStore.currentDocId) return
     if (documentStore.isTransitioningDocument) return
+    const id = documentStore.currentDocId
     const assets = documentAssets
     const changed = assets !== savedAssets
     savedAssets = assets
-    documentStore.autoSave(documentStore.currentDocId, markdown, changed ? assets : undefined)
+    documentStore.autoSave(id, markdown, changed ? assets : undefined)
+
+    if (!tabSync || (markdown === syncedContent && !assetsChangedHere)) return
+    lastEditAt = Date.now()
+    tabSync.post({
+      id,
+      content: markdown,
+      assets: assetsChangedHere ? assets : undefined,
+      at: lastEditAt,
+    })
+    syncedContent = null
+    assetsChangedHere = false
   })
 
   // Auto-compile effect. Only while the paged preview is actually on screen:
@@ -488,21 +442,20 @@
   // keystroke behind a hidden pane does not re-run this effect for nothing.
   $effect(() => {
     if (!browser) return
-    if (!client) return
+    if (!preview.client) return
     if (isLoading) return
     if (!showPreview || previewMode !== 'pages') return
 
     const md = markdown
     // Switching back to Pages with nothing changed since: the pages on screen
     // are already the answer.
-    if (previewDoc && md === compiledMarkdown) return
+    if (preview.previewDoc && md === preview.compiledMarkdown) return
 
     if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
 
-    const delay = hasEverCompiled ? Math.min(Math.max(450, lastCycleMs), 2500) : 0
     autoPreviewTimer = window.setTimeout(() => {
-      void compile(md)
-    }, delay)
+      void preview.compile(md)
+    }, preview.compileDelay)
 
     return () => {
       if (autoPreviewTimer) window.clearTimeout(autoPreviewTimer)
@@ -512,57 +465,23 @@
   function compileNow() {
     // Compile what is on screen, including keystrokes still buffered.
     editorPane?.flushPendingEdit()
-    if (previewMode === 'pages') void compile(markdown)
-    else void renderHtml(markdown)
+    if (previewMode === 'pages') void preview.compile(markdown)
+    else void preview.renderHtml(markdown)
   }
 
   // The HTML view costs a few milliseconds, so it tracks typing closely rather
   // than waiting for the Typst compile. Only runs while its tab is showing.
+  // No debounce of its own: the editor already batches keystrokes, and the
+  // worker drops a render as soon as a newer one arrives.
   $effect(() => {
     if (!browser) return
-    if (!client) return
+    if (!preview.client) return
     if (isLoading) return
     if (previewMode !== 'document') return
 
     const md = markdown
-    if (htmlTimer) window.clearTimeout(htmlTimer)
-    htmlTimer = window.setTimeout(() => void renderHtml(md), HTML_DEBOUNCE_MS)
-
-    return () => {
-      if (htmlTimer) window.clearTimeout(htmlTimer)
-    }
+    untrack(() => void preview.renderHtml(md))
   })
-
-  let htmlSeq = 0
-
-  async function renderHtml(md: string) {
-    if (!client) return
-    const seq = ++htmlSeq
-    try {
-      // `editable` gives the fragment its source lines and live checkboxes;
-      // the reference view has a source it will not write to, so it opts out.
-      const { html, diagnostics } = await client.renderHtml(
-        md,
-        imagesToSend(documentImages(md)),
-        false,
-        !readOnly,
-      )
-      // Both guards matter: `seq` catches a render this component superseded,
-      // `md === markdown` catches one that finished against text the document
-      // has since moved past — which is how a checkbox click during the
-      // debounce window got repainted in its old state.
-      if (seq === htmlSeq && md === markdown) {
-        htmlDoc = html
-        warnings = [...new Set([...diagnostics, ...cachedRemoteImages(md).failed.map(unreachable)])]
-      }
-    } catch (error) {
-      // A render the worker dropped in favour of a newer one is not an error.
-      if (error instanceof Error && error.message === SUPERSEDED) return
-      if (seq !== htmlSeq) return
-      status = 'error'
-      errorMessage = error instanceof Error ? error.message : String(error)
-    }
-  }
 
   // Auto-fit on mobile tab switch, once the pane has been laid out.
   $effect(() => {
@@ -584,123 +503,43 @@
   })
 
   $effect(() => {
-    if (!previewDoc || !slots) return
-    svgPageCount = previewDoc.pages.length
-    slots.show(previewDoc)
+    if (!preview.previewDoc || !slots) return
+    svgPageCount = preview.previewDoc.pages.length
+    slots.show(preview.previewDoc)
   })
 
-  // All Markdown processing happens inside the Typst compile (the md2pdf
-  // engine). The host only resolves images Typst cannot fetch itself.
-  async function compile(md: string) {
+  // An export that failed, shown until the next edit or export. A compile
+  // error is not otherwise visible from the Web tab.
+  let exportError = $state<string | null>(null)
+
+  $effect(() => {
+    void markdown
+    exportError = null
+  })
+
+  /** Run one export of what is on screen, including keystrokes still buffered. */
+  async function runExport(save: (client: TypstWorkerClient, md: string) => Promise<void>) {
+    editorPane?.flushPendingEdit()
+    const client = preview.client
     if (!client) return
-    // Only mark "compiled" once real content exists, so the adaptive delay
-    // below is not calibrated against an empty first pass.
-    if (md.trim() !== '') hasEverCompiled = true
-
-    const seq = ++compileSeq
-    // Whatever is still queued in the worker is already stale.
-    client.cancelPendingPreview()
-    status = 'compiling'
-    errorMessage = null
-    const startedAt = performance.now()
-
+    exportError = null
     try {
-      // Remote images are not awaited: compile with what is cached, then
-      // recompile if a fetch brings in something new.
-      const { missing } = cachedRemoteImages(md)
-      const images = documentImages(md)
-
-      compiledMarkdown = md
-
-      if (missing.length > 0) {
-        void prefetchRemoteImages(missing).then((gotNew) => {
-          if (!gotNew || compiledMarkdown !== md) return
-          void compile(md)
-          if (previewMode === 'document') void renderHtml(md)
-        })
-      }
-
-      const result = await client.compilePreview(md, imagesToSend(images))
-      if (seq !== compileSeq) return
-      previewDoc = result.preview
-      status = 'done'
-      lastCycleMs = performance.now() - startedAt
+      await save(client, markdown)
     } catch (error) {
-      // A compile the worker dropped in favour of a newer one is not an error.
-      if (error instanceof Error && error.message === SUPERSEDED) return
-      if (seq !== compileSeq) return
-      status = 'error'
-      errorMessage = error instanceof Error ? error.message : String(error)
+      exportError = `Export failed: ${error instanceof Error ? error.message : String(error)}`
     }
   }
 
-  /** Every image byte-array the document references, local and remote. */
-  function documentImages(md: string): ImageMap {
-    return { ...collectReferencedImageAssets(md), ...cachedRemoteImages(md).images }
-  }
+  // Compiled from what is on screen rather than from whatever the preview
+  // last rendered — the paged preview may never have run at all.
+  const downloadPdf = () => runExport((client, md) => savePdf(client, md, preview.newImages()))
 
-  // The worker keeps every image it has been handed, so a recompile only
-  // ships new ones instead of copying megabytes across the worker boundary.
-  const sentImages = new Map<string, Uint8Array<ArrayBuffer>>()
+  const exportHtml = () =>
+    runExport((client, md) => downloadHtml(client, md, preview.newImages(), settingsStore.theme))
 
-  function imagesToSend(images: ImageMap): ImageMap {
-    const fresh: ImageMap = {}
-    for (const [path, bytes] of Object.entries(images)) {
-      if (sentImages.get(path) === bytes) continue
-      sentImages.set(path, bytes)
-      fresh[path] = bytes
-    }
-    return fresh
-  }
-
-  async function downloadPdf() {
+  function exportMarkdown() {
     editorPane?.flushPendingEdit()
-    if (!client) return
-    // Compiled from what is on screen rather than from whatever the preview
-    // last rendered — the paged preview may never have run at all.
-    const md = markdown
-    // Open the tab synchronously so it counts as user-initiated and isn't
-    // blocked by popup blockers after the async compile.
-    const newTab = window.open('', '_blank')
-    // @ts-ignore
-    const { pdf } = await client.compilePdf(md, imagesToSend(documentImages(md)))
-    const blob = new Blob([pdf], { type: 'application/pdf' })
-    const url = URL.createObjectURL(blob)
-    if (newTab) {
-      newTab.location.href = url
-    } else {
-      window.open(url, '_blank')
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  }
-
-  function download(blob: Blob, extension: string) {
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download =
-      (deriveNameFromContent(markdown) || 'document').replace(/[/\\?%*:|"<>]/g, '-') + extension
-    link.click()
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  }
-
-  async function downloadHtml() {
-    editorPane?.flushPendingEdit()
-    if (!client) return
-    const md = markdown
-    const { html } = await client.renderHtml(
-      md,
-      imagesToSend(documentImages(md)),
-      true,
-      false,
-      settingsStore.theme,
-    )
-    download(new Blob([html], { type: 'text/html;charset=utf-8' }), '.html')
-  }
-
-  function downloadMarkdown() {
-    editorPane?.flushPendingEdit()
-    download(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), '.md')
+    downloadMarkdown(markdown)
   }
 
   let fileInputEl = $state<HTMLInputElement | null>(null)
@@ -744,22 +583,8 @@
   }
 
   function handleImageSaved(path: string, bytes: Uint8Array<ArrayBuffer>, mimeType: string) {
+    assetsChangedHere = true
     imageAssets[path] = { bytes, mimeType }
-  }
-
-  function collectReferencedImageAssets(md: string): ImageMap {
-    const referenced = new Set<string>()
-    // The tail also covers HackMD `=WxH` sizing, not just a quoted title.
-    const markdownImageRegex = /!\[[^\]]*]\(([^)\s]+)(?:\s+[^)]*)?\)/g
-
-    for (const match of md.matchAll(markdownImageRegex)) {
-      const path = match[1]
-      if (path in imageAssets) {
-        referenced.add(path)
-      }
-    }
-
-    return Object.fromEntries([...referenced].map((path) => [path, imageAssets[path].bytes]))
   }
 
   function startResize(e: MouseEvent) {
@@ -1075,7 +900,7 @@
                 isExportOpen = false
                 void downloadPdf()
               }}
-              disabled={!previewDoc}
+              disabled={!preview.previewDoc}
             >
               PDF
             </button>
@@ -1083,7 +908,7 @@
               class="menu-item"
               onclick={() => {
                 isExportOpen = false
-                downloadMarkdown()
+                exportMarkdown()
               }}
             >
               Markdown
@@ -1092,7 +917,7 @@
               class="menu-item"
               onclick={() => {
                 isExportOpen = false
-                void downloadHtml()
+                void exportHtml()
               }}
             >
               HTML
@@ -1219,7 +1044,7 @@
         bind:this={editorPane}
         bind:markdown
         placeholder="Type Markdown here..."
-        {errorMessage}
+        errorMessage={exportError ?? preview.errorMessage}
         {readOnly}
         onImageSaved={handleImageSaved}
         onNewDocument={() => void documentMenu?.newBlank()}
@@ -1268,7 +1093,7 @@
       class:mobile-hidden={activeMobileTab !== 'preview'}
     >
       <!-- View mode leaves nothing for this bar to hold, so it goes away. -->
-      {#if viewMode !== 'view' || status === 'error'}
+      {#if viewMode !== 'view' || preview.status === 'error'}
         <div class="preview-toolbar">
           <div class="preview-status-wrapper">
             <!-- View mode is for reading: no editing tools, no paged/pageless
@@ -1287,7 +1112,7 @@
                   aria-pressed={previewMode === 'document'}
                   onclick={() => {
                     selectPreviewMode('document')
-                    if (!htmlDoc) void renderHtml(markdown)
+                    if (!preview.htmlDoc) void preview.renderHtml(markdown)
                   }}
                 >
                   Web
@@ -1300,29 +1125,33 @@
                 {svgPageCount === 1 ? 'page' : 'pages'}
               </span>
             {/if}
-            {#if status === 'error'}
+            {#if preview.status === 'error'}
               <div class="error-badge">
                 <span>⚠️ Failed</span>
               </div>
-            {:else if previewMode === 'document' && warnings.length > 0}
+            {:else if previewMode === 'document' && preview.warnings.length > 0}
               <button
                 class="warning-badge"
                 onclick={() => (isWarningsOpen = !isWarningsOpen)}
                 aria-expanded={isWarningsOpen}
                 title="Content the preview could not render"
               >
-                {warnings.length}
-                {warnings.length === 1 ? 'warning' : 'warnings'}
+                {preview.warnings.length}
+                {preview.warnings.length === 1 ? 'warning' : 'warnings'}
               </button>
             {/if}
           </div>
           <div class="preview-toolbar-right">
             {#if previewMode === 'pages'}
               <div class="zoom">
-                <button onclick={svgZoomOut} disabled={svgScale <= 0.25}>-</button>
+                <button onclick={svgZoomOut} disabled={svgScale <= 0.25} aria-label="Zoom out">
+                  -
+                </button>
                 <span class="zoom-level">{Math.round(svgScale * 100)}%</span>
-                <button onclick={svgZoomIn} disabled={svgScale >= 3}>+</button>
-                <button onclick={fitWidth} disabled={!previewDoc}>Fit</button>
+                <button onclick={svgZoomIn} disabled={svgScale >= 3} aria-label="Zoom in">+</button>
+                <button onclick={fitWidth} disabled={!preview.previewDoc} aria-label="Fit to width">
+                  Fit
+                </button>
               </div>
             {/if}
           </div>
@@ -1339,9 +1168,9 @@
           bind:this={svgContainerEl}
         ></div>
         {#if previewMode === 'document'}
-          {#if isWarningsOpen && warnings.length > 0}
+          {#if isWarningsOpen && preview.warnings.length > 0}
             <ul class="warning-list">
-              {#each warnings as warning (warning)}
+              {#each preview.warnings as warning (warning)}
                 <li>{warning}</li>
               {/each}
             </ul>
@@ -1349,14 +1178,14 @@
           <div class="html-preview-container">
             <HtmlPreview
               bind:this={htmlPreview}
-              html={htmlDoc}
+              html={preview.htmlDoc}
               theme={settingsStore.theme}
               onnavigate={setHash}
               ontasktoggle={(line, checked) => editorPane?.setTaskMarker(line, checked)}
             />
           </div>
         {/if}
-        {#if previewMode === 'pages' && status === 'compiling' && !previewDoc}
+        {#if previewMode === 'pages' && preview.status === 'compiling' && !preview.previewDoc}
           <div class="preview-placeholder">
             <div class="loading-spinner"></div>
           </div>
@@ -1380,6 +1209,7 @@
         aria-modal="true"
         aria-labelledby="about-title"
         tabindex="-1"
+        {@attach trapFocus}
       >
         <h3 class="modal-title" id="about-title">About md2pdf</h3>
         <p class="modal-help">
@@ -1522,6 +1352,8 @@
     align-items: center;
     height: 100%;
     text-decoration: none;
+    /* Next to a long document name it would otherwise give up its width. */
+    flex-shrink: 0;
   }
 
   .logo-img {
@@ -1715,13 +1547,16 @@
   }
 
   /* Same height as the editor's strip, so the two line up across the divider. */
+  /* A narrow pane wraps the bar onto a second row rather than clipping it. */
   .preview-toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    height: var(--pane-toolbar-height);
+    gap: var(--space-xs) var(--space-sm);
+    min-height: var(--pane-toolbar-height);
     /* The right edge lines up with Export's, one bar above. */
-    padding: 0 var(--space-md) 0 var(--space-sm);
+    padding: var(--space-xs) var(--space-md) var(--space-xs) var(--space-sm);
     background: var(--color-gray-50);
     border-bottom: 1px solid var(--color-gray-200);
     flex-shrink: 0;
@@ -1802,6 +1637,7 @@
   .zoom-level {
     color: var(--color-gray-500);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .tool-btn:disabled {
@@ -1822,8 +1658,9 @@
 
   .preview-status-wrapper {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-md);
+    gap: var(--space-xs) var(--space-md);
   }
 
   /* A degraded render, not a failed one: the document is on screen and

@@ -127,16 +127,20 @@ export default defineConfig({
 		withPwa(
 			{
 				adapter: adapter(),
-				// Deprecated in Kit 3 in favour of #lib subpath imports, which would
-				// need explicit .ts extensions on every import.
-				alias: { $lib: 'src/lib' },
 				prerender: { handleHttpError: 'fail' },
 			},
 			{
 				registerType: 'autoUpdate',
-				// engine.wasm and the Typst compiler are past the 2 MB default.
-				maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
+				// The Typst compiler alone is about 30 MB.
+				maximumFileSizeToCacheInBytes: 32 * 1024 * 1024,
 				generateSW: {
+					// Everything a compile needs, so the app works offline from the
+					// first visit on: the compilers, the md2pdf package and the
+					// Latin and math fonts, besides the usual app shell.
+					globPatterns: [
+						'client/**/*.{js,css,ico,png,svg,webp,webmanifest,wasm,typ,ttf,otf,woff2}',
+						'client/md2pdf/manifest.json',
+					],
 					// The twemoji mirror is ~3700 files and 17 MB, fetched one glyph
 					// at a time only by documents that use emoji. Precaching it would
 					// mean downloading all of it to install the app.
@@ -183,5 +187,9 @@ export default defineConfig({
 	],
 	worker: {
 		format: 'es',
+	},
+	// The welcome document is tests/extended.md, imported from outside web/.
+	server: {
+		fs: { allow: ['..'] },
 	},
 });
