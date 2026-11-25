@@ -949,11 +949,27 @@ fn render_image(url: &str, title: &str, alt: &str, alignment: Alignment, doc: &D
     if caption.is_empty() || caption_is_dims {
         return format!("#align({})[{image_call}]", alignment.typst());
     }
-    format!(
-        "#align({})[\n  #block(width: {figure_width}, breakable: false)[\n    #set par(justify: false)\n    #align(center)[{image_call}]\n    #v(0.3em, weak: true)\n    #align(center, text(size: 0.85em, fill: luma(120), [{}]))\n  ]\n]",
-        alignment.typst(),
-        esc_text(caption)
-    )
+    let caption = format!("align(center, text(size: 0.85em, fill: luma(120), [{}]))", esc_text(caption));
+    let figure = |caption_line: &str| {
+        format!(
+            "#block(width: {figure_width}, breakable: false)[\n    #set par(justify: false)\n    #align(center)[{image_call}]\n    #v(0.3em, weak: true)\n    {caption_line}\n  ]"
+        )
+    };
+    match alignment {
+        // The caption of a centred figure may use the whole text width, so one
+        // a little wider than the image stays on one line. Negative padding
+        // widens only the caption: the image and its block keep their size.
+        Alignment::Center => format!(
+            "#align(center, layout(md-text => [\n  {}\n]))",
+            figure(&format!(
+                "#layout(md-fig => pad(x: (md-fig.width - md-text.width) / 2, {caption}))"
+            ))
+        ),
+        // A wider caption would reach past the margin the figure is set against.
+        Alignment::Left | Alignment::Right => {
+            format!("#align({})[\n  {}\n]", alignment.typst(), figure(&format!("#{caption}")))
+        }
+    }
 }
 
 /// A formatting tag's Typst equivalent around already-rendered content.
@@ -1446,6 +1462,13 @@ mod tests {
             "{out}"
         );
         assert!(out.contains("#align(center, text(size: 0.85em"), "{out}");
+    }
+
+    #[test]
+    fn lets_a_centred_caption_grow_past_its_image() {
+        let out = convert_str("![Caption](image.png \"=80x\")\n", false);
+        assert!(out.contains("#block(width: 60pt, breakable: false)"), "{out}");
+        assert!(out.contains("pad(x: (md-fig.width - md-text.width) / 2"), "{out}");
     }
 
     #[test]

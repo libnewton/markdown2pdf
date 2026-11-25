@@ -15,8 +15,8 @@
     radius: 6pt,
     width: 100%,
     {
-      text(weight: "bold", fill: rgb(theme.accent), size: 0.9em, label)
-      v(0.7em, weak: true)
+      // Sticky, so a page break never leaves the label alone at the bottom.
+      block(sticky: true, below: 0.7em, text(weight: "bold", fill: rgb(theme.accent), size: 0.9em, label))
       body
     },
   )
