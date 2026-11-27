@@ -374,7 +374,7 @@ What each group does:
 | `false`                   | nothing             |
 | `"Page {page} of {pages}"` | `Page 3 of 12`      |
 
-Setting `footer-center` yourself replaces the number entirely.
+A one-page document shows no number. Setting `footer-center` yourself replaces the number entirely.
 
 ---
 

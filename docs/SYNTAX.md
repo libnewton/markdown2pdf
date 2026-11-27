@@ -353,7 +353,7 @@ any `de` variant.
 | `"Page {page} of {pages}"` | `Page 3 of 12` |
 | `false`, `no` or `off` | nothing |
 
-Setting `footer-center` replaces the page number.
+A document of a single page shows no number. Setting `footer-center` replaces the page number.
 
 ### Header and footer (PDF)
 
