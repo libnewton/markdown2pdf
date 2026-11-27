@@ -54,11 +54,8 @@
   let slot-of(name, fallback: none) = args.at(name, default: fallback)
   let header-slots = (slot-of("header-left"), slot-of("header-center"), slot-of("header-right"))
   let custom-footer-center = slot-of("footer-center")
-  let footer-slots = (
-    slot-of("footer-left"),
-    if custom-footer-center == none { number-template } else { custom-footer-center },
-    slot-of("footer-right"),
-  )
+  let footer-left = slot-of("footer-left")
+  let footer-right = slot-of("footer-right")
   let author-line = if authors.len() > 0 { authors.join(", ") } else { "" }
   let vars = (
     title: title,
@@ -97,7 +94,13 @@
     },
     footer: context {
       if here().page() > 1 or not cover-mode {
-        bar(..footer-slots, vars, remotes, asset, height: footer-height)
+        // A one-page document needs no page number.
+        let footer-center = if custom-footer-center != none {
+          custom-footer-center
+        } else if counter(page).final().first() > 1 {
+          number-template
+        }
+        bar(footer-left, footer-center, footer-right, vars, remotes, asset, height: footer-height)
       }
     },
   )
